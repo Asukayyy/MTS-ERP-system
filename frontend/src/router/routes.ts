@@ -55,6 +55,44 @@ export const constantRoutes: RouteRecordRaw[] = [
         name: 'Planning',
         component: () => import('@/views/planning/index.vue'),
         meta: { title: '计划管理' },
+        children: [
+          {
+            path: 'mps',
+            name: 'PlanningMps',
+            component: () => import('@/views/planning/mps/index.vue'),
+            meta: { title: '主生产计划 MPS' },
+          },
+          {
+            path: 'mrp',
+            name: 'PlanningMrp',
+            component: () => import('@/views/planning/mrp/index.vue'),
+            meta: { title: '物料需求计划 MRP' },
+          },
+          {
+            path: 'work-plan',
+            name: 'PlanningWorkPlan',
+            component: () => import('@/views/planning/work-plan/index.vue'),
+            meta: { title: '生产作业计划' },
+          },
+          {
+            path: 'dispatch',
+            name: 'PlanningDispatch',
+            component: () => import('@/views/planning/dispatch/index.vue'),
+            meta: { title: '派工单管理' },
+          },
+          {
+            path: 'requisition',
+            name: 'PlanningRequisition',
+            component: () => import('@/views/planning/requisition/index.vue'),
+            meta: { title: '领料单管理' },
+          },
+          {
+            path: 'analysis',
+            name: 'PlanningAnalysis',
+            component: () => import('@/views/planning/analysis/index.vue'),
+            meta: { title: '综合查询与统计分析' },
+          },
+        ],
       },
       {
         path: 'procurement',
