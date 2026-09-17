@@ -3,7 +3,8 @@
 **当前不定义任何 ERP 业务表。**
 
 本模块未来的表（建议，见 docs/architecture/data-ownership.md）：
-customer / sales_forecast / sales_order / sales_order_line / shipment
+sal_customer / sal_forecast / sal_order / sal_order_item / sal_shipment /
+sal_shipment_item / sal_return / sal_return_item
 
 新建模型时：
 1. 继承 `app.core.database.Base`

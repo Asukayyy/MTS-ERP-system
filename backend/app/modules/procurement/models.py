@@ -3,8 +3,9 @@
 **当前不定义任何 ERP 业务表。**
 
 本模块未来的表（建议，见 docs/architecture/data-ownership.md）：
-supplier / purchase_plan / purchase_plan_line /
-purchase_order / purchase_order_line / receiving / receiving_line
+pur_supplier / pur_supplier_material / pur_purchase_plan / pur_purchase_plan_item /
+pur_order / pur_order_item / pur_receipt / pur_receipt_item /
+pur_supplier_evaluation
 
 新建模型时：
 1. 继承 `app.core.database.Base`

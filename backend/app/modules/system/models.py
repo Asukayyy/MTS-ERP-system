@@ -3,8 +3,10 @@
 **当前不定义任何 ERP 业务表。**
 
 本模块未来的表（建议，见 docs/architecture/data-ownership.md）：
-product / material / bom / bom_line / routing / routing_step /
-organization / user / role / permission / dictionary / operation_log
+sys_material / sys_bom / sys_bom_item / sys_routing / sys_routing_operation /
+sys_organization / sys_personnel / sys_dictionary / sys_dictionary_item /
+sys_user / sys_role / sys_permission / sys_user_role / sys_role_permission /
+sys_operation_log
 
 新建模型时：
 1. 继承 `app.core.database.Base`
