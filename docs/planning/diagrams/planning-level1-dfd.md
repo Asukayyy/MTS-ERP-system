@@ -92,11 +92,11 @@ flowchart LR
 
 | 存储 | 对应数据所有权规划中的表（第 3 周建表） |
 | --- | --- |
-| D1 MPS 数据 | `mps` / `mps_line` |
-| D2 MRP 结果 | `mrp_result` |
-| D3 生产作业计划 | `production_work_plan`（及 `planned_order`） |
-| D4 派工单 | `dispatch_order` |
-| D5 领料单 | `material_requisition` / `material_requisition_line` |
+| D1 MPS 数据 | `pln_mps` / `pln_mps_item` |
+| D2 MRP 结果 | `pln_mrp_result`（及 `pln_mrp_run`） |
+| D3 生产作业计划 | `pln_production_plan` |
+| D4 派工单 | `pln_dispatch_order` |
+| D5 领料单 | `pln_material_requisition` / `pln_material_requisition_item` |
 
 ### 输入数据流（进入本模块）
 

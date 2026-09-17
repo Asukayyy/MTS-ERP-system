@@ -31,7 +31,7 @@
 
 ## 数据表规划（Owner: planning）
 
-`mps` / `mps_line` / `mrp_result` / `planned_order` / `production_work_plan` / `dispatch_order` / `material_requisition` / `material_requisition_line`
+`pln_demand` / `pln_mps` / `pln_mps_item` / `pln_mrp_run` / `pln_mrp_result` / `pln_production_plan` / `pln_dispatch_order` / `pln_material_requisition` / `pln_material_requisition_item` / `pln_completion_report`
 
 > 详见 `docs/architecture/data-ownership.md`。第 3 周完成 E-R 与物理模型设计后才建表，**当前不创建任何业务表**。
 

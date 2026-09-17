@@ -111,7 +111,7 @@ flowchart TD
 
 - Planning **不直接修改** system 的业务数据、procurement 的订单、inventory 的库存余额。
 - Planning 只产生并维护自己的数据：**MPS、MRP 结果、生产作业计划、派工单、领料单**
-  （对应数据所有权规划中的 `mps` / `mps_line` / `mrp_result` / `planned_order` / `production_work_plan` / `dispatch_order` / `material_requisition`(+`_line`)）。
+  （对应数据所有权规划中的 `mps` / `mps_item` / `demand` / `mrp_run` / `mrp_result` / `production_plan` / `dispatch_order` / `material_requisition`(+`_item`) / `completion_report`）。
 - 跨模块业务后续通过统一的 Service / API Contract 完成，禁止直读其他模块的表。
 
 ## 六、第一层数据流图（DFD）

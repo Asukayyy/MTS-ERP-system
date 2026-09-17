@@ -3,7 +3,9 @@
 **当前不定义任何 ERP 业务表。**
 
 本模块未来的表（建议，见 docs/architecture/data-ownership.md）：
-warehouse / location / inventory_balance / inventory_transaction
+inv_warehouse / inv_location / inv_balance / inv_transaction /
+inv_replenishment_request / inv_reorder_rule / inv_transfer / inv_transfer_item /
+inv_stocktake / inv_stocktake_item
 
 新建模型时：
 1. 继承 `app.core.database.Base`
