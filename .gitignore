@@ -1,0 +1,89 @@
+# ============================================================
+# BH-ERP 统一 .gitignore
+# 规则：任何可由工具还原的产物、依赖、缓存、密钥一律不入库
+# ============================================================
+
+# ---------- 前端依赖与构建产物 ----------
+node_modules/
+.vite/
+frontend/dist/
+frontend/.vite/
+frontend/*.local
+
+# 注意：智能制造大作业/prototype/dist 是刻意提交的可直接打开原型，
+# 因此这里不使用全局 dist/ 规则，只忽略 frontend 的构建产物。
+
+# ---------- Python ----------
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+build/
+develop-eggs/
+downloads/
+eggs/
+.eggs/
+lib64/
+parts/
+sdist/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# ---------- Python 虚拟环境 ----------
+.venv/
+venv/
+ENV/
+env/
+.python-version
+
+# ---------- 测试与类型检查缓存 ----------
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# ---------- 环境变量与密钥（务必不要提交真实密码） ----------
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# ---------- 数据库本地文件 ----------
+*.sqlite
+*.sqlite3
+*.db
+*.mdb
+
+# ---------- 日志 ----------
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ---------- 编辑器与 IDE ----------
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# ---------- 打包与临时文件 ----------
+*.zip
+*.tar.gz
+*.7z
+*.tmp
+~$*
+*.bak
+*.orig
+
+# ---------- 操作系统 ----------
+.DS_Store
+Thumbs.db
+desktop.ini
