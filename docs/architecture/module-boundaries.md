@@ -1,7 +1,7 @@
 # 模块边界与接口方向
 
-本文档只定义**边界与接口方向**，不实现任何跨模块调用。
-五个人在动手前必须先读这一份。
+本文档定义**模块边界、数据所有权与跨模块接口方向**，并记录已落地的契约入口。
+新增跨模块调用前必须先读这一份。
 
 ## 一、总原则
 
@@ -95,28 +95,41 @@ sales ──销售需求──▶ planning ──采购需求──▶ procureme
 **关键反馈环：** inventory 的实时库存状态必须反馈给 planning，用于 MRP 净需求计算。
 这是 MTS 模式下"库存 → 计划"的闭环，也是本系统区别于纯订单式系统的核心。
 
-## 四、后续实现跨模块调用的推荐做法
+## 四、跨模块调用的实际做法
 
-本阶段**不实现**任何跨模块调用。真正要实现时，按下面的顺序推进：
+跨模块调用已全部落地，统一遵循下面的顺序：
 
 1. **先约定 Contract**：明确函数名 / 接口路径、入参、出参、错误码。
 2. **由 Owner 模块实现并暴露**：Owner 在自己的模块里实现，对外暴露一个明确的入口。
 3. **消费方只依赖 Contract**：不 import Owner 的内部实现文件。
 
-后端示例（**仅示意，当前未实现**）：
+后端示例（**五个模块的 `contract.py` 均已创建**）：
 
 ```python
 # planning 需要 sales 的销售需求
 # ✅ 正确：通过 sales 暴露的 contract
-from app.modules.sales.contract import get_sales_demand
+from app.modules.sales.contract import get_open_order_demand
 
 # ❌ 错误：直接使用 sales 的内部实现
 from app.modules.sales.service import SalesOrderService
 from app.modules.sales.repository import SalesOrderRepository
 ```
 
-> `contract.py` 目前**尚未创建**。哪个模块需要对外提供能力，由该模块负责人在自己模块目录内
-> 新建 `contract.py`，并同步更新本文档。
+各模块已暴露的契约入口：
+
+| 模块 | 契约文件 | 主要函数 |
+| --- | --- | --- |
+| system | `app/modules/system/contract.py` | `get_material(s)`、`get_active_bom_children`、`log_operation` |
+| sales | `app/modules/sales/contract.py` | `get_open_order_demand`、`get_confirmed_forecast_demand`、`get_open_order_qty` |
+| planning | `app/modules/planning/contract.py` | `create_production_plan_from_mrp_result`、`get_mrp_results`、`get_open_production_qty` |
+| procurement | `app/modules/procurement/contract.py` | `create_purchase_plan_from_mrp`、`get_pending_receipt_qty` |
+| inventory | `app/modules/inventory/contract.py` | `get_available_qty`、`increase_stock`、`decrease_stock` |
+
+**两条强制约定**：
+
+- 契约函数只返回 `dict` / 标量，**不返回 ORM 对象**；
+- 契约函数**永不 `db.commit()`**，运行在调用方事务内，保证跨模块操作原子性
+  （如「到货确认 = 采购单状态 + 库存流水 + 结存」在同一事务提交）。
 
 ## 五、禁止事项清单
 

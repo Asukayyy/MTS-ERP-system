@@ -1,9 +1,8 @@
 # Planning 跨模块数据接口草案（Interface Draft）
 
-> **性质说明：这是第 2 周的接口「需求草案」，不是正式 OpenAPI / Contract 定义。**
-> 本周只把「数据名称、提供方、使用方、用途」定义清楚；
-> 正式的函数签名 / REST 路径 / 出入参结构在第 3 周详细设计阶段细化，
-> 并遵循 [../architecture/module-boundaries.md](../architecture/module-boundaries.md) 的 Contract 机制落地。
+> **性质说明：本文件是第 2 周的接口「需求草案」，用于记录数据级需求。**
+> 正式的函数签名 / REST 路径 / 出入参结构已在实现阶段落地，见第四节与
+> [../architecture/module-boundaries.md](../architecture/module-boundaries.md) 的 Contract 机制。
 
 ## 一、Planning 需要（输入侧）
 
@@ -27,17 +26,30 @@
 | 派工单 / 派工信息 | Planning | 生产执行（业务参与方） | 车间作业任务下达 |
 | 计划执行状态 / 计划业务数据（查询） | Planning | 计划管理人员及其他模块 | 综合查询与统计分析 |
 
-## 三、落地规则（实现期生效，本周不实现）
+## 三、落地规则（已生效）
 
 1. 由 **Provider（Owner）模块**在自己目录内新建 `contract.py` 暴露能力；Consumer **只依赖 Contract**，不 import Owner 的 `service.py` / `repository.py` / `models.py`。
 2. 禁止跨模块直读 / JOIN 其他模块的表；单据关联使用 **ID 引用**（`<entity>_id`，`BIGINT`）。
    跨模块历史业务外键默认 `ON DELETE RESTRICT`（规格 §20）；多态引用只建索引不建外键。
    基础数据被业务引用后不物理删除，改为 `status = INACTIVE`。
 3. 库存数量以 inventory 的接口为准，planning 不自行缓存库存字段。
-4. 每个接口的入参、出参、错误码（planning 区段 `3000~3999`）在第 3 周详细设计中定义。
+4. 每个接口的入参、出参、错误码（planning 区段 `3000~3999`）已在实现中定义，见
+   [`../api/api-contract.md`](../api/api-contract.md)。
 
-## 四、第 3 周待细化
+## 四、落地结果
 
-- [ ] 与各 Owner 模块逐一确认上表数据的字段级内容
-- [ ] 将本草案转化为 `contract.py` / REST API 的正式定义
-- [ ] 在 `docs/architecture/module-boundaries.md` 中登记最终约定的 Contract
+上表数据需求已全部转为正式契约（五个模块的 `contract.py` 均已创建）：
+
+| 数据需求 | 实际契约函数 | 所在模块 |
+| --- | --- | --- |
+| 物料信息 | `get_material` / `get_materials` / `get_finished_materials` | `system.contract` |
+| BOM 结构 | `get_active_bom_children` / `get_active_bom` / `has_bom` | `system.contract` |
+| 销售需求 / 销售订单需求 | `get_open_order_demand` / `get_confirmed_forecast_demand` | `sales.contract` |
+| 当前库存 / 可用库存 | `get_stock_snapshot` / `get_available_qty` | `inventory.contract` |
+| 采购需求 | `create_purchase_plan_from_mrp`（planning → procurement） | `procurement.contract` |
+| 领料需求 | `decrease_stock`（planning → inventory） | `inventory.contract` |
+| 完工入库 | `increase_stock`（planning → inventory） | `inventory.contract` |
+| 计划数据对外查询 | `get_mrp_results` / `get_open_production_qty` / `create_production_plan_from_mrp_result` | `planning.contract` |
+
+> 契约纪律：只返回 `dict` / 标量，不返回 ORM 对象；永不 `db.commit()`，由调用方事务统一提交。
+> 登记位置：[`../architecture/module-boundaries.md`](../architecture/module-boundaries.md) 第四节。

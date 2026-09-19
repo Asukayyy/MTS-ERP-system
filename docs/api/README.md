@@ -135,7 +135,10 @@ raise BusinessException(code=4001, message="库存不足")
 
 ## 六、当前已实现的接口
 
-只有占位健康检查，用于验证模块路由注册成功：
+当前共 **167 个路径 / 223 个操作**，完整清单见 [api-contract.md](api-contract.md)（由
+`create_app().openapi()` 导出，可逐条核对）。
+
+以下是应用级与各模块的**占位健康检查**，仅用于验证模块路由注册成功：
 
 | 接口 | 返回 `data` |
 | --- | --- |
@@ -146,7 +149,8 @@ raise BusinessException(code=4001, message="库存不足")
 | `GET /api/v1/procurement/health` | `{"module": "procurement", "status": "up"}` |
 | `GET /api/v1/inventory/health` | `{"module": "inventory", "status": "up"}` |
 
-> 这些接口**仅用于证明路由注册成功**，请勿在其上扩展任何业务逻辑。
+> 这些健康检查**仅用于证明路由注册成功**，固定返回 `up`（不反映真实依赖状态），
+> 请勿在其上扩展任何业务逻辑。
 
 ## 七、接口文档
 

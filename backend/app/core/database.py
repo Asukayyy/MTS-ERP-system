@@ -29,7 +29,8 @@ class Base(DeclarativeBase):
     """所有 ORM 模型的公共基类。
 
     各模块的 `models.py` 统一继承本类，Alembic 通过 `Base.metadata` 自动收集表结构。
-    当前 `Base.metadata` 中**没有任何业务表**，业务表由模块负责人在自己模块的 `models.py` 中定义。
+    当前 `Base.metadata` 已包含五个模块的 **52 张业务表**
+    （system 15 / sales 8 / planning 10 / procurement 9 / inventory 10）。
     """
 
 
