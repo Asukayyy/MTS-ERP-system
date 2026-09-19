@@ -5,6 +5,7 @@
 跨模块数据（销售需求、库存、BOM）通过模块 Contract 获取，本层**不跨模块 JOIN**。
 """
 
+from decimal import Decimal
 from typing import List, Optional, Sequence
 
 from sqlalchemy import func, select
@@ -61,6 +62,28 @@ def add_demand(db: Session, demand: models.PlnDemand) -> models.PlnDemand:
     return demand
 
 
+def get_demands_by_ids(db: Session, demand_ids: Sequence[int]) -> List[models.PlnDemand]:
+    if not demand_ids:
+        return []
+    return list(
+        db.scalars(select(models.PlnDemand).where(models.PlnDemand.id.in_(list(demand_ids))))
+    )
+
+
+def find_demand_by_source(
+    db: Session, source_type: str, source_reference_id: Optional[int]
+):
+    """按来源类型 + 来源单据ID 查找已有需求（导入去重用）。"""
+    if source_reference_id is None:
+        return None
+    return db.scalar(
+        select(models.PlnDemand).where(
+            models.PlnDemand.source_type == source_type,
+            models.PlnDemand.source_reference_id == source_reference_id,
+        )
+    )
+
+
 # ==================== MPS ====================
 
 
@@ -69,10 +92,13 @@ def list_mps(
     page: int = 1,
     page_size: int = 20,
     status: Optional[str] = None,
+    year: Optional[int] = None,
 ):
     stmt = select(models.PlnMps).order_by(models.PlnMps.id.desc())
     if status:
         stmt = stmt.where(models.PlnMps.status == status)
+    if year:
+        stmt = stmt.where(models.PlnMps.plan_year == year)
     return _paginate(db, stmt, page, page_size)
 
 
@@ -110,6 +136,12 @@ def next_no(db: Session, model, field_name: str, prefix: str) -> str:
     """生成业务单号：`<prefix><6位序号>`。仅用于演示级单号，真实场景应走独立序列。"""
     total = count_all(db, model)
     return f"{prefix}{total + 1:06d}"
+
+
+def exists_by_field(db: Session, model, field_name: str, value) -> bool:
+    """判断某列取值是否已存在（业务编码唯一性校验）。"""
+    column = getattr(model, field_name)
+    return (db.scalar(select(func.count()).select_from(model).where(column == value)) or 0) > 0
 
 
 # ==================== MRP ====================
@@ -174,6 +206,33 @@ def get_mrp_results_by_ids(db: Session, ids: Sequence[int]) -> List[models.PlnMr
     )
 
 
+def get_mrp_result(db: Session, result_id: int) -> Optional[models.PlnMrpResult]:
+    return db.get(models.PlnMrpResult, result_id)
+
+
+def find_run_result(
+    db: Session, run_id: int, material_id: int
+) -> Optional[models.PlnMrpResult]:
+    """取某批次内某物料的计算结果（计算明细展示用）。"""
+    return db.scalar(
+        select(models.PlnMrpResult)
+        .where(
+            models.PlnMrpResult.run_id == run_id,
+            models.PlnMrpResult.material_id == material_id,
+        )
+        .order_by(models.PlnMrpResult.id)
+    )
+
+
+def count_mrp_results_by_supply(db: Session, supply_type: str) -> int:
+    return count_where(db, models.PlnMrpResult, models.PlnMrpResult.supply_type == supply_type)
+
+
+def count_open(db: Session, model, open_statuses: Sequence[str]) -> int:
+    """统计未结束（不处于给定终态）的单据数。"""
+    return count_where(db, model, model.status.notin_(list(open_statuses)))
+
+
 # ==================== 生产作业计划 ====================
 
 
@@ -202,6 +261,48 @@ def add_production_plan(
     db.add(plan)
     db.flush()
     return plan
+
+
+def find_plan_by_mrp_result(
+    db: Session, mrp_result_id: int
+) -> Optional[models.PlnProductionPlan]:
+    """按 MRP 结果ID 查已生成的作业计划（防止重复下达）。"""
+    return db.scalar(
+        select(models.PlnProductionPlan).where(
+            models.PlnProductionPlan.mrp_result_id == mrp_result_id
+        )
+    )
+
+
+def find_plan_by_source(
+    db: Session, source_type: str, source_reference_id: int
+) -> Optional[models.PlnProductionPlan]:
+    """按来源类型 + 来源单据ID 查作业计划（补库受理去重用）。"""
+    return db.scalar(
+        select(models.PlnProductionPlan).where(
+            models.PlnProductionPlan.source_type == source_type,
+            models.PlnProductionPlan.source_reference_id == source_reference_id,
+        )
+    )
+
+
+def sum_open_production_qty(db: Session, material_id: int) -> Decimal:
+    """某物料未完工的生产数量合计 = Σ(计划数量 - 已完工数量)，终态单据不计。"""
+    total = db.scalar(
+        select(
+            func.coalesce(
+                func.sum(
+                    models.PlnProductionPlan.planned_qty
+                    - models.PlnProductionPlan.completed_qty
+                ),
+                0,
+            )
+        ).where(
+            models.PlnProductionPlan.material_id == material_id,
+            models.PlnProductionPlan.status.notin_(["COMPLETED", "CANCELLED"]),
+        )
+    )
+    return Decimal(str(total or 0))
 
 
 # ==================== 派工单 ====================

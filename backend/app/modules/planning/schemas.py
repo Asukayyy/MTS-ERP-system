@@ -287,7 +287,155 @@ class PlanningStatsOut(BaseModel):
     open_plan_count: int = Field(description="未完成作业计划数")
     open_dispatch_count: int = Field(description="未完成派工单数")
     open_requisition_count: int = Field(description="未完成领料单数")
+    completion_report_count: int = Field(default=0, description="完工报告数量")
 
 
 class StatsResponse(ApiResponse[PlanningStatsOut]):
     """计划模块统计响应。"""
+
+
+# ---------------- 需求：扩展入参 ----------------
+class DemandStatusUpdate(BaseModel):
+    """需求状态流转入参。"""
+
+    status: str = Field(description="目标状态 DRAFT/CONFIRMED/RELEASED/COMPLETED/CANCELLED")
+
+
+class DemandFromReplenishmentRequest(BaseModel):
+    """从库存补库需求生成计划需求入参。"""
+
+    request_id: int = Field(description="库存补库需求ID（inv_replenishment_request.id）")
+
+
+class DemandImportResult(BaseModel):
+    """从销售订单导入需求的结果。"""
+
+    created_count: int = Field(description="新建需求数")
+    skipped_count: int = Field(description="已存在被跳过数")
+    demand_ids: List[int] = Field(default_factory=list, description="新建需求ID列表")
+
+
+# ---------------- MPS：扩展入参 ----------------
+class MpsUpdate(BaseModel):
+    """MPS 修改入参（仅 DRAFT 可改；items 为空表示不改明细）。"""
+
+    mps_name: Optional[str] = None
+    program_no: Optional[str] = None
+    plan_year: Optional[int] = None
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
+    remark: Optional[str] = None
+    items: Optional[List[MpsItemCreate]] = Field(default=None, description="替换后的 MPS 行明细")
+
+
+# ---------------- MPS 课程附录 1 导入 ----------------
+class MpsImportRow(BaseModel):
+    """显式传入的导入行。"""
+
+    material_code: str = Field(description="物料编码，导入时解析为物料ID")
+    period_label: Optional[str] = Field(default=None, description="计划期间标签")
+    planned_qty: Decimal = Field(gt=0, description="计划生产数量")
+    start_date: date = Field(description="计划开始日期")
+    end_date: date = Field(description="计划完成日期")
+
+
+class MpsImportRequest(BaseModel):
+    """MPS 导入请求：`source` 与服务端内置案例二选一，或直接给 `rows`。"""
+
+    source: Optional[str] = Field(default=None, description="内置数据源标识，如 course_chair_case")
+    rows: List[MpsImportRow] = Field(default_factory=list, description="显式导入行")
+    mps_no: Optional[str] = Field(default=None, description="MPS编号，留空自动生成")
+    mps_name: Optional[str] = None
+    program_no: Optional[str] = None
+    plan_year: Optional[int] = None
+    remark: Optional[str] = None
+
+
+class MpsImportPreviewRow(BaseModel):
+    """校验通过的一行。"""
+
+    row_index: int
+    material_code: str
+    material_id: Optional[int] = None
+    material_name: Optional[str] = None
+    period_label: Optional[str] = None
+    planned_qty: Decimal
+    start_date: date
+    end_date: date
+
+
+class MpsImportError(BaseModel):
+    """一行校验失败。"""
+
+    row: int = Field(description="行号（从 0 开始）")
+    message: str
+
+
+class MpsImportSummary(BaseModel):
+    """导入汇总。"""
+
+    total_rows: int
+    valid_count: int
+    error_count: int
+    plan_year: int
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
+
+
+class MpsImportPreviewOut(BaseModel):
+    """导入预览（不落库）。"""
+
+    valid_rows: List[MpsImportPreviewRow] = Field(default_factory=list)
+    errors: List[MpsImportError] = Field(default_factory=list)
+    summary: MpsImportSummary
+
+
+# ---------------- MRP：扩展出参 ----------------
+class MrpExplainOut(BaseModel):
+    """MRP 计算明细：供前端展示毛需求 → 净需求的完整推导过程。"""
+
+    mrp_result_id: int
+    run_id: int
+    material_id: int
+    material_code: Optional[str] = None
+    material_name: Optional[str] = None
+    parent_material_id: Optional[int] = None
+    parent_material_code: Optional[str] = None
+    parent_material_name: Optional[str] = None
+    bom_level: int
+    gross_requirement: Decimal
+    on_hand: Decimal
+    available_quantity: Decimal
+    safety_stock: Decimal
+    net_requirement: Decimal
+    order_qty: Decimal
+    supply_type: str
+    lead_time_days: int
+    requirement_date: date
+    planned_release_date: Optional[date] = None
+    status: str
+    formula: str = Field(description="净需求计算说明（中文）")
+
+
+# ---------------- 生产作业计划：扩展入参 ----------------
+class ProductionPlanUpdate(BaseModel):
+    """生产作业计划修改入参（仅 DRAFT 可改）。"""
+
+    planned_qty: Optional[Decimal] = Field(default=None, gt=0)
+    plan_date: Optional[date] = None
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
+    remark: Optional[str] = None
+
+
+class ProductionPlanFromMrpRequest(BaseModel):
+    """从 MRP 结果批量生成作业计划入参。"""
+
+    mrp_result_ids: List[int] = Field(default_factory=list, description="MRP 结果ID列表")
+
+
+# ---------------- 完工报告：取消入参 ----------------
+class CompletionReportCancel(BaseModel):
+    """完工报告取消入参。"""
+
+    remark: Optional[str] = None
