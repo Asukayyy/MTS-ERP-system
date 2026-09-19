@@ -1,0 +1,137 @@
+{
+  "case": "案例2（1）转椅 BOM —— 某办公家具生产企业",
+  "product_mode": "MTS",
+  "provenance": {
+    "bom_source": "data/reference/BOM例子.doc",
+    "bom_location": "案例2：某办公家具生产企业 → （1）转椅BOM（内嵌 Visio.Drawing.11 绘图对象）",
+    "bom_extraction": "解析 Word 复合文档 ObjectPool/_1445321627/EPRINT（EMF 打印流）中的 EMR_EXTTEXTTEXTOUTW 文字记录及坐标，再按连线还原层级",
+    "mps_source": "data/reference/附录1：主生产计划.xls → Sheet1",
+    "mps_extraction": "pandas.read_excel(header=None) 原样读取",
+    "name_and_quantity": "物料名称与数量关系 100% 来自课程原始文件，未作任何猜测或修改",
+    "material_code_note": "课程原始文件不提供物料编码，本文件中的 material_code 为系统自定义编号方案（FG/SF/RM 前缀），导入后可自由修改",
+    "system_defaults_note": "课程仅要求『各级物料安全库存指标自行设定』，未给出提前期；lead_time_days 与 safety_stock 为系统默认值，非课程数据",
+    "unit_note": "课程附录注明『各级物料期初库存数量为3000件（套）』，未逐项标注计量单位，本文件统一采用 件(PCS)"
+  },
+
+  "course_data": {
+    "product": {
+      "material_code": "FG-1001",
+      "material_name": "办公转椅",
+      "material_type": "FINISHED",
+      "supply_type": "MAKE",
+      "unit_code": "PCS",
+      "lead_time_days": 5,
+      "safety_stock": 1000,
+      "bom_version": "V1.0",
+      "children": [
+        {
+          "material_code": "SF-2001",
+          "material_name": "塑料件",
+          "material_type": "SEMI",
+          "supply_type": "MAKE",
+          "unit_code": "PCS",
+          "lead_time_days": 3,
+          "safety_stock": 300,
+          "quantity": 1,
+          "children": [
+            { "material_code": "RM-3001", "material_name": "脚轮", "material_type": "PURCHASED", "supply_type": "BUY", "quantity": 5 },
+            { "material_code": "RM-3002", "material_name": "三节杯", "material_type": "PURCHASED", "supply_type": "BUY", "quantity": 1 },
+            { "material_code": "RM-3003", "material_name": "五星脚", "material_type": "PURCHASED", "supply_type": "BUY", "quantity": 1 },
+            { "material_code": "RM-3004", "material_name": "扶手", "material_type": "PURCHASED", "supply_type": "BUY", "quantity": 1 },
+            { "material_code": "RM-3005", "material_name": "背猪腰", "material_type": "PURCHASED", "supply_type": "BUY", "quantity": 1 }
+          ]
+        },
+        {
+          "material_code": "SF-2002",
+          "material_name": "五金件",
+          "material_type": "SEMI",
+          "supply_type": "MAKE",
+          "unit_code": "PCS",
+          "lead_time_days": 3,
+          "safety_stock": 300,
+          "quantity": 1,
+          "children": [
+            { "material_code": "RM-3006", "material_name": "猪腰铁片", "material_type": "PURCHASED", "supply_type": "BUY", "quantity": 1 },
+            { "material_code": "RM-3007", "material_name": "底盘", "material_type": "PURCHASED", "supply_type": "BUY", "quantity": 1 }
+          ]
+        },
+        {
+          "material_code": "SF-2003",
+          "material_name": "标准件",
+          "material_type": "SEMI",
+          "supply_type": "MAKE",
+          "unit_code": "PCS",
+          "lead_time_days": 3,
+          "safety_stock": 300,
+          "quantity": 1,
+          "children": [
+            { "material_code": "RM-3008", "material_name": "底盘螺丝", "material_type": "PURCHASED", "supply_type": "BUY", "quantity": 4 },
+            { "material_code": "RM-3009", "material_name": "背螺丝", "material_type": "PURCHASED", "supply_type": "BUY", "quantity": 2 }
+          ]
+        },
+        {
+          "material_code": "SF-2004",
+          "material_name": "其他件",
+          "material_type": "SEMI",
+          "supply_type": "MAKE",
+          "unit_code": "PCS",
+          "lead_time_days": 3,
+          "safety_stock": 300,
+          "quantity": 1,
+          "children": [
+            { "material_code": "RM-3010", "material_name": "座木板", "material_type": "PURCHASED", "supply_type": "BUY", "quantity": 1 },
+            { "material_code": "RM-3011", "material_name": "背木板", "material_type": "PURCHASED", "supply_type": "BUY", "quantity": 1 },
+            { "material_code": "RM-3012", "material_name": "座海棉", "material_type": "PURCHASED", "supply_type": "BUY", "quantity": 1 },
+            { "material_code": "RM-3013", "material_name": "背海绵", "material_type": "PURCHASED", "supply_type": "BUY", "quantity": 1 },
+            { "material_code": "RM-3014", "material_name": "背后海绵", "material_type": "PURCHASED", "supply_type": "BUY", "quantity": 1 },
+            { "material_code": "RM-3015", "material_name": "背后PVC", "material_type": "PURCHASED", "supply_type": "BUY", "quantity": 1 },
+            { "material_code": "RM-3016", "material_name": "座下无纺布", "material_type": "PURCHASED", "supply_type": "BUY", "quantity": 1 },
+            { "material_code": "RM-3017", "material_name": "布", "material_type": "PURCHASED", "supply_type": "BUY", "quantity": 1 },
+            { "material_code": "RM-3018", "material_name": "胶边", "material_type": "PURCHASED", "supply_type": "BUY", "quantity": 1 }
+          ]
+        },
+        {
+          "material_code": "SF-2005",
+          "material_name": "包装件",
+          "material_type": "SEMI",
+          "supply_type": "MAKE",
+          "unit_code": "PCS",
+          "lead_time_days": 3,
+          "safety_stock": 300,
+          "quantity": 1,
+          "children": [
+            { "material_code": "RM-3019", "material_name": "外箱", "material_type": "PURCHASED", "supply_type": "BUY", "quantity": 1 },
+            { "material_code": "RM-3020", "material_name": "护箱", "material_type": "PURCHASED", "supply_type": "BUY", "quantity": 1 },
+            { "material_code": "RM-3021", "material_name": "纸板", "material_type": "PURCHASED", "supply_type": "BUY", "quantity": 1 },
+            { "material_code": "RM-3022", "material_name": "背胶袋", "material_type": "PURCHASED", "supply_type": "BUY", "quantity": 1 },
+            { "material_code": "RM-3023", "material_name": "座胶袋", "material_type": "PURCHASED", "supply_type": "BUY", "quantity": 1 }
+          ]
+        }
+      ]
+    },
+
+    "mps": {
+      "source_note": "附录1 Sheet1：年计划产量 120000，期初库存 30000，预计期末库存 18000，1~12月计划产量均为 10000",
+      "annual_plan_quantity": 120000,
+      "product_initial_stock": 30000,
+      "product_expected_ending_stock": 18000,
+      "monthly_plan_quantity": 10000,
+      "month_count": 12,
+      "product_expected_monthly_stock": [29000, 28000, 27000, 26000, 25000, 24000, 23000, 22000, 21000, 20000, 19000, 18000],
+      "product_note": "附录1未显式写出产品名称，按 BOM 例子.doc 案例2 判定为『办公转椅』"
+    },
+
+    "initial_inventory": {
+      "source_note": "附录1 Sheet1 行7注：BOM表中各级物料期初库存数量为3000件（套）",
+      "finished_goods_quantity": 30000,
+      "component_quantity": 3000
+    }
+  },
+
+  "counts": {
+    "levels": 3,
+    "semi_components": 5,
+    "purchased_parts": 23,
+    "total_nodes": 29
+  }
+}

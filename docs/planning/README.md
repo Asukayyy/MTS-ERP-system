@@ -10,16 +10,20 @@
 | [diagrams/planning-function-tree.md](diagrams/planning-function-tree.md) | 功能树（Mermaid，可渲染） | 已完成 |
 | [diagrams/planning-level1-dfd.md](diagrams/planning-level1-dfd.md) | 第一层数据流图 DFD（Mermaid，可渲染） | 已完成 |
 | [diagrams/planning-module-relations.md](diagrams/planning-module-relations.md) | 与 system / sales / procurement / inventory 的关系图（Mermaid，可渲染） | 已完成 |
-| [interface-draft.md](interface-draft.md) | 跨模块数据接口需求草案（非正式 API 定义） | 已完成 |
-| [week3-detailed-design.md](week3-detailed-design.md) | 第 3 周：详细功能设计与数据结构模型设计 | 未开始 |
+| [interface-draft.md](interface-draft.md) | 跨模块数据接口需求草案（正式定义已落地为 `contract.py` 与 REST API） | 已完成 |
+| [week3-detailed-design.md](week3-detailed-design.md) | 第 3 周：详细功能设计与数据结构模型设计 | 已完成 |
 
 ## 阶段边界
 
 | 阶段 | 内容 | 边界 |
 | --- | --- | --- |
-| 第 2 周（本轮） | 系统分析、功能树、第一层 DFD、输入/处理/输出分析、跨模块数据需求草案、页面初步规划、技术选型记录 | **不含任何业务实现**，不建业务表、不写算法、不做业务页面 |
-| 第 3 周 | 详细功能设计、MRP 处理逻辑、E-R 模型、数据结构物理模型、API 详细定义、页面详细设计 | 只设计，仍不写业务代码 |
-| 第 3 周之后 | 系统开发，在 `backend/app/modules/planning/` 与 `frontend/src/{api,views}/planning/` 内实现 | 遵循模块隔离铁律 |
+| 第 2 周 | 系统分析、功能树、第一层 DFD、输入/处理/输出分析、跨模块数据需求草案、页面初步规划、技术选型记录 | 仅文档，不含业务实现 |
+| 第 3 周 | 详细功能设计、MRP 处理逻辑、E-R 模型、数据结构物理模型、API 详细定义、页面详细设计 | 设计文档 + 实现落地 |
+| 已交付 | 计划模块全部业务功能实现于 `backend/app/modules/planning/` 与 `frontend/src/{api,views}/planning/` | 遵循模块隔离铁律 |
+
+> 最新交付状态：planning 后端 36 个路径已实现，MRP 为真实多层 BOM 展开算法；
+> 表结构见 [`../database/planning-er.md`](../database/planning-er.md)，
+> 接口清单见 [`../api/api-contract.md`](../api/api-contract.md)。
 
 ## 约束
 

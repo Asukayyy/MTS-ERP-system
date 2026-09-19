@@ -52,7 +52,10 @@ copy .env.example .env              # Windows
 # 4. 按本机情况修改 .env 中的 DB_* （必须先建好 bh_erp 库）
 #    DB_HOST / DB_PORT / DB_NAME / DB_USER / DB_PASSWORD
 
-# 5. 启动
+# 5. 建表（应用全部 Alembic 迁移）
+alembic upgrade head
+
+# 6. 启动
 uvicorn app.main:app --reload --port 8000
 ```
 
@@ -128,16 +131,21 @@ frontend/vite.config.ts  frontend/tsconfig*.json  frontend/package.json
 
 | 文档 | 为什么 |
 | --- | --- |
+| [../architecture/system-architecture.md](../architecture/system-architecture.md) | 分层架构、模块边界、Owner 原则、跨模块契约规则 |
+| [../architecture/module-ownership.md](../architecture/module-ownership.md) | 搞清楚哪张表归你，别乱建表（**必读**） |
 | [../architecture/module-boundaries.md](../architecture/module-boundaries.md) | 搞清楚模块边界，别 import 别人的 service/repository |
-| [../architecture/data-ownership.md](../architecture/data-ownership.md) | 搞清楚哪张表归你，别乱建表 |
-| [../api/README.md](../api/README.md) | 统一响应、分页、错误码规范 |
-| [../../CONTRIBUTING.md](../../CONTRIBUTING.md) | 分支、Commit、PR 流程 |
+| [../architecture/data-ownership.md](../architecture/data-ownership.md) | 数据表归属规划 |
+| [../api/api-contract.md](../api/api-contract.md) | 统一响应、分页、错误码与全部接口清单 |
+| [../database/data-dictionary.md](../database/data-dictionary.md) | 命名规范、类型规范、枚举与状态机 |
+| [../development/database-migration-guide.md](database-migration-guide.md) | 建表与迁移流程 |
+| [../development/git-workflow.md](git-workflow.md) | 分支、Commit、PR 流程 |
+| [../../CONTRIBUTING.md](../../CONTRIBUTING.md) | 分支、Commit、PR 流程（团队约定原文） |
 
 ## 七、常见问题
 
 **Q：后端启动报数据库连接错误？**
-A：确认 MySQL 已启动、`bh_erp` 库已创建、`.env` 中 `DB_*` 正确。
-注意本阶段还没有任何业务表，不需要执行迁移。
+A：确认 MySQL 已启动、`bh_erp` 库已创建、`.env` 中 `DB_*` 正确，
+并已执行 `alembic upgrade head`（当前共有 52 张业务表，必须建表后才能调用业务接口）。
 
 **Q：前端页面能看到，但点"调用 health 接口"报错？**
 A：后端没启动，或没跑在 8000 端口。前端 proxy 固定指向 `http://127.0.0.1:8000`。
@@ -146,7 +154,8 @@ A：后端没启动，或没跑在 8000 端口。前端 proxy 固定指向 `http
 A：先跑 `npm run type-check` 定位具体文件。请确保没有未使用的变量/导入（`noUnusedLocals` 已开启）。
 
 **Q：`alembic revision --autogenerate` 没生成任何内容？**
-A：正常。当前 `Base.metadata` 里还没有业务表。
+A：说明模型与数据库已经一致（无漂移）。可用 `alembic check` 确认；
+若你刚新增了模型却仍为空，检查该模型是否被 `backend/migrations/env.py` 引用的模块 `models` 导出。
 
 **Q：我改的 `.env` 会不会被提交？**
 A：不会。`.env` 已在 `.gitignore` 中；仓库里只有 `.env.example`。

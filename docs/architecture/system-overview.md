@@ -17,8 +17,11 @@ BH-ERP 是一个 **Web B/S 架构**的制造企业资源计划系统，面向**�
 | 转椅 BOM | 系统的基础数据验证对象（成品 → 部件 → 零件 → 原材料的多层结构） |
 | 附录 1 主生产计划（MPS） | 系统的计划输入验证对象（课程提供的 MPS 数据） |
 
-> 本阶段（基础工程框架）**不导入**真实转椅 BOM 与附录 1 MPS 数据，
-> 它们由 system 模块与 planning 模块的负责人在各自开发阶段录入。
+> 课程原始数据已结构化保存到 `data/seed/course_chair_case.json`，
+> 并可通过 **课程数据导入**接口写入系统：
+> system 模块导入物料与 BOM，planning 模块导入附录 1 的 MPS，
+> inventory 模块导入期初库存。导入采用「先预览、再确认」两段式。
+> 实操步骤见 [../user-guide/course-scenario-guide.md](../user-guide/course-scenario-guide.md)。
 
 ## 三、五个模块
 
@@ -93,11 +96,12 @@ MySQL                          （五个模块共享同一个库，代码按模�
 每个后端模块内部固定五层结构：
 
 ```
-router.py       HTTP 层：定义路径、入参出参、调用 service
+router.py       HTTP 层：定义路径、入参出参、调用 service、提交事务
 schemas.py      Pydantic 模型：请求 / 响应结构
-service.py      业务层：业务规则、事务边界
+service.py      业务层：业务规则、状态机、跨模块编排（不 commit）
 repository.py   数据访问层：SQL / ORM 查询
-models.py       ORM 模型：表结构定义（当前为空）
+models.py       ORM 模型：表结构定义（五模块共 52 张表）
+contract.py     跨模块契约：对外暴露的读写函数，返回纯 dict / 标量
 ```
 
 调用方向**只允许自上而下**：
@@ -107,12 +111,22 @@ router  →  service  →  repository  →  MySQL
 ```
 
 反向调用（repository 调 service、service 调 router）一律禁止。
+跨模块调用**只能**走对方模块的 `contract.py`。
 
-## 七、当前阶段说明
+## 七、当前状态
 
-本仓库处于 **Foundation / Skeleton** 阶段：
+系统主要业务功能**已实现**：
 
-- 已完成：目录结构、前后端可运行环境、数据库与迁移框架、统一响应规范、协作文档
-- 未完成：**所有 ERP 业务功能**（五个模块只有占位健康检查接口与占位页面）
+- 后端：**52 张业务表**、**167 个路径 / 223 个操作**、2 个 Alembic 迁移（HEAD `f5e52ee720d6`）
+- 前端：**35 个模块页面**（路由表共 39 处 `path` 声明）
+- 业务闭环：课程数据导入 → MPS → MRP → 采购 / 生产 → 入库 / 领料 / 完工 → 发货 / 退货 → 订货点补库
 
-各模块的开发顺序与依赖关系见 [module-boundaries.md](module-boundaries.md)。
+**已知简化项**：
+
+- 未实现鉴权：所有接口不校验 `Authorization`，`system/auth/login` 为简化版登录
+- 各模块 `/health` 为占位接口，固定返回 `{module, status:"up"}`
+- 单号/编码生成为演示级实现，不是并发安全的正式编号器
+- 无 CI、无容器化部署
+
+各模块的开发顺序与依赖关系见 [module-boundaries.md](module-boundaries.md)，
+完整架构与跨模块契约规则见 [system-architecture.md](system-architecture.md)。

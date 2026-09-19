@@ -18,8 +18,8 @@ function goDashboard() {
       <el-alert
         type="info"
         :closable="false"
-        title="登录功能尚未实现"
-        description="本页面仅用于建立「登录前 / 登录后」的路由结构。真实登录与权限校验由 system 模块负责人实现。"
+        title="当前为简化登录，不校验权限"
+        description="后端已提供 POST /api/v1/system/auth/login（简化版登录），但全系统不做 Authorization 校验；本页面用于建立「登录前 / 登录后」的路由结构。"
       />
 
       <el-button class="login-page__button" type="primary" @click="goDashboard">

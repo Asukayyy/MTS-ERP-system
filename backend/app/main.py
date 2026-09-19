@@ -40,7 +40,8 @@ def create_app() -> FastAPI:
         version=settings.APP_VERSION,
         description=(
             "基于转椅 BOM 与主生产计划 MPS 的 Web 版 MTS ERP 系统。"
-            "当前为**基础工程框架**，业务功能尚未实现。"
+            "已实现 system / sales / planning / procurement / inventory 五个模块，"
+            "含多层 BOM 展开 MRP 引擎与课程转椅数据的端到端闭环。"
         ),
         debug=settings.DEBUG,
     )
