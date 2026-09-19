@@ -374,6 +374,9 @@ class SysBomItem(Base, AuditMixin):
     quantity: Mapped[Decimal] = mapped_column(
         Numeric(18, 4), nullable=False, default=1, comment="单位用量"
     )
+    lead_time_offset: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, comment="提前期偏置（天，相对父件需求时间的提前量）"
+    )
     scrap_rate: Mapped[Decimal] = mapped_column(
         Numeric(8, 4), nullable=False, default=0, comment="损耗率（0~1）"
     )
@@ -385,6 +388,7 @@ class SysBomItem(Base, AuditMixin):
     __table_args__ = (
         UniqueConstraint("bom_id", "material_id", name="uq_sys_bom_item"),
         CheckConstraint("quantity > 0", name="ck_sys_bom_item_qty"),
+        CheckConstraint("lead_time_offset >= 0", name="ck_sys_bom_item_lead_offset"),
         CheckConstraint("scrap_rate >= 0 AND scrap_rate < 1", name="ck_sys_bom_item_scrap"),
     )
 

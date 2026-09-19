@@ -5,8 +5,16 @@
 2. `target_metadata = Base.metadata`，因此各模块 `models.py` 中继承 `Base` 的表会被自动收集。
 3. 新增模块的模型后，记得在上面的 models 导入区补一行，否则 autogenerate 发现不了该模块的表。
 
-当前 `Base.metadata` 中**没有任何业务表**，`alembic revision --autogenerate` 不会生成建表语句，
-这是本阶段（基础框架）的预期结果。
+当前 `Base.metadata` 已包含五个模块的 **52 张业务表**（system 15 / sales 8 / planning 10 /
+procurement 9 / inventory 10，含 BOM 明细、库存流水、MRP 结果等）。
+
+迁移链：
+
+- `9e6fa0de8416` 基线：一次性建立全部业务表、外键与 CHECK 约束
+- `f5e52ee720d6` 补充：BOM 提前期偏置、退货质量状态、补库目标量
+
+每次改完 `models.py` 后执行 `alembic revision --autogenerate -m "..."`，
+再用 `alembic check` 确认没有遗漏的漂移（MySQL 的 CHECK 约束不会被 autogenerate 检测，需手工补）。
 """
 
 from logging.config import fileConfig

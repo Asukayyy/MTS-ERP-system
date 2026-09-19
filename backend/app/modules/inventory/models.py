@@ -250,6 +250,9 @@ class InvReplenishmentRequest(Base, AuditMixin):
     current_qty: Mapped[Decimal] = mapped_column(
         Numeric(18, 4), nullable=False, default=0, comment="触发时库存量"
     )
+    target_qty: Mapped[Decimal] = mapped_column(
+        Numeric(18, 4), nullable=False, default=0, comment="目标库存量"
+    )
     required_date: Mapped[date] = mapped_column(Date, nullable=False, comment="需求日期")
     source_type: Mapped[str] = mapped_column(
         String(20), nullable=False, index=True, comment="来源 REORDER/PRODUCTION"

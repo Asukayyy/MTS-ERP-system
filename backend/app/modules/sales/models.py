@@ -288,9 +288,17 @@ class SalReturnItem(Base, AuditMixin):
         ForeignKey("inv_location.id", ondelete="RESTRICT"), nullable=True, comment="退回库位ID"
     )
     quantity: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, comment="退货数量")
+    quality_status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="QUALIFIED", comment="质量状态 QUALIFIED/DEFECTIVE/SCRAP"
+    )
     reason: Mapped[Optional[str]] = mapped_column(String(200), nullable=True, comment="行退货原因")
     remark: Mapped[Optional[str]] = mapped_column(String(200), nullable=True, comment="备注")
 
     sales_return: Mapped[SalReturn] = relationship(back_populates="items")
 
-    __table_args__ = (CheckConstraint("quantity > 0", name="ck_sal_return_item_qty"),)
+    __table_args__ = (
+        CheckConstraint("quantity > 0", name="ck_sal_return_item_qty"),
+        CheckConstraint(
+            "quality_status IN ('QUALIFIED','DEFECTIVE','SCRAP')", name="ck_sal_return_item_quality"
+        ),
+    )
