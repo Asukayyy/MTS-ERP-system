@@ -30,7 +30,9 @@
 ## 三、落地规则（实现期生效，本周不实现）
 
 1. 由 **Provider（Owner）模块**在自己目录内新建 `contract.py` 暴露能力；Consumer **只依赖 Contract**，不 import Owner 的 `service.py` / `repository.py` / `models.py`。
-2. 禁止跨模块直读 / JOIN 其他模块的表；单据关联使用 **ID 引用**，不加跨模块外键约束。
+2. 禁止跨模块直读 / JOIN 其他模块的表；单据关联使用 **ID 引用**（`<entity>_id`，`BIGINT`）。
+   跨模块历史业务外键默认 `ON DELETE RESTRICT`（规格 §20）；多态引用只建索引不建外键。
+   基础数据被业务引用后不物理删除，改为 `status = INACTIVE`。
 3. 库存数量以 inventory 的接口为准，planning 不自行缓存库存字段。
 4. 每个接口的入参、出参、错误码（planning 区段 `3000~3999`）在第 3 周详细设计中定义。
 
