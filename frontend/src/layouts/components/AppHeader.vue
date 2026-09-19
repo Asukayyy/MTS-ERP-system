@@ -16,7 +16,7 @@ const appStore = useAppStore()
     <span class="app-header__title">{{ route.meta.title ?? '' }}</span>
 
     <div class="app-header__right">
-      <el-tag type="warning" effect="plain">基础框架 · 业务功能开发中</el-tag>
+      <el-tag type="success" effect="plain">转椅制造 MTS · 使用中</el-tag>
     </div>
   </div>
 </template>
