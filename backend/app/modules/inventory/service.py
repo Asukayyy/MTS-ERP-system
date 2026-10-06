@@ -487,6 +487,7 @@ def list_balances(
     material_id: Optional[int] = None,
     warehouse_id: Optional[int] = None,
     keyword: Optional[str] = None,
+    has_reorder_point: bool = False,
 ) -> Tuple[List[Dict[str, Any]], int]:
     """分页查询实时库存，附带物料编码/名称与可用量。"""
     material_ids: Optional[List[int]] = None
@@ -495,7 +496,8 @@ def list_balances(
 
         material_ids = [m["id"] for m in search_materials(db, keyword=keyword, limit=500)]
     rows, total = repository.list_balances(
-        db, page, page_size, material_id, warehouse_id, material_ids
+        db, page, page_size, material_id, warehouse_id, material_ids,
+        has_reorder_point=has_reorder_point,
     )
     materials = _material_map(db, [r.material_id for r in rows])
     warehouses = _warehouse_name_map(db, [r.warehouse_id for r in rows])

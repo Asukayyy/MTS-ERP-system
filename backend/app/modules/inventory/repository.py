@@ -126,6 +126,7 @@ def list_balances(
     material_id: Optional[int] = None,
     warehouse_id: Optional[int] = None,
     material_ids: Optional[Sequence[int]] = None,
+    has_reorder_point: bool = False,
 ):
     """分页查询结存。`material_ids` 用于把跨模块的关键字检索结果收敛到本模块 SQL。"""
     stmt = select(models.InvBalance).order_by(models.InvBalance.id.desc())
@@ -133,6 +134,8 @@ def list_balances(
         stmt = stmt.where(models.InvBalance.material_id == material_id)
     if warehouse_id:
         stmt = stmt.where(models.InvBalance.warehouse_id == warehouse_id)
+    if has_reorder_point:
+        stmt = stmt.where(models.InvBalance.reorder_point.is_not(None))
     if material_ids is not None:
         ids = [int(i) for i in material_ids]
         if not ids:

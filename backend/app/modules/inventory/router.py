@@ -140,6 +140,7 @@ def list_balances(
     material_id: Optional[int] = Query(default=None, description="物料ID过滤"),
     warehouse_id: Optional[int] = Query(default=None, description="仓库ID过滤"),
     keyword: Optional[str] = Query(default=None, description="物料编码/名称关键字"),
+    has_reorder_point: bool = Query(default=False, description="仅返回已配置订货点的结存"),
     db: Session = Depends(get_db),
 ) -> ApiResponse[PageData[schemas.BalanceOut]]:
     """分页查询实时库存（含现存量/锁定量/可用量/订货点）。"""
@@ -150,6 +151,7 @@ def list_balances(
         material_id=material_id,
         warehouse_id=warehouse_id,
         keyword=keyword,
+        has_reorder_point=has_reorder_point,
     )
     return success(
         PageData[schemas.BalanceOut](

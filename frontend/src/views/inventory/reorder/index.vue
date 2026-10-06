@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 
@@ -13,15 +13,11 @@ import type { Balance, ReorderSuggestion, RemoteOption } from '@/types/erp'
  * 订货点维护页：订货点 / 建议订货量直接维护在库存结存（inv_balance）上，
  * 不再使用独立的订货点规则表。
  */
-const { loading, rows, page, pageSize, query, load, search, reset, changePage, changeSize } =
+const { loading, rows, total, page, pageSize, query, load, search, reset, changePage, changeSize } =
   usePagedTable<Balance, { material_id: number | undefined; warehouse_id: number | undefined }>(
-    (params) => listBalances(params),
+    (params) => listBalances({ ...params, has_reorder_point: true }),
     { material_id: undefined, warehouse_id: undefined },
   )
-
-/** 只展示已配置订货点（reorder_point 不为空）的结存行 */
-const configuredRows = computed(() => rows.value.filter((r) => r.reorder_point != null))
-const configuredTotal = computed(() => configuredRows.value.length)
 
 async function loadMaterialOptions(keyword: string): Promise<RemoteOption[]> {
   const data = await listMaterials({ keyword, page: 1, page_size: 50 })
@@ -121,7 +117,7 @@ onMounted(() => {
         </el-form-item>
       </el-form>
 
-      <el-table v-loading="loading" :data="configuredRows" border size="small">
+      <el-table v-loading="loading" :data="rows" border size="small">
         <el-table-column label="物料编码" prop="material_code" min-width="130" />
         <el-table-column label="物料名称" prop="material_name" min-width="160" />
         <el-table-column label="仓库ID" prop="warehouse_id" width="100" align="right" />
@@ -141,7 +137,7 @@ onMounted(() => {
         <el-pagination
           :current-page="page"
           :page-size="pageSize"
-          :total="configuredTotal"
+          :total="total"
           :page-sizes="[10, 20, 50, 100]"
           layout="total, sizes, prev, pager, next"
           @current-change="changePage"
