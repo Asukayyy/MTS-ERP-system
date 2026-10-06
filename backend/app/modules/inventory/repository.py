@@ -87,93 +87,28 @@ def add_warehouse(db: Session, warehouse: models.InvWarehouse) -> models.InvWare
     return warehouse
 
 
-# ==================== 库位 ====================
-
-
-def list_locations(
-    db: Session,
-    page: int = 1,
-    page_size: int = 20,
-    warehouse_id: Optional[int] = None,
-    keyword: Optional[str] = None,
-    status: Optional[str] = None,
-):
-    """分页查询库位，支持仓库过滤与编码/名称关键字。"""
-    stmt = select(models.InvLocation).order_by(models.InvLocation.id.desc())
-    if warehouse_id:
-        stmt = stmt.where(models.InvLocation.warehouse_id == warehouse_id)
-    if keyword:
-        like = f"%{keyword}%"
-        stmt = stmt.where(
-            or_(
-                models.InvLocation.location_code.like(like),
-                models.InvLocation.location_name.like(like),
-            )
-        )
-    if status:
-        stmt = stmt.where(models.InvLocation.status == status)
-    return _paginate(db, stmt, page, page_size)
-
-
-def get_location(db: Session, location_id: int) -> Optional[models.InvLocation]:
-    return db.get(models.InvLocation, location_id)
-
-
-def get_location_by_code(
-    db: Session, warehouse_id: int, location_code: str
-) -> Optional[models.InvLocation]:
-    return db.scalar(
-        select(models.InvLocation).where(
-            models.InvLocation.warehouse_id == warehouse_id,
-            models.InvLocation.location_code == location_code,
-        )
-    )
-
-
-def add_location(db: Session, location: models.InvLocation) -> models.InvLocation:
-    db.add(location)
-    db.flush()
-    return location
-
-
-def delete_location(db: Session, location: models.InvLocation) -> None:
-    db.delete(location)
-
-
-def count_balances_by_location(db: Session, location_id: int) -> int:
-    """统计某库位下的结存记录数（删除库位前的引用校验）。"""
-    return count_where(db, models.InvBalance, models.InvBalance.location_id == location_id)
-
-
 # ==================== 库存结存 ====================
 
 
-def _balance_filter(warehouse_id: int, location_id: Optional[int], material_id: int):
-    """构造结存桶的唯一键条件（location_id 为 NULL 时要用 IS NULL）。"""
-    criteria = [
+def _balance_filter(warehouse_id: int, material_id: int):
+    """构造结存桶的唯一键条件 `(warehouse_id, material_id)`。"""
+    return [
         models.InvBalance.warehouse_id == warehouse_id,
         models.InvBalance.material_id == material_id,
     ]
-    if location_id is None:
-        criteria.append(models.InvBalance.location_id.is_(None))
-    else:
-        criteria.append(models.InvBalance.location_id == location_id)
-    return criteria
 
 
-def get_balance(
-    db: Session, warehouse_id: int, location_id: Optional[int], material_id: int
-) -> Optional[models.InvBalance]:
-    return db.scalar(select(models.InvBalance).where(*_balance_filter(warehouse_id, location_id, material_id)))
+def get_balance(db: Session, warehouse_id: int, material_id: int) -> Optional[models.InvBalance]:
+    return db.scalar(select(models.InvBalance).where(*_balance_filter(warehouse_id, material_id)))
 
 
 def get_balance_for_update(
-    db: Session, warehouse_id: int, location_id: Optional[int], material_id: int
+    db: Session, warehouse_id: int, material_id: int
 ) -> Optional[models.InvBalance]:
     """加行锁读取结存（`SELECT ... FOR UPDATE`），供出库/移库在事务内复核可用量。"""
     return db.scalar(
         select(models.InvBalance)
-        .where(*_balance_filter(warehouse_id, location_id, material_id))
+        .where(*_balance_filter(warehouse_id, material_id))
         .with_for_update()
     )
 
@@ -284,233 +219,105 @@ def aggregate_by_material(
 # ==================== 库存流水 ====================
 
 
-def next_txn_no(db: Session, biz_date: date) -> str:
-    """生成流水单号：`INV` + yyyyMMdd + 4 位流水号。"""
-    return _next_doc_no(
-        db,
-        models.InvTransaction,
-        models.InvTransaction.transaction_no,
-        f"INV{biz_date.strftime('%Y%m%d')}",
-    )
+# ==================== 库存操作单（移库 / 盘点） ====================
 
 
-def add_transaction(db: Session, txn: models.InvTransaction) -> models.InvTransaction:
-    db.add(txn)
-    return txn
+def next_operation_no(db: Session, biz_date: date, op_type: str) -> str:
+    """生成操作单号：移库 `TRF` + 日期 + 序号，盘点 `STK` + 日期 + 序号。"""
+    prefix = f"{'TRF' if op_type == 'TRANSFER' else 'STK'}{biz_date.strftime('%Y%m%d')}"
+    return _next_doc_no(db, models.InvStockOperation, models.InvStockOperation.operation_no, prefix)
 
 
-def get_transaction(db: Session, txn_id: int) -> Optional[models.InvTransaction]:
-    return db.get(models.InvTransaction, txn_id)
-
-
-def list_transactions(
+def list_stock_operations(
     db: Session,
     page: int = 1,
     page_size: int = 20,
-    transaction_type: Optional[str] = None,
-    material_id: Optional[int] = None,
+    op_type: Optional[str] = None,
+    status: Optional[str] = None,
     warehouse_id: Optional[int] = None,
-    source_type: Optional[str] = None,
-    date_from: Optional[date] = None,
-    date_to: Optional[date] = None,
-    source_no: Optional[str] = None,
-    material_ids: Optional[Sequence[int]] = None,
 ):
-    """分页查询库存流水，支持按类型/物料/仓库/来源/日期/来源单号过滤。"""
-    stmt = select(models.InvTransaction).order_by(models.InvTransaction.id.desc())
-    if transaction_type:
-        stmt = stmt.where(models.InvTransaction.transaction_type == transaction_type)
-    if material_id:
-        stmt = stmt.where(models.InvTransaction.material_id == material_id)
+    """分页查询库存操作单，可按类型 / 状态 / 仓库过滤。"""
+    stmt = select(models.InvStockOperation).order_by(models.InvStockOperation.id.desc())
+    if op_type:
+        stmt = stmt.where(models.InvStockOperation.op_type == op_type)
+    if status:
+        stmt = stmt.where(models.InvStockOperation.status == status)
     if warehouse_id:
-        stmt = stmt.where(models.InvTransaction.warehouse_id == warehouse_id)
-    if source_type:
-        stmt = stmt.where(models.InvTransaction.source_type == source_type)
-    if date_from:
-        stmt = stmt.where(models.InvTransaction.biz_date >= date_from)
-    if date_to:
-        stmt = stmt.where(models.InvTransaction.biz_date <= date_to)
-    if source_no:
-        stmt = stmt.where(models.InvTransaction.source_no.like(f"%{source_no}%"))
-    if material_ids is not None:
-        ids = [int(i) for i in material_ids]
-        if not ids:
-            return [], 0
-        stmt = stmt.where(models.InvTransaction.material_id.in_(ids))
+        stmt = stmt.where(
+            or_(
+                models.InvStockOperation.from_warehouse_id == warehouse_id,
+                models.InvStockOperation.to_warehouse_id == warehouse_id,
+                models.InvStockOperation.warehouse_id == warehouse_id,
+            )
+        )
     return _paginate(db, stmt, page, page_size)
+
+
+def get_stock_operation(db: Session, operation_id: int) -> Optional[models.InvStockOperation]:
+    return db.get(models.InvStockOperation, operation_id)
+
+
+def get_operation_by_no(db: Session, operation_no: str) -> Optional[models.InvStockOperation]:
+    return db.scalar(
+        select(models.InvStockOperation).where(models.InvStockOperation.operation_no == operation_no)
+    )
+
+
+def add_stock_operation(
+    db: Session, operation: models.InvStockOperation
+) -> models.InvStockOperation:
+    db.add(operation)
+    db.flush()
+    return operation
+
+
+def add_operation_item(
+    db: Session, item: models.InvStockOperationItem
+) -> models.InvStockOperationItem:
+    db.add(item)
+    return item
+
+
+def count_operations_by_type(db: Session, op_type: str) -> int:
+    return count_where(db, models.InvStockOperation, models.InvStockOperation.op_type == op_type)
 
 
 def aggregate_flow(
     db: Session, date_from: date, date_to: date
 ) -> List[Tuple[str, int, Decimal]]:
-    """按流水类型 + 物料汇总出入库数量。"""
+    """按操作类型 + 物料汇总库存变动数量（基于库存操作单）。
+
+    移库按明细 quantity 汇总；盘点按明细 (actual_qty - book_qty) 差异汇总。
+    """
+    op = models.InvStockOperation
+    item = models.InvStockOperationItem
     stmt = (
         select(
-            models.InvTransaction.transaction_type,
-            models.InvTransaction.material_id,
-            func.coalesce(func.sum(models.InvTransaction.quantity_change), 0),
+            op.op_type,
+            item.material_id,
+            func.coalesce(
+                func.sum(
+                    func.coalesce(item.quantity, 0)
+                    + func.coalesce(item.actual_qty, 0)
+                    - func.coalesce(item.book_qty, 0)
+                ),
+                0,
+            ),
         )
+        .select_from(item)
+        .join(op, op.id == item.operation_id)
         .where(
-            models.InvTransaction.biz_date >= date_from,
-            models.InvTransaction.biz_date <= date_to,
+            op.status == "COMPLETED",
+            op.op_date >= date_from,
+            op.op_date <= date_to,
         )
-        .group_by(models.InvTransaction.transaction_type, models.InvTransaction.material_id)
-        .order_by(models.InvTransaction.transaction_type, models.InvTransaction.material_id)
+        .group_by(op.op_type, item.material_id)
+        .order_by(op.op_type, item.material_id)
     )
     return [
-        (str(txn_type), int(mid), Decimal(str(total or 0)))
-        for txn_type, mid, total in db.execute(stmt)
+        (str(op_type), int(mid), Decimal(str(total or 0)))
+        for op_type, mid, total in db.execute(stmt)
     ]
-
-
-# ==================== 移库 ====================
-
-
-def next_transfer_no(db: Session, biz_date: date) -> str:
-    return _next_doc_no(
-        db,
-        models.InvTransfer,
-        models.InvTransfer.transfer_no,
-        f"TRF{biz_date.strftime('%Y%m%d')}",
-    )
-
-
-def list_transfers(
-    db: Session,
-    page: int = 1,
-    page_size: int = 20,
-    status: Optional[str] = None,
-    from_warehouse_id: Optional[int] = None,
-):
-    stmt = select(models.InvTransfer).order_by(models.InvTransfer.id.desc())
-    if status:
-        stmt = stmt.where(models.InvTransfer.status == status)
-    if from_warehouse_id:
-        stmt = stmt.where(models.InvTransfer.from_warehouse_id == from_warehouse_id)
-    return _paginate(db, stmt, page, page_size)
-
-
-def get_transfer(db: Session, transfer_id: int) -> Optional[models.InvTransfer]:
-    return db.get(models.InvTransfer, transfer_id)
-
-
-def get_transfer_by_no(db: Session, transfer_no: str) -> Optional[models.InvTransfer]:
-    return db.scalar(
-        select(models.InvTransfer).where(models.InvTransfer.transfer_no == transfer_no)
-    )
-
-
-def add_transfer(db: Session, transfer: models.InvTransfer) -> models.InvTransfer:
-    db.add(transfer)
-    db.flush()
-    return transfer
-
-
-def add_transfer_item(db: Session, item: models.InvTransferItem) -> models.InvTransferItem:
-    db.add(item)
-    return item
-
-
-# ==================== 盘点 ====================
-
-
-def next_stocktake_no(db: Session, biz_date: date) -> str:
-    return _next_doc_no(
-        db,
-        models.InvStocktake,
-        models.InvStocktake.stocktake_no,
-        f"STK{biz_date.strftime('%Y%m%d')}",
-    )
-
-
-def list_stocktakes(
-    db: Session,
-    page: int = 1,
-    page_size: int = 20,
-    warehouse_id: Optional[int] = None,
-    status: Optional[str] = None,
-):
-    stmt = select(models.InvStocktake).order_by(models.InvStocktake.id.desc())
-    if warehouse_id:
-        stmt = stmt.where(models.InvStocktake.warehouse_id == warehouse_id)
-    if status:
-        stmt = stmt.where(models.InvStocktake.status == status)
-    return _paginate(db, stmt, page, page_size)
-
-
-def get_stocktake(db: Session, stocktake_id: int) -> Optional[models.InvStocktake]:
-    return db.get(models.InvStocktake, stocktake_id)
-
-
-def get_stocktake_by_no(db: Session, stocktake_no: str) -> Optional[models.InvStocktake]:
-    return db.scalar(
-        select(models.InvStocktake).where(models.InvStocktake.stocktake_no == stocktake_no)
-    )
-
-
-def add_stocktake(db: Session, stocktake: models.InvStocktake) -> models.InvStocktake:
-    db.add(stocktake)
-    db.flush()
-    return stocktake
-
-
-def add_stocktake_item(
-    db: Session, item: models.InvStocktakeItem
-) -> models.InvStocktakeItem:
-    db.add(item)
-    return item
-
-
-# ==================== 订货点规则 ====================
-
-
-def list_reorder_rules(
-    db: Session,
-    page: int = 1,
-    page_size: int = 20,
-    status: Optional[str] = None,
-    material_id: Optional[int] = None,
-    warehouse_id: Optional[int] = None,
-):
-    stmt = select(models.InvReorderRule).order_by(models.InvReorderRule.id.desc())
-    if status:
-        stmt = stmt.where(models.InvReorderRule.status == status)
-    if material_id:
-        stmt = stmt.where(models.InvReorderRule.material_id == material_id)
-    if warehouse_id:
-        stmt = stmt.where(models.InvReorderRule.warehouse_id == warehouse_id)
-    return _paginate(db, stmt, page, page_size)
-
-
-def list_active_reorder_rules(db: Session) -> List[models.InvReorderRule]:
-    return list(
-        db.scalars(
-            select(models.InvReorderRule)
-            .where(models.InvReorderRule.status == "ACTIVE")
-            .order_by(models.InvReorderRule.id)
-        )
-    )
-
-
-def get_reorder_rule(db: Session, rule_id: int) -> Optional[models.InvReorderRule]:
-    return db.get(models.InvReorderRule, rule_id)
-
-
-def get_reorder_rule_by_pair(
-    db: Session, material_id: int, warehouse_id: int
-) -> Optional[models.InvReorderRule]:
-    return db.scalar(
-        select(models.InvReorderRule).where(
-            models.InvReorderRule.material_id == material_id,
-            models.InvReorderRule.warehouse_id == warehouse_id,
-        )
-    )
-
-
-def add_reorder_rule(db: Session, rule: models.InvReorderRule) -> models.InvReorderRule:
-    db.add(rule)
-    db.flush()
-    return rule
 
 
 # ==================== 补库需求 ====================

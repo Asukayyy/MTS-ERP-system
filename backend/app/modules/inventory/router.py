@@ -4,6 +4,9 @@
 - 路由层只做参数绑定、调用 service、提交事务，不写业务规则。
 - 每个改状态的动作在 service 内写操作日志，二者同一事务；本层成功后才 `db.commit()`。
 - 出参统一 `ApiResponse[...]`，分页统一 `PageData[...]`。
+
+5 张概念表：仓库（含库位字段）/ 结存（含订货点字段）/ 流水 / 补库需求 / 库存操作单
+（op_type 区分 TRANSFER / STOCKTAKE）。
 """
 
 from datetime import date
@@ -56,7 +59,7 @@ def list_warehouses(
 def create_warehouse(
     payload: schemas.WarehouseCreate, db: Session = Depends(get_db)
 ) -> ApiResponse[schemas.WarehouseOut]:
-    """新增仓库。"""
+    """新增仓库（库位编码/名称为文本字段，直接并入仓库表）。"""
     warehouse = service.create_warehouse(
         db,
         warehouse_code=payload.warehouse_code,
@@ -64,6 +67,8 @@ def create_warehouse(
         org_id=payload.org_id,
         manager_id=payload.manager_id,
         address=payload.address,
+        location_code=payload.location_code,
+        location_name=payload.location_name,
         remark=payload.remark,
         operator_id=payload.operator_id,
     )
@@ -79,7 +84,7 @@ def create_warehouse(
 def get_warehouse(
     warehouse_id: int, db: Session = Depends(get_db)
 ) -> ApiResponse[schemas.WarehouseOut]:
-    """按 ID 查询仓库详情（含库位）。"""
+    """按 ID 查询仓库详情。"""
     return success(service.get_warehouse(db, warehouse_id))
 
 
@@ -91,7 +96,7 @@ def get_warehouse(
 def update_warehouse(
     warehouse_id: int, payload: schemas.WarehouseUpdate, db: Session = Depends(get_db)
 ) -> ApiResponse[schemas.WarehouseOut]:
-    """修改仓库基本信息。"""
+    """修改仓库基本信息（含库位文本字段）。"""
     warehouse = service.update_warehouse(
         db,
         warehouse_id,
@@ -99,6 +104,8 @@ def update_warehouse(
         org_id=payload.org_id,
         manager_id=payload.manager_id,
         address=payload.address,
+        location_code=payload.location_code,
+        location_name=payload.location_name,
         remark=payload.remark,
         operator_id=payload.operator_id,
     )
@@ -122,91 +129,6 @@ def set_warehouse_status(
     return success(warehouse)
 
 
-# ==================== 库位 ====================
-
-
-@router.get("/locations", response_model=ApiResponse[PageData[schemas.LocationOut]], summary="库位列表")
-def list_locations(
-    params: PageParams = Depends(PageParams.as_dependency),
-    warehouse_id: Optional[int] = Query(default=None, description="仓库ID过滤"),
-    keyword: Optional[str] = Query(default=None, description="编码/名称关键字"),
-    status: Optional[str] = Query(default=None, description="状态"),
-    db: Session = Depends(get_db),
-) -> ApiResponse[PageData[schemas.LocationOut]]:
-    """分页查询库位。"""
-    rows, total = service.list_locations(
-        db, params.page, params.page_size, warehouse_id, keyword, status
-    )
-    return success(
-        PageData[schemas.LocationOut](
-            page=params.page, page_size=params.page_size, total=total, items=rows
-        )
-    )
-
-
-@router.post("/locations", response_model=ApiResponse[schemas.LocationOut], summary="新增库位")
-def create_location(
-    payload: schemas.LocationCreate, db: Session = Depends(get_db)
-) -> ApiResponse[schemas.LocationOut]:
-    """新增库位（同一仓库下编码唯一）。"""
-    location = service.create_location(
-        db,
-        location_code=payload.location_code,
-        location_name=payload.location_name,
-        warehouse_id=payload.warehouse_id,
-        remark=payload.remark,
-        operator_id=payload.operator_id,
-    )
-    db.commit()
-    return success(location)
-
-
-@router.put(
-    "/locations/{location_id}", response_model=ApiResponse[schemas.LocationOut], summary="修改库位"
-)
-def update_location(
-    location_id: int, payload: schemas.LocationUpdate, db: Session = Depends(get_db)
-) -> ApiResponse[schemas.LocationOut]:
-    """修改库位。"""
-    location = service.update_location(
-        db,
-        location_id,
-        location_name=payload.location_name,
-        remark=payload.remark,
-        operator_id=payload.operator_id,
-    )
-    db.commit()
-    return success(location)
-
-
-@router.delete(
-    "/locations/{location_id}", response_model=ApiResponse[dict], summary="删除库位"
-)
-def delete_location(
-    location_id: int,
-    operator_id: Optional[int] = Query(default=None, description="操作人ID"),
-    db: Session = Depends(get_db),
-) -> ApiResponse[dict]:
-    """删除库位（已被库存引用的库位禁止删除）。"""
-    service.delete_location(db, location_id, operator_id)
-    db.commit()
-    return success({"deleted": location_id})
-
-
-@router.patch(
-    "/locations/{location_id}/status",
-    response_model=ApiResponse[schemas.LocationOut],
-    summary="启用/停用库位",
-)
-def set_location_status(
-    location_id: int, payload: schemas.StatusUpdate, db: Session = Depends(get_db)
-) -> ApiResponse[schemas.LocationOut]:
-    """库位状态流转。"""
-    location = service.set_location_status(db, location_id, payload.status, payload.operator_id)
-    db.commit()
-    return success(location)
-
-
 # ==================== 实时库存 ====================
 
 
@@ -220,7 +142,7 @@ def list_balances(
     keyword: Optional[str] = Query(default=None, description="物料编码/名称关键字"),
     db: Session = Depends(get_db),
 ) -> ApiResponse[PageData[schemas.BalanceOut]]:
-    """分页查询实时库存（含现存量/锁定量/可用量）。"""
+    """分页查询实时库存（含现存量/锁定量/可用量/订货点）。"""
     rows, total = service.list_balances(
         db,
         page=params.page,
@@ -250,57 +172,40 @@ def get_available_stock(
     return success(service.get_available_stock(db, material_id, warehouse_id))
 
 
-# ==================== 库存流水 ====================
-
-
 @router.get(
-    "/transactions",
-    response_model=ApiResponse[PageData[schemas.TransactionOut]],
-    summary="库存流水列表",
+    "/balances/reorder-suggestions",
+    response_model=ApiResponse[List[schemas.ReorderSuggestionOut]],
+    summary="补库建议",
 )
-def list_transactions(
-    params: PageParams = Depends(PageParams.as_dependency),
-    transaction_type: Optional[str] = Query(default=None, description="IN/OUT/TRANSFER_IN/TRANSFER_OUT/ADJUST"),
-    material_id: Optional[int] = Query(default=None, description="物料ID"),
-    warehouse_id: Optional[int] = Query(default=None, description="仓库ID"),
-    source_type: Optional[str] = Query(default=None, description="来源业务类型"),
-    date_from: Optional[date] = Query(default=None, description="业务日期起"),
-    date_to: Optional[date] = Query(default=None, description="业务日期止"),
-    source_no: Optional[str] = Query(default=None, description="来源单号（模糊）"),
-    keyword: Optional[str] = Query(default=None, description="物料编码/名称关键字"),
+def list_reorder_suggestions(
     db: Session = Depends(get_db),
-) -> ApiResponse[PageData[schemas.TransactionOut]]:
-    """分页查询库存流水。"""
-    rows, total = service.list_transactions(
-        db,
-        page=params.page,
-        page_size=params.page_size,
-        transaction_type=transaction_type,
-        material_id=material_id,
-        warehouse_id=warehouse_id,
-        source_type=source_type,
-        date_from=date_from,
-        date_to=date_to,
-        source_no=source_no,
-        keyword=keyword,
-    )
-    return success(
-        PageData[schemas.TransactionOut](
-            page=params.page, page_size=params.page_size, total=total, items=rows
-        )
-    )
+) -> ApiResponse[List[schemas.ReorderSuggestionOut]]:
+    """对现存量低于订货点的结存给出补库建议。"""
+    return success(service.list_reorder_suggestions(db))
 
 
-@router.get(
-    "/transactions/{transaction_id}",
-    response_model=ApiResponse[schemas.TransactionOut],
-    summary="库存流水详情",
+@router.patch(
+    "/balances/{balance_id}/reorder",
+    response_model=ApiResponse[schemas.BalanceOut],
+    summary="更新结存订货点",
 )
-def get_transaction(
-    transaction_id: int, db: Session = Depends(get_db)
-) -> ApiResponse[schemas.TransactionOut]:
-    """按 ID 查询库存流水。"""
-    return success(service.get_transaction(db, transaction_id))
+def update_balance_reorder(
+    balance_id: int, payload: schemas.BalanceReorderUpdate, db: Session = Depends(get_db)
+) -> ApiResponse[schemas.BalanceOut]:
+    """直接维护结存上的订货点 / 建议订货量。"""
+    result = service.update_balance_reorder(
+        db,
+        balance_id,
+        reorder_point=payload.reorder_point,
+        reorder_quantity=payload.reorder_quantity,
+        operator_id=payload.operator_id,
+    )
+    db.commit()
+    return success(result)
+
+
+# ==================== 库存流水（已删除独立流水表，变动记录见库存操作单） ====================
+# inv_transaction 表已删除，库存变动记录通过 /stock-operations 查询移库/盘点单据。
 
 
 # ==================== 手工入 / 出库 ====================
@@ -318,7 +223,6 @@ def stock_increase(
         material_id=payload.material_id,
         quantity=payload.quantity,
         warehouse_id=payload.warehouse_id,
-        location_id=payload.location_id,
         source_module="inventory",
         source_type="MANUAL",
         unit_cost=payload.unit_cost,
@@ -342,7 +246,6 @@ def stock_decrease(
         material_id=payload.material_id,
         quantity=payload.quantity,
         warehouse_id=payload.warehouse_id,
-        location_id=payload.location_id,
         source_module="inventory",
         source_type="MANUAL",
         unit_cost=payload.unit_cost,
@@ -354,269 +257,105 @@ def stock_decrease(
     return success(result)
 
 
-# ==================== 移库 ====================
+# ==================== 库存操作单（移库 / 盘点） ====================
 
 
 @router.get(
-    "/transfers", response_model=ApiResponse[PageData[schemas.TransferOut]], summary="移库单列表"
+    "/stock-operations",
+    response_model=ApiResponse[PageData[schemas.StockOperationOut]],
+    summary="库存操作单列表（op_type=TRANSFER/STOCKTAKE）",
 )
-def list_transfers(
+def list_stock_operations(
     params: PageParams = Depends(PageParams.as_dependency),
-    status: Optional[str] = Query(default=None, description="状态"),
-    from_warehouse_id: Optional[int] = Query(default=None, description="源仓库ID"),
+    op_type: Optional[str] = Query(default=None, description="TRANSFER/STOCKTAKE"),
+    status: Optional[str] = Query(default=None, description="DRAFT/COMPLETED/CANCELLED"),
+    warehouse_id: Optional[int] = Query(default=None, description="涉及仓库ID"),
     db: Session = Depends(get_db),
-) -> ApiResponse[PageData[schemas.TransferOut]]:
-    """分页查询移库单。"""
-    rows, total = service.list_transfers(
-        db, params.page, params.page_size, status, from_warehouse_id
+) -> ApiResponse[PageData[schemas.StockOperationOut]]:
+    """分页查询库存操作单（移库与盘点合并，按 op_type 区分）。"""
+    rows, total = service.list_stock_operations(
+        db, params.page, params.page_size, op_type, status, warehouse_id
     )
     return success(
-        PageData[schemas.TransferOut](
+        PageData[schemas.StockOperationOut](
             page=params.page, page_size=params.page_size, total=total, items=rows
         )
     )
 
 
-@router.post("/transfers", response_model=ApiResponse[schemas.TransferOut], summary="新增移库单")
-def create_transfer(
-    payload: schemas.TransferCreate, db: Session = Depends(get_db)
-) -> ApiResponse[schemas.TransferOut]:
-    """新增移库单（单头 + 明细，状态 DRAFT）。"""
-    transfer = service.create_transfer(
+@router.post(
+    "/stock-operations",
+    response_model=ApiResponse[schemas.StockOperationOut],
+    summary="新增库存操作单",
+)
+def create_stock_operation(
+    payload: schemas.StockOperationCreate, db: Session = Depends(get_db)
+) -> ApiResponse[schemas.StockOperationOut]:
+    """新增库存操作单：op_type=TRANSFER 需源/目标仓库；STOCKTAKE 需仓库。
+
+    盘点明细的 book_qty 留空时按当前结存自动带出。
+    """
+    operation = service.create_stock_operation(
         db,
+        op_type=payload.op_type,
+        op_date=payload.op_date,
+        items=[item.model_dump() for item in payload.items],
+        operation_no=payload.operation_no,
         from_warehouse_id=payload.from_warehouse_id,
         to_warehouse_id=payload.to_warehouse_id,
-        transfer_date=payload.transfer_date,
-        items=[item.model_dump() for item in payload.items],
-        transfer_no=payload.transfer_no,
-        remark=payload.remark,
-        operator_id=payload.operator_id,
-    )
-    db.commit()
-    return success(transfer)
-
-
-@router.get(
-    "/transfers/{transfer_id}",
-    response_model=ApiResponse[schemas.TransferOut],
-    summary="移库单详情",
-)
-def get_transfer(transfer_id: int, db: Session = Depends(get_db)) -> ApiResponse[schemas.TransferOut]:
-    """按 ID 查询移库单（含明细）。"""
-    return success(service.get_transfer(db, transfer_id))
-
-
-@router.post(
-    "/transfers/{transfer_id}/confirm",
-    response_model=ApiResponse[schemas.TransferOut],
-    summary="确认移库",
-)
-def confirm_transfer(
-    transfer_id: int,
-    operator_id: Optional[int] = Query(default=None, description="操作人ID"),
-    db: Session = Depends(get_db),
-) -> ApiResponse[schemas.TransferOut]:
-    """确认移库：写 TRANSFER_OUT + TRANSFER_IN 两条流水，状态 → COMPLETED。"""
-    transfer = service.confirm_transfer(db, transfer_id, operator_id)
-    db.commit()
-    return success(transfer)
-
-
-@router.post(
-    "/transfers/{transfer_id}/cancel",
-    response_model=ApiResponse[schemas.TransferOut],
-    summary="取消移库",
-)
-def cancel_transfer(
-    transfer_id: int,
-    operator_id: Optional[int] = Query(default=None, description="操作人ID"),
-    db: Session = Depends(get_db),
-) -> ApiResponse[schemas.TransferOut]:
-    """取消移库单（仅 DRAFT 可取消）。"""
-    transfer = service.cancel_transfer(db, transfer_id, operator_id)
-    db.commit()
-    return success(transfer)
-
-
-# ==================== 盘点 ====================
-
-
-@router.get(
-    "/stocktakes", response_model=ApiResponse[PageData[schemas.StocktakeOut]], summary="盘点单列表"
-)
-def list_stocktakes(
-    params: PageParams = Depends(PageParams.as_dependency),
-    warehouse_id: Optional[int] = Query(default=None, description="仓库ID"),
-    status: Optional[str] = Query(default=None, description="状态"),
-    db: Session = Depends(get_db),
-) -> ApiResponse[PageData[schemas.StocktakeOut]]:
-    """分页查询盘点单。"""
-    rows, total = service.list_stocktakes(db, params.page, params.page_size, warehouse_id, status)
-    return success(
-        PageData[schemas.StocktakeOut](
-            page=params.page, page_size=params.page_size, total=total, items=rows
-        )
-    )
-
-
-@router.post("/stocktakes", response_model=ApiResponse[schemas.StocktakeOut], summary="新增盘点单")
-def create_stocktake(
-    payload: schemas.StocktakeCreate, db: Session = Depends(get_db)
-) -> ApiResponse[schemas.StocktakeOut]:
-    """新增盘点单（明细的 book_qty 留空时按当前结存自动带出）。"""
-    stocktake = service.create_stocktake(
-        db,
         warehouse_id=payload.warehouse_id,
-        stocktake_date=payload.stocktake_date,
-        items=[item.model_dump() for item in payload.items],
-        stocktake_no=payload.stocktake_no,
         remark=payload.remark,
         operator_id=payload.operator_id,
     )
     db.commit()
-    return success(stocktake)
+    return success(operation)
 
 
 @router.get(
-    "/stocktakes/{stocktake_id}",
-    response_model=ApiResponse[schemas.StocktakeOut],
-    summary="盘点单详情",
+    "/stock-operations/{operation_id}",
+    response_model=ApiResponse[schemas.StockOperationOut],
+    summary="库存操作单详情",
 )
-def get_stocktake(
-    stocktake_id: int, db: Session = Depends(get_db)
-) -> ApiResponse[schemas.StocktakeOut]:
-    """按 ID 查询盘点单（含明细）。"""
-    return success(service.get_stocktake(db, stocktake_id))
+def get_stock_operation(
+    operation_id: int, db: Session = Depends(get_db)
+) -> ApiResponse[schemas.StockOperationOut]:
+    """按 ID 查询库存操作单（含明细）。"""
+    return success(service.get_stock_operation(db, operation_id))
 
 
 @router.post(
-    "/stocktakes/{stocktake_id}/confirm",
-    response_model=ApiResponse[schemas.StocktakeOut],
-    summary="确认盘点",
+    "/stock-operations/{operation_id}/confirm",
+    response_model=ApiResponse[schemas.StockOperationOut],
+    summary="确认库存操作单",
 )
-def confirm_stocktake(
-    stocktake_id: int,
+def confirm_stock_operation(
+    operation_id: int,
     operator_id: Optional[int] = Query(default=None, description="操作人ID"),
     db: Session = Depends(get_db),
-) -> ApiResponse[schemas.StocktakeOut]:
-    """确认盘点：按差异写 ADJUST 流水，状态 → COMPLETED。"""
-    stocktake = service.confirm_stocktake(db, stocktake_id, operator_id)
+) -> ApiResponse[schemas.StockOperationOut]:
+    """确认执行：TRANSFER 写 TRANSFER_OUT + TRANSFER_IN；STOCKTAKE 按差异写 ADJUST。
+
+    状态 → COMPLETED；库存不足返回 5001，整单不落流水。
+    """
+    operation = service.confirm_stock_operation(db, operation_id, operator_id)
     db.commit()
-    return success(stocktake)
+    return success(operation)
 
 
 @router.post(
-    "/stocktakes/{stocktake_id}/cancel",
-    response_model=ApiResponse[schemas.StocktakeOut],
-    summary="取消盘点",
+    "/stock-operations/{operation_id}/cancel",
+    response_model=ApiResponse[schemas.StockOperationOut],
+    summary="取消库存操作单",
 )
-def cancel_stocktake(
-    stocktake_id: int,
+def cancel_stock_operation(
+    operation_id: int,
     operator_id: Optional[int] = Query(default=None, description="操作人ID"),
     db: Session = Depends(get_db),
-) -> ApiResponse[schemas.StocktakeOut]:
-    """取消盘点单（仅 DRAFT 可取消）。"""
-    stocktake = service.cancel_stocktake(db, stocktake_id, operator_id)
+) -> ApiResponse[schemas.StockOperationOut]:
+    """取消库存操作单（仅 DRAFT 可取消）。"""
+    operation = service.cancel_stock_operation(db, operation_id, operator_id)
     db.commit()
-    return success(stocktake)
-
-
-# ==================== 订货点规则 ====================
-
-
-@router.get(
-    "/reorder-rules",
-    response_model=ApiResponse[PageData[schemas.ReorderRuleOut]],
-    summary="订货点规则列表",
-)
-def list_reorder_rules(
-    params: PageParams = Depends(PageParams.as_dependency),
-    status: Optional[str] = Query(default=None, description="状态"),
-    material_id: Optional[int] = Query(default=None, description="物料ID"),
-    warehouse_id: Optional[int] = Query(default=None, description="仓库ID"),
-    db: Session = Depends(get_db),
-) -> ApiResponse[PageData[schemas.ReorderRuleOut]]:
-    """分页查询订货点规则。"""
-    rows, total = service.list_reorder_rules(
-        db,
-        page=params.page,
-        page_size=params.page_size,
-        status=status,
-        material_id=material_id,
-        warehouse_id=warehouse_id,
-    )
-    return success(
-        PageData[schemas.ReorderRuleOut](
-            page=params.page, page_size=params.page_size, total=total, items=rows
-        )
-    )
-
-
-@router.get(
-    "/reorder-rules/suggestions",
-    response_model=ApiResponse[List[schemas.ReorderSuggestionOut]],
-    summary="补库建议",
-)
-def list_reorder_suggestions(
-    db: Session = Depends(get_db),
-) -> ApiResponse[List[schemas.ReorderSuggestionOut]]:
-    """对现存量低于订货点的 ACTIVE 规则给出补库建议。"""
-    return success(service.list_reorder_suggestions(db))
-
-
-@router.post(
-    "/reorder-rules", response_model=ApiResponse[schemas.ReorderRuleOut], summary="新增订货点规则"
-)
-def create_reorder_rule(
-    payload: schemas.ReorderRuleCreate, db: Session = Depends(get_db)
-) -> ApiResponse[schemas.ReorderRuleOut]:
-    """新增订货点规则（物料+仓库唯一）。"""
-    rule = service.create_reorder_rule(
-        db,
-        material_id=payload.material_id,
-        warehouse_id=payload.warehouse_id,
-        reorder_point=payload.reorder_point,
-        reorder_quantity=payload.reorder_quantity,
-        remark=payload.remark,
-        operator_id=payload.operator_id,
-    )
-    db.commit()
-    return success(rule)
-
-
-@router.put(
-    "/reorder-rules/{rule_id}",
-    response_model=ApiResponse[schemas.ReorderRuleOut],
-    summary="修改订货点规则",
-)
-def update_reorder_rule(
-    rule_id: int, payload: schemas.ReorderRuleUpdate, db: Session = Depends(get_db)
-) -> ApiResponse[schemas.ReorderRuleOut]:
-    """修改订货点与建议订货量。"""
-    rule = service.update_reorder_rule(
-        db,
-        rule_id,
-        reorder_point=payload.reorder_point,
-        reorder_quantity=payload.reorder_quantity,
-        remark=payload.remark,
-        operator_id=payload.operator_id,
-    )
-    db.commit()
-    return success(rule)
-
-
-@router.patch(
-    "/reorder-rules/{rule_id}/status",
-    response_model=ApiResponse[schemas.ReorderRuleOut],
-    summary="启用/停用订货点规则",
-)
-def set_reorder_rule_status(
-    rule_id: int, payload: schemas.StatusUpdate, db: Session = Depends(get_db)
-) -> ApiResponse[schemas.ReorderRuleOut]:
-    """订货点规则状态流转。"""
-    rule = service.set_reorder_rule_status(db, rule_id, payload.status, payload.operator_id)
-    db.commit()
-    return success(rule)
+    return success(operation)
 
 
 # ==================== 补库需求 ====================
@@ -797,7 +536,6 @@ def preview_initial_stock_import(
         source=payload.source,
         warehouse_id=payload.warehouse_id,
         warehouse_code=payload.warehouse_code,
-        location_id=payload.location_id,
         rows=[row.model_dump() for row in payload.rows],
     )
     return success(result)
@@ -817,7 +555,6 @@ def confirm_initial_stock_import(
         source=payload.source,
         warehouse_id=payload.warehouse_id,
         warehouse_code=payload.warehouse_code,
-        location_id=payload.location_id,
         rows=[row.model_dump() for row in payload.rows],
         operator_id=payload.operator_id,
     )

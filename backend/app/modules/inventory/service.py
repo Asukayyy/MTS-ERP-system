@@ -18,6 +18,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -39,7 +40,6 @@ CODE_STATUS_INVALID = 5003  # 单据状态不允许该操作
 CODE_NOT_FOUND = 5004  # 资源不存在
 CODE_DUPLICATE = 5005  # 唯一性冲突
 CODE_BALANCE_NEGATIVE = 5006  # 调整后库存会为负
-CODE_LOCATION_IN_USE = 5007  # 库位已被库存引用，禁止删除
 
 MODULE = "inventory"
 
@@ -83,15 +83,6 @@ def _require_material(db: Session, material_id: int) -> Dict[str, Any]:
     return material
 
 
-def _require_location(db: Session, location_id: int, warehouse_id: int) -> models.InvLocation:
-    location = repository.get_location(db, location_id)
-    if not location:
-        raise BusinessException(CODE_NOT_FOUND, f"库位不存在：{location_id}")
-    if location.warehouse_id != warehouse_id:
-        raise BusinessException(CODE_PARAM_INVALID, "库位不属于指定仓库")
-    return location
-
-
 def _validate_source_type(source_type: str) -> None:
     if source_type not in _VALID_SOURCE_TYPES:
         raise BusinessException(CODE_PARAM_INVALID, f"非法的来源业务类型：{source_type}")
@@ -121,73 +112,21 @@ def _balance_dict(balance: models.InvBalance) -> Dict[str, Any]:
 # ==================== 库存引擎（核心） ====================
 
 
-def _lock_or_create_balance(
-    db: Session, warehouse_id: int, location_id: Optional[int], material_id: int
-) -> models.InvBalance:
+def _lock_or_create_balance(db: Session, warehouse_id: int, material_id: int) -> models.InvBalance:
     """取或建结存桶，并对已存在的行加锁（`SELECT ... FOR UPDATE`）。"""
-    balance = repository.get_balance_for_update(db, warehouse_id, location_id, material_id)
+    balance = repository.get_balance_for_update(db, warehouse_id, material_id)
     if balance is None:
         balance = models.InvBalance(
             warehouse_id=warehouse_id,
-            location_id=location_id,
             material_id=material_id,
             quantity=Decimal("0"),
             locked_quantity=Decimal("0"),
+            reorder_point=None,
+            reorder_quantity=None,
         )
         repository.add_balance(db, balance)
-        balance = repository.get_balance_for_update(
-            db, warehouse_id, location_id, material_id
-        ) or balance
+        balance = repository.get_balance_for_update(db, warehouse_id, material_id) or balance
     return balance
-
-
-def _append_transaction(
-    db: Session,
-    *,
-    transaction_type: str,
-    material_id: int,
-    warehouse_id: int,
-    location_id: Optional[int],
-    quantity_change: Decimal,
-    quantity_after: Decimal,
-    unit_cost: Decimal,
-    biz_date: date,
-    source_module: str,
-    source_type: str,
-    source_reference_id: Optional[int],
-    source_no: Optional[str],
-    operator_id: Optional[int],
-    remark: Optional[str],
-) -> models.InvTransaction:
-    """写入一条库存流水。单号冲突时重取单号重试一次（保存点回滚，不影响外层事务）。"""
-    txn = models.InvTransaction(
-        transaction_no=repository.next_txn_no(db, biz_date),
-        transaction_type=transaction_type,
-        material_id=material_id,
-        warehouse_id=warehouse_id,
-        location_id=location_id,
-        quantity_change=quantity_change,
-        quantity_after=quantity_after,
-        unit_cost=unit_cost,
-        biz_date=biz_date,
-        source_module=source_module,
-        source_type=source_type,
-        source_reference_id=source_reference_id,
-        source_no=source_no,
-        operator_id=operator_id,
-        remark=remark,
-        created_by=operator_id,
-    )
-    try:
-        with db.begin_nested():
-            db.add(txn)
-            db.flush()
-    except IntegrityError:
-        txn.transaction_no = repository.next_txn_no(db, biz_date)
-        with db.begin_nested():
-            db.add(txn)
-            db.flush()
-    return txn
 
 
 def _validate_stock_args(
@@ -196,7 +135,6 @@ def _validate_stock_args(
     material_id: int,
     quantity: Decimal,
     warehouse_id: int,
-    location_id: Optional[int],
     source_module: str,
     source_type: str,
 ) -> Decimal:
@@ -208,8 +146,6 @@ def _validate_stock_args(
     _validate_source_type(source_type)
     _require_warehouse(db, warehouse_id)
     _require_material(db, material_id)
-    if location_id is not None:
-        _require_location(db, location_id, warehouse_id)
     return qty
 
 
@@ -220,7 +156,6 @@ def _increase_stock(
     material_id: int,
     quantity: Decimal,
     warehouse_id: int,
-    location_id: Optional[int] = None,
     source_module: str,
     source_type: str,
     source_reference_id: Optional[int] = None,
@@ -236,34 +171,14 @@ def _increase_stock(
         material_id=material_id,
         quantity=quantity,
         warehouse_id=warehouse_id,
-        location_id=location_id,
         source_module=source_module,
         source_type=source_type,
     )
     biz = biz_date or date.today()
-    balance = _lock_or_create_balance(db, warehouse_id, location_id, material_id)
+    balance = _lock_or_create_balance(db, warehouse_id, material_id)
     balance.quantity = _as_decimal(balance.quantity) + qty
     balance.updated_at_txn = datetime.now()
-    txn = _append_transaction(
-        db,
-        transaction_type=transaction_type,
-        material_id=material_id,
-        warehouse_id=warehouse_id,
-        location_id=location_id,
-        quantity_change=qty,
-        quantity_after=balance.quantity,
-        unit_cost=_as_decimal(unit_cost),
-        biz_date=biz,
-        source_module=source_module,
-        source_type=source_type,
-        source_reference_id=source_reference_id,
-        source_no=source_no,
-        operator_id=operator_id,
-        remark=remark,
-    )
     return {
-        "transaction_id": txn.id,
-        "transaction_no": txn.transaction_no,
         "quantity_after": _as_decimal(balance.quantity),
     }
 
@@ -274,7 +189,6 @@ def increase_stock(
     material_id: int,
     quantity: Decimal,
     warehouse_id: int,
-    location_id: Optional[int] = None,
     source_module: str,
     source_type: str,
     source_reference_id: Optional[int] = None,
@@ -291,7 +205,6 @@ def increase_stock(
         material_id=material_id,
         quantity=quantity,
         warehouse_id=warehouse_id,
-        location_id=location_id,
         source_module=source_module,
         source_type=source_type,
         source_reference_id=source_reference_id,
@@ -310,7 +223,6 @@ def _decrease_stock(
     material_id: int,
     quantity: Decimal,
     warehouse_id: int,
-    location_id: Optional[int] = None,
     source_module: str,
     source_type: str,
     source_reference_id: Optional[int] = None,
@@ -326,12 +238,11 @@ def _decrease_stock(
         material_id=material_id,
         quantity=quantity,
         warehouse_id=warehouse_id,
-        location_id=location_id,
         source_module=source_module,
         source_type=source_type,
     )
     biz = biz_date or date.today()
-    balance = repository.get_balance_for_update(db, warehouse_id, location_id, material_id)
+    balance = repository.get_balance_for_update(db, warehouse_id, material_id)
     if balance is None:
         raise BusinessException(
             CODE_STOCK_INSUFFICIENT,
@@ -349,26 +260,7 @@ def _decrease_stock(
         raise BusinessException(CODE_STOCK_INSUFFICIENT, "库存不足：出库后将出现负库存")
     balance.quantity = new_qty
     balance.updated_at_txn = datetime.now()
-    txn = _append_transaction(
-        db,
-        transaction_type=transaction_type,
-        material_id=material_id,
-        warehouse_id=warehouse_id,
-        location_id=location_id,
-        quantity_change=-qty,
-        quantity_after=new_qty,
-        unit_cost=_as_decimal(unit_cost),
-        biz_date=biz,
-        source_module=source_module,
-        source_type=source_type,
-        source_reference_id=source_reference_id,
-        source_no=source_no,
-        operator_id=operator_id,
-        remark=remark,
-    )
     return {
-        "transaction_id": txn.id,
-        "transaction_no": txn.transaction_no,
         "quantity_after": new_qty,
     }
 
@@ -379,7 +271,6 @@ def decrease_stock(
     material_id: int,
     quantity: Decimal,
     warehouse_id: int,
-    location_id: Optional[int] = None,
     source_module: str,
     source_type: str,
     source_reference_id: Optional[int] = None,
@@ -396,7 +287,6 @@ def decrease_stock(
         material_id=material_id,
         quantity=quantity,
         warehouse_id=warehouse_id,
-        location_id=location_id,
         source_module=source_module,
         source_type=source_type,
         source_reference_id=source_reference_id,
@@ -413,7 +303,6 @@ def _apply_adjust(
     *,
     material_id: int,
     warehouse_id: int,
-    location_id: Optional[int],
     delta: Decimal,
     unit_cost: Decimal = Decimal("0"),
     biz_date: Optional[date] = None,
@@ -423,10 +312,10 @@ def _apply_adjust(
     source_no: Optional[str] = None,
     operator_id: Optional[int] = None,
     remark: Optional[str] = None,
-) -> models.InvTransaction:
-    """盘点调整：写 `ADJUST` 流水（delta 可为负，调整后结存不得为负）。"""
+) -> Decimal:
+    """盘点调整：直接改结存（delta 可为负，调整后结存不得为负）。"""
     biz = biz_date or date.today()
-    balance = _lock_or_create_balance(db, warehouse_id, location_id, material_id)
+    balance = _lock_or_create_balance(db, warehouse_id, material_id)
     new_qty = _as_decimal(balance.quantity) + delta
     if new_qty < 0:
         raise BusinessException(
@@ -435,23 +324,7 @@ def _apply_adjust(
         )
     balance.quantity = new_qty
     balance.updated_at_txn = datetime.now()
-    return _append_transaction(
-        db,
-        transaction_type="ADJUST",
-        material_id=material_id,
-        warehouse_id=warehouse_id,
-        location_id=location_id,
-        quantity_change=delta,
-        quantity_after=new_qty,
-        unit_cost=_as_decimal(unit_cost),
-        biz_date=biz,
-        source_module=source_module,
-        source_type=source_type,
-        source_reference_id=source_reference_id,
-        source_no=source_no,
-        operator_id=operator_id,
-        remark=remark,
-    )
+    return new_qty
 
 
 # ---- 只读查询（契约导出） ----
@@ -510,6 +383,8 @@ def create_warehouse(
     org_id: Optional[int] = None,
     manager_id: Optional[int] = None,
     address: Optional[str] = None,
+    location_code: Optional[str] = None,
+    location_name: Optional[str] = None,
     remark: Optional[str] = None,
     operator_id: Optional[int] = None,
 ) -> models.InvWarehouse:
@@ -521,6 +396,8 @@ def create_warehouse(
         org_id=org_id,
         manager_id=manager_id,
         address=address,
+        location_code=location_code,
+        location_name=location_name,
         status="ACTIVE",
         remark=remark,
         created_by=operator_id,
@@ -546,6 +423,8 @@ def update_warehouse(
     org_id: Optional[int] = None,
     manager_id: Optional[int] = None,
     address: Optional[str] = None,
+    location_code: Optional[str] = None,
+    location_name: Optional[str] = None,
     remark: Optional[str] = None,
     operator_id: Optional[int] = None,
 ) -> models.InvWarehouse:
@@ -558,6 +437,10 @@ def update_warehouse(
         warehouse.manager_id = manager_id
     if address is not None:
         warehouse.address = address
+    if location_code is not None:
+        warehouse.location_code = location_code
+    if location_name is not None:
+        warehouse.location_name = location_name
     if remark is not None:
         warehouse.remark = remark
     warehouse.updated_by = operator_id
@@ -591,125 +474,6 @@ def set_warehouse_status(
         detail=f"仓库 {warehouse.warehouse_code} 状态改为 {status}",
     )
     return warehouse
-
-
-# ==================== 库位 ====================
-
-
-def list_locations(
-    db: Session,
-    page: int = 1,
-    page_size: int = 20,
-    warehouse_id: Optional[int] = None,
-    keyword: Optional[str] = None,
-    status: Optional[str] = None,
-):
-    return repository.list_locations(db, page, page_size, warehouse_id, keyword, status)
-
-
-def get_location(db: Session, location_id: int) -> models.InvLocation:
-    location = repository.get_location(db, location_id)
-    if not location:
-        raise BusinessException(CODE_NOT_FOUND, f"库位不存在：{location_id}")
-    return location
-
-
-def create_location(
-    db: Session,
-    *,
-    location_code: str,
-    location_name: str,
-    warehouse_id: int,
-    remark: Optional[str] = None,
-    operator_id: Optional[int] = None,
-) -> models.InvLocation:
-    _require_warehouse(db, warehouse_id)
-    if repository.get_location_by_code(db, warehouse_id, location_code):
-        raise BusinessException(
-            CODE_DUPLICATE, f"该仓库下库位编码已存在：{location_code}"
-        )
-    location = models.InvLocation(
-        location_code=location_code,
-        location_name=location_name,
-        warehouse_id=warehouse_id,
-        status="ACTIVE",
-        remark=remark,
-        created_by=operator_id,
-    )
-    repository.add_location(db, location)
-    log_operation(
-        db,
-        module=MODULE,
-        action="CREATE",
-        target_type="inv_location",
-        target_id=location.id,
-        operator_id=operator_id,
-        detail=f"新增库位 {location_code}",
-    )
-    return location
-
-
-def update_location(
-    db: Session,
-    location_id: int,
-    *,
-    location_name: Optional[str] = None,
-    remark: Optional[str] = None,
-    operator_id: Optional[int] = None,
-) -> models.InvLocation:
-    location = get_location(db, location_id)
-    if location_name is not None:
-        location.location_name = location_name
-    if remark is not None:
-        location.remark = remark
-    location.updated_by = operator_id
-    log_operation(
-        db,
-        module=MODULE,
-        action="UPDATE",
-        target_type="inv_location",
-        target_id=location.id,
-        operator_id=operator_id,
-        detail=f"修改库位 {location.location_code}",
-    )
-    return location
-
-
-def set_location_status(
-    db: Session, location_id: int, status: str, operator_id: Optional[int] = None
-) -> models.InvLocation:
-    if status not in _RECORD_STATUS:
-        raise BusinessException(CODE_PARAM_INVALID, f"非法状态：{status}")
-    location = get_location(db, location_id)
-    location.status = status
-    location.updated_by = operator_id
-    log_operation(
-        db,
-        module=MODULE,
-        action="STATUS",
-        target_type="inv_location",
-        target_id=location.id,
-        operator_id=operator_id,
-        detail=f"库位 {location.location_code} 状态改为 {status}",
-    )
-    return location
-
-
-def delete_location(db: Session, location_id: int, operator_id: Optional[int] = None) -> None:
-    location = get_location(db, location_id)
-    if repository.count_balances_by_location(db, location_id) > 0:
-        raise BusinessException(CODE_LOCATION_IN_USE, "库位已被库存引用，禁止删除")
-    code = location.location_code
-    repository.delete_location(db, location)
-    log_operation(
-        db,
-        module=MODULE,
-        action="DELETE",
-        target_type="inv_location",
-        target_id=location_id,
-        operator_id=operator_id,
-        detail=f"删除库位 {code}",
-    )
 
 
 # ==================== 实时库存查询 ====================
@@ -746,7 +510,8 @@ def list_balances(
                 "material_name": material.get("material_name"),
                 "warehouse_id": row.warehouse_id,
                 "warehouse_name": warehouses.get(row.warehouse_id),
-                "location_id": row.location_id,
+                "reorder_point": row.reorder_point,
+                "reorder_quantity": row.reorder_quantity,
                 **_balance_dict(row),
             }
         )
@@ -768,529 +533,313 @@ def get_available_stock(
     }
 
 
-# ==================== 库存流水查询 ====================
+# ==================== 库存变动记录（从业务单据聚合） ====================
+# inv_transaction 流水表已删除。库存变动记录可通过库存操作单（移库/盘点）查询，
+# 手工入/出库直接改结存、不留单据；前端流水页复用 list_stock_operations 展示。
 
 
-def list_transactions(
+# ==================== 库存操作单（移库 / 盘点） ====================
+
+
+def list_stock_operations(
+    db: Session,
+    page: int = 1,
+    page_size: int = 20,
+    op_type: Optional[str] = None,
+    status: Optional[str] = None,
+    warehouse_id: Optional[int] = None,
+):
+    return repository.list_stock_operations(db, page, page_size, op_type, status, warehouse_id)
+
+
+def get_stock_operation(db: Session, operation_id: int) -> models.InvStockOperation:
+    operation = repository.get_stock_operation(db, operation_id)
+    if not operation:
+        raise BusinessException(CODE_NOT_FOUND, f"库存操作单不存在：{operation_id}")
+    return operation
+
+
+def create_stock_operation(
     db: Session,
     *,
-    page: int = 1,
-    page_size: int = 20,
-    transaction_type: Optional[str] = None,
-    material_id: Optional[int] = None,
-    warehouse_id: Optional[int] = None,
-    source_type: Optional[str] = None,
-    date_from: Optional[date] = None,
-    date_to: Optional[date] = None,
-    source_no: Optional[str] = None,
-    keyword: Optional[str] = None,
-) -> Tuple[List[Dict[str, Any]], int]:
-    material_ids: Optional[List[int]] = None
-    if keyword:
-        from app.modules.system.contract import search_materials
-
-        material_ids = [m["id"] for m in search_materials(db, keyword=keyword, limit=500)]
-    rows, total = repository.list_transactions(
-        db,
-        page,
-        page_size,
-        transaction_type,
-        material_id,
-        warehouse_id,
-        source_type,
-        date_from,
-        date_to,
-        source_no,
-        material_ids,
-    )
-    materials = _material_map(db, [r.material_id for r in rows])
-    items = [_transaction_dict(row, materials) for row in rows]
-    return items, total
-
-
-def _transaction_dict(
-    row: models.InvTransaction, materials: Dict[int, Dict[str, Any]]
-) -> Dict[str, Any]:
-    material = materials.get(row.material_id, {})
-    return {
-        "id": row.id,
-        "transaction_no": row.transaction_no,
-        "transaction_type": row.transaction_type,
-        "material_id": row.material_id,
-        "material_code": material.get("material_code"),
-        "material_name": material.get("material_name"),
-        "warehouse_id": row.warehouse_id,
-        "location_id": row.location_id,
-        "quantity_change": _as_decimal(row.quantity_change),
-        "quantity_after": _as_decimal(row.quantity_after),
-        "unit_cost": _as_decimal(row.unit_cost),
-        "biz_date": row.biz_date,
-        "source_module": row.source_module,
-        "source_type": row.source_type,
-        "source_reference_id": row.source_reference_id,
-        "source_no": row.source_no,
-        "operator_id": row.operator_id,
-        "remark": row.remark,
-        "created_at": row.created_at,
-    }
-
-
-def get_transaction(db: Session, transaction_id: int) -> Dict[str, Any]:
-    row = repository.get_transaction(db, transaction_id)
-    if not row:
-        raise BusinessException(CODE_NOT_FOUND, f"库存流水不存在：{transaction_id}")
-    return _transaction_dict(row, _material_map(db, [row.material_id]))
-
-
-# ==================== 移库 ====================
-
-
-def list_transfers(
-    db: Session,
-    page: int = 1,
-    page_size: int = 20,
-    status: Optional[str] = None,
+    op_type: str,
+    op_date: date,
+    items: Sequence[Mapping[str, Any]],
+    operation_no: Optional[str] = None,
     from_warehouse_id: Optional[int] = None,
-):
-    return repository.list_transfers(db, page, page_size, status, from_warehouse_id)
-
-
-def get_transfer(db: Session, transfer_id: int) -> models.InvTransfer:
-    transfer = repository.get_transfer(db, transfer_id)
-    if not transfer:
-        raise BusinessException(CODE_NOT_FOUND, f"移库单不存在：{transfer_id}")
-    return transfer
-
-
-def create_transfer(
-    db: Session,
-    *,
-    from_warehouse_id: int,
-    to_warehouse_id: int,
-    transfer_date: date,
-    items: Sequence[Mapping[str, Any]],
-    transfer_no: Optional[str] = None,
+    to_warehouse_id: Optional[int] = None,
+    warehouse_id: Optional[int] = None,
     remark: Optional[str] = None,
     operator_id: Optional[int] = None,
-) -> models.InvTransfer:
+) -> models.InvStockOperation:
+    """新增库存操作单（单头 + 明细，状态 DRAFT）。
+
+    - TRANSFER：必填 from_warehouse_id / to_warehouse_id，明细带 quantity；
+    - STOCKTAKE：必填 warehouse_id，明细带 actual_qty（book_qty 缺省按当前结存自动带出）。
+    """
+    if op_type not in ("TRANSFER", "STOCKTAKE"):
+        raise BusinessException(CODE_PARAM_INVALID, f"非法操作类型：{op_type}")
     if not items:
-        raise BusinessException(CODE_PARAM_INVALID, "移库单至少需要一条明细")
-    _require_warehouse(db, from_warehouse_id)
-    _require_warehouse(db, to_warehouse_id)
-    if transfer_no and repository.get_transfer_by_no(db, transfer_no):
-        raise BusinessException(CODE_DUPLICATE, f"移库单号已存在：{transfer_no}")
-    number = transfer_no or repository.next_transfer_no(db, transfer_date)
-    transfer = models.InvTransfer(
-        transfer_no=number,
-        from_warehouse_id=from_warehouse_id,
-        to_warehouse_id=to_warehouse_id,
-        transfer_date=transfer_date,
+        raise BusinessException(CODE_PARAM_INVALID, "操作单至少需要一条明细")
+    if operation_no and repository.get_operation_by_no(db, operation_no):
+        raise BusinessException(CODE_DUPLICATE, f"操作单号已存在：{operation_no}")
+
+    if op_type == "TRANSFER":
+        if not from_warehouse_id or not to_warehouse_id:
+            raise BusinessException(CODE_PARAM_INVALID, "移库单必须指定源仓库与目标仓库")
+        _require_warehouse(db, from_warehouse_id)
+        _require_warehouse(db, to_warehouse_id)
+        if from_warehouse_id == to_warehouse_id:
+            raise BusinessException(CODE_PARAM_INVALID, "移库源仓库与目标仓库不能相同")
+        warehouse = None
+    else:
+        if not warehouse_id:
+            raise BusinessException(CODE_PARAM_INVALID, "盘点单必须指定仓库")
+        warehouse = _require_warehouse(db, warehouse_id)
+
+    number = operation_no or repository.next_operation_no(db, op_date, op_type)
+    operation = models.InvStockOperation(
+        operation_no=number,
+        op_type=op_type,
+        from_warehouse_id=from_warehouse_id if op_type == "TRANSFER" else None,
+        to_warehouse_id=to_warehouse_id if op_type == "TRANSFER" else None,
+        warehouse_id=warehouse_id if op_type == "STOCKTAKE" else None,
+        op_date=op_date,
         status="DRAFT",
         remark=remark,
         created_by=operator_id,
     )
-    repository.add_transfer(db, transfer)
+    repository.add_stock_operation(db, operation)
     for raw in items:
-        qty = _as_decimal(raw.get("quantity"))
-        if qty <= 0:
-            raise BusinessException(CODE_PARAM_INVALID, "移库数量必须为正数")
         _require_material(db, raw["material_id"])
-        from_loc = raw.get("from_location_id")
-        to_loc = raw.get("to_location_id")
-        if from_loc is not None:
-            _require_location(db, from_loc, from_warehouse_id)
-        if to_loc is not None:
-            _require_location(db, to_loc, to_warehouse_id)
-        if from_warehouse_id == to_warehouse_id and from_loc == to_loc:
-            raise BusinessException(CODE_PARAM_INVALID, "移库源与目标不能相同")
-        repository.add_transfer_item(
-            db,
-            models.InvTransferItem(
-                transfer_id=transfer.id,
-                material_id=raw["material_id"],
-                from_location_id=from_loc,
-                to_location_id=to_loc,
+        if op_type == "TRANSFER":
+            qty = _as_decimal(raw.get("quantity"))
+            if qty <= 0:
+                raise BusinessException(CODE_PARAM_INVALID, "移库数量必须为正数")
+            repository.add_operation_item(
+                db,
+                models.InvStockOperationItem(
+                    operation_id=operation.id,
+                    material_id=raw["material_id"],
+                    quantity=qty,
+                    remark=raw.get("remark"),
+                ),
+            )
+        else:
+            actual = _as_decimal(raw.get("actual_qty"))
+            if actual < 0:
+                raise BusinessException(CODE_PARAM_INVALID, "实盘数量不能为负数")
+            book_value = raw.get("book_qty")
+            if book_value is None:
+                balance = repository.get_balance(db, warehouse.id, raw["material_id"])
+                book_value = _as_decimal(balance.quantity) if balance else Decimal("0")
+            book = _as_decimal(book_value)
+            repository.add_operation_item(
+                db,
+                models.InvStockOperationItem(
+                    operation_id=operation.id,
+                    material_id=raw["material_id"],
+                    book_qty=book,
+                    actual_qty=actual,
+                    difference=actual - book,
+                    remark=raw.get("remark"),
+                ),
+            )
+    log_operation(
+        db,
+        module=MODULE,
+        action="CREATE",
+        target_type="inv_stock_operation",
+        target_id=operation.id,
+        operator_id=operator_id,
+        detail=f"新增{'移库' if op_type == 'TRANSFER' else '盘点'}单 {number}",
+    )
+    return operation
+
+
+def confirm_stock_operation(
+    db: Session, operation_id: int, operator_id: Optional[int] = None
+) -> models.InvStockOperation:
+    """确认操作单（仅 DRAFT 可确认）：
+
+    - TRANSFER：对每条明细写 TRANSFER_OUT + TRANSFER_IN 两条流水（同一事务）；
+    - STOCKTAKE：按差异写 `ADJUST` 流水（差异为 0 的行不写流水）。
+    """
+    operation = get_stock_operation(db, operation_id)
+    if operation.status != "DRAFT":
+        raise BusinessException(
+            CODE_STATUS_INVALID, f"操作单当前状态为 {operation.status}，不能确认"
+        )
+    items = list(operation.items)
+    if not items:
+        raise BusinessException(CODE_PARAM_INVALID, "操作单没有明细，不能确认")
+    if operation.op_type == "TRANSFER":
+        for item in items:
+            qty = _as_decimal(item.quantity)
+            if qty <= 0:
+                raise BusinessException(CODE_PARAM_INVALID, "移库数量必须为正数")
+            _decrease_stock(
+                db,
+                transaction_type="TRANSFER_OUT",
+                material_id=item.material_id,
                 quantity=qty,
-                remark=raw.get("remark"),
-            ),
-        )
-    log_operation(
-        db,
-        module=MODULE,
-        action="CREATE",
-        target_type="inv_transfer",
-        target_id=transfer.id,
-        operator_id=operator_id,
-        detail=f"新增移库单 {number}",
-    )
-    return transfer
-
-
-def confirm_transfer(
-    db: Session, transfer_id: int, operator_id: Optional[int] = None
-) -> models.InvTransfer:
-    """确认移库：对每条明细写 TRANSFER_OUT + TRANSFER_IN 两条流水（同一事务）。"""
-    transfer = get_transfer(db, transfer_id)
-    if transfer.status != "DRAFT":
-        raise BusinessException(CODE_STATUS_INVALID, f"移库单当前状态为 {transfer.status}，不能确认")
-    items = list(transfer.items)
-    if not items:
-        raise BusinessException(CODE_PARAM_INVALID, "移库单没有明细，不能确认")
-    for item in items:
-        _decrease_stock(
-            db,
-            transaction_type="TRANSFER_OUT",
-            material_id=item.material_id,
-            quantity=_as_decimal(item.quantity),
-            warehouse_id=transfer.from_warehouse_id,
-            location_id=item.from_location_id,
-            source_module=MODULE,
-            source_type="TRANSFER",
-            source_reference_id=transfer.id,
-            source_no=transfer.transfer_no,
-            biz_date=transfer.transfer_date,
-            operator_id=operator_id,
-            remark=f"移库出库 {transfer.transfer_no}",
-        )
-        _increase_stock(
-            db,
-            transaction_type="TRANSFER_IN",
-            material_id=item.material_id,
-            quantity=_as_decimal(item.quantity),
-            warehouse_id=transfer.to_warehouse_id,
-            location_id=item.to_location_id,
-            source_module=MODULE,
-            source_type="TRANSFER",
-            source_reference_id=transfer.id,
-            source_no=transfer.transfer_no,
-            biz_date=transfer.transfer_date,
-            operator_id=operator_id,
-            remark=f"移库入库 {transfer.transfer_no}",
-        )
-    transfer.status = "COMPLETED"
-    transfer.updated_by = operator_id
+                warehouse_id=operation.from_warehouse_id,
+                source_module=MODULE,
+                source_type="TRANSFER",
+                source_reference_id=operation.id,
+                source_no=operation.operation_no,
+                biz_date=operation.op_date,
+                operator_id=operator_id,
+                remark=f"移库出库 {operation.operation_no}",
+            )
+            _increase_stock(
+                db,
+                transaction_type="TRANSFER_IN",
+                material_id=item.material_id,
+                quantity=qty,
+                warehouse_id=operation.to_warehouse_id,
+                source_module=MODULE,
+                source_type="TRANSFER",
+                source_reference_id=operation.id,
+                source_no=operation.operation_no,
+                biz_date=operation.op_date,
+                operator_id=operator_id,
+                remark=f"移库入库 {operation.operation_no}",
+            )
+    else:
+        for item in items:
+            book = _as_decimal(item.book_qty)
+            actual = _as_decimal(item.actual_qty)
+            difference = actual - book
+            item.difference = difference
+            if difference == 0:
+                continue
+            _apply_adjust(
+                db,
+                material_id=item.material_id,
+                warehouse_id=operation.warehouse_id,
+                delta=difference,
+                biz_date=operation.op_date,
+                source_module=MODULE,
+                source_type="STOCKTAKE",
+                source_reference_id=operation.id,
+                source_no=operation.operation_no,
+                operator_id=operator_id,
+                remark=f"盘点调整 {operation.operation_no}",
+            )
+    operation.status = "COMPLETED"
+    operation.updated_by = operator_id
     log_operation(
         db,
         module=MODULE,
         action="CONFIRM",
-        target_type="inv_transfer",
-        target_id=transfer.id,
+        target_type="inv_stock_operation",
+        target_id=operation.id,
         operator_id=operator_id,
-        detail=f"确认移库单 {transfer.transfer_no}",
+        detail=f"确认操作单 {operation.operation_no}",
     )
-    return transfer
+    return operation
 
 
-def cancel_transfer(
-    db: Session, transfer_id: int, operator_id: Optional[int] = None
-) -> models.InvTransfer:
-    transfer = get_transfer(db, transfer_id)
-    if transfer.status != "DRAFT":
-        raise BusinessException(CODE_STATUS_INVALID, f"移库单当前状态为 {transfer.status}，不能取消")
-    transfer.status = "CANCELLED"
-    transfer.updated_by = operator_id
+def cancel_stock_operation(
+    db: Session, operation_id: int, operator_id: Optional[int] = None
+) -> models.InvStockOperation:
+    operation = get_stock_operation(db, operation_id)
+    if operation.status != "DRAFT":
+        raise BusinessException(
+            CODE_STATUS_INVALID, f"操作单当前状态为 {operation.status}，不能取消"
+        )
+    operation.status = "CANCELLED"
+    operation.updated_by = operator_id
     log_operation(
         db,
         module=MODULE,
         action="CANCEL",
-        target_type="inv_transfer",
-        target_id=transfer.id,
+        target_type="inv_stock_operation",
+        target_id=operation.id,
         operator_id=operator_id,
-        detail=f"取消移库单 {transfer.transfer_no}",
+        detail=f"取消操作单 {operation.operation_no}",
     )
-    return transfer
+    return operation
 
 
-# ==================== 盘点 ====================
+# ==================== 订货点（直接维护在 inv_balance 上） ====================
 
 
-def list_stocktakes(
+def get_balance_row(db: Session, balance_id: int) -> models.InvBalance:
+    balance = db.get(models.InvBalance, balance_id)
+    if not balance:
+        raise BusinessException(CODE_NOT_FOUND, f"库存结存不存在：{balance_id}")
+    return balance
+
+
+def update_balance_reorder(
     db: Session,
-    page: int = 1,
-    page_size: int = 20,
-    warehouse_id: Optional[int] = None,
-    status: Optional[str] = None,
-):
-    return repository.list_stocktakes(db, page, page_size, warehouse_id, status)
-
-
-def get_stocktake(db: Session, stocktake_id: int) -> models.InvStocktake:
-    stocktake = repository.get_stocktake(db, stocktake_id)
-    if not stocktake:
-        raise BusinessException(CODE_NOT_FOUND, f"盘点单不存在：{stocktake_id}")
-    return stocktake
-
-
-def create_stocktake(
-    db: Session,
-    *,
-    warehouse_id: int,
-    stocktake_date: date,
-    items: Sequence[Mapping[str, Any]],
-    stocktake_no: Optional[str] = None,
-    remark: Optional[str] = None,
-    operator_id: Optional[int] = None,
-) -> models.InvStocktake:
-    """新增盘点单；`book_qty` 缺省时按当前结存自动带出。"""
-    if not items:
-        raise BusinessException(CODE_PARAM_INVALID, "盘点单至少需要一条明细")
-    _require_warehouse(db, warehouse_id)
-    if stocktake_no and repository.get_stocktake_by_no(db, stocktake_no):
-        raise BusinessException(CODE_DUPLICATE, f"盘点单号已存在：{stocktake_no}")
-    number = stocktake_no or repository.next_stocktake_no(db, stocktake_date)
-    stocktake = models.InvStocktake(
-        stocktake_no=number,
-        warehouse_id=warehouse_id,
-        stocktake_date=stocktake_date,
-        status="DRAFT",
-        remark=remark,
-        created_by=operator_id,
-    )
-    repository.add_stocktake(db, stocktake)
-    for raw in items:
-        _require_material(db, raw["material_id"])
-        location_id = raw.get("location_id")
-        if location_id is not None:
-            _require_location(db, location_id, warehouse_id)
-        actual = _as_decimal(raw.get("actual_qty"))
-        book_value = raw.get("book_qty")
-        if book_value is None:
-            balance = repository.get_balance(db, warehouse_id, location_id, raw["material_id"])
-            book_value = _as_decimal(balance.quantity) if balance else Decimal("0")
-        book = _as_decimal(book_value)
-        repository.add_stocktake_item(
-            db,
-            models.InvStocktakeItem(
-                stocktake_id=stocktake.id,
-                material_id=raw["material_id"],
-                location_id=location_id,
-                book_qty=book,
-                actual_qty=actual,
-                difference=actual - book,
-                remark=raw.get("remark"),
-            ),
-        )
-    log_operation(
-        db,
-        module=MODULE,
-        action="CREATE",
-        target_type="inv_stocktake",
-        target_id=stocktake.id,
-        operator_id=operator_id,
-        detail=f"新增盘点单 {number}",
-    )
-    return stocktake
-
-
-def confirm_stocktake(
-    db: Session, stocktake_id: int, operator_id: Optional[int] = None
-) -> models.InvStocktake:
-    """确认盘点：按差异写 `ADJUST` 流水（差异为 0 的行不写流水）。"""
-    stocktake = get_stocktake(db, stocktake_id)
-    if stocktake.status != "DRAFT":
-        raise BusinessException(
-            CODE_STATUS_INVALID, f"盘点单当前状态为 {stocktake.status}，不能确认"
-        )
-    items = list(stocktake.items)
-    if not items:
-        raise BusinessException(CODE_PARAM_INVALID, "盘点单没有明细，不能确认")
-    for item in items:
-        book = _as_decimal(item.book_qty)
-        actual = _as_decimal(item.actual_qty)
-        difference = actual - book
-        item.difference = difference
-        if difference == 0:
-            continue
-        _apply_adjust(
-            db,
-            material_id=item.material_id,
-            warehouse_id=stocktake.warehouse_id,
-            location_id=item.location_id,
-            delta=difference,
-            biz_date=stocktake.stocktake_date,
-            source_module=MODULE,
-            source_type="STOCKTAKE",
-            source_reference_id=stocktake.id,
-            source_no=stocktake.stocktake_no,
-            operator_id=operator_id,
-            remark=f"盘点调整 {stocktake.stocktake_no}",
-        )
-    stocktake.status = "COMPLETED"
-    stocktake.updated_by = operator_id
-    log_operation(
-        db,
-        module=MODULE,
-        action="CONFIRM",
-        target_type="inv_stocktake",
-        target_id=stocktake.id,
-        operator_id=operator_id,
-        detail=f"确认盘点单 {stocktake.stocktake_no}",
-    )
-    return stocktake
-
-
-def cancel_stocktake(
-    db: Session, stocktake_id: int, operator_id: Optional[int] = None
-) -> models.InvStocktake:
-    stocktake = get_stocktake(db, stocktake_id)
-    if stocktake.status != "DRAFT":
-        raise BusinessException(
-            CODE_STATUS_INVALID, f"盘点单当前状态为 {stocktake.status}，不能取消"
-        )
-    stocktake.status = "CANCELLED"
-    stocktake.updated_by = operator_id
-    log_operation(
-        db,
-        module=MODULE,
-        action="CANCEL",
-        target_type="inv_stocktake",
-        target_id=stocktake.id,
-        operator_id=operator_id,
-        detail=f"取消盘点单 {stocktake.stocktake_no}",
-    )
-    return stocktake
-
-
-# ==================== 订货点规则 ====================
-
-
-def list_reorder_rules(
-    db: Session,
-    *,
-    page: int = 1,
-    page_size: int = 20,
-    status: Optional[str] = None,
-    material_id: Optional[int] = None,
-    warehouse_id: Optional[int] = None,
-) -> Tuple[List[Dict[str, Any]], int]:
-    rows, total = repository.list_reorder_rules(
-        db, page, page_size, status, material_id, warehouse_id
-    )
-    materials = _material_map(db, [r.material_id for r in rows])
-    items = []
-    for row in rows:
-        material = materials.get(row.material_id, {})
-        items.append(
-            {
-                "id": row.id,
-                "material_id": row.material_id,
-                "material_code": material.get("material_code"),
-                "material_name": material.get("material_name"),
-                "warehouse_id": row.warehouse_id,
-                "reorder_point": _as_decimal(row.reorder_point),
-                "reorder_quantity": _as_decimal(row.reorder_quantity),
-                "status": row.status,
-                "remark": row.remark,
-            }
-        )
-    return items, total
-
-
-def get_reorder_rule(db: Session, rule_id: int) -> models.InvReorderRule:
-    rule = repository.get_reorder_rule(db, rule_id)
-    if not rule:
-        raise BusinessException(CODE_NOT_FOUND, f"订货点规则不存在：{rule_id}")
-    return rule
-
-
-def create_reorder_rule(
-    db: Session,
-    *,
-    material_id: int,
-    warehouse_id: int,
-    reorder_point: Decimal,
-    reorder_quantity: Decimal,
-    remark: Optional[str] = None,
-    operator_id: Optional[int] = None,
-) -> models.InvReorderRule:
-    _require_material(db, material_id)
-    _require_warehouse(db, warehouse_id)
-    if repository.get_reorder_rule_by_pair(db, material_id, warehouse_id):
-        raise BusinessException(CODE_DUPLICATE, "该物料在此仓库的订货点规则已存在")
-    rule = models.InvReorderRule(
-        material_id=material_id,
-        warehouse_id=warehouse_id,
-        reorder_point=_as_decimal(reorder_point),
-        reorder_quantity=_as_decimal(reorder_quantity),
-        status="ACTIVE",
-        remark=remark,
-        created_by=operator_id,
-    )
-    repository.add_reorder_rule(db, rule)
-    log_operation(
-        db,
-        module=MODULE,
-        action="CREATE",
-        target_type="inv_reorder_rule",
-        target_id=rule.id,
-        operator_id=operator_id,
-        detail=f"新增订货点规则 物料{material_id}/仓库{warehouse_id}",
-    )
-    return rule
-
-
-def update_reorder_rule(
-    db: Session,
-    rule_id: int,
+    balance_id: int,
     *,
     reorder_point: Optional[Decimal] = None,
     reorder_quantity: Optional[Decimal] = None,
-    remark: Optional[str] = None,
     operator_id: Optional[int] = None,
-) -> models.InvReorderRule:
-    rule = get_reorder_rule(db, rule_id)
+) -> models.InvBalance:
+    """直接编辑结存行的订货点 / 建议订货量（原 inv_reorder_rule 维护逻辑并入）。"""
+    balance = get_balance_row(db, balance_id)
     if reorder_point is not None:
-        rule.reorder_point = _as_decimal(reorder_point)
+        if _as_decimal(reorder_point) < 0:
+            raise BusinessException(CODE_PARAM_INVALID, "订货点不能为负数")
+        balance.reorder_point = _as_decimal(reorder_point)
     if reorder_quantity is not None:
-        rule.reorder_quantity = _as_decimal(reorder_quantity)
-    if remark is not None:
-        rule.remark = remark
-    rule.updated_by = operator_id
+        if _as_decimal(reorder_quantity) < 0:
+            raise BusinessException(CODE_PARAM_INVALID, "建议订货量不能为负数")
+        balance.reorder_quantity = _as_decimal(reorder_quantity)
+    balance.updated_by = operator_id
     log_operation(
         db,
         module=MODULE,
         action="UPDATE",
-        target_type="inv_reorder_rule",
-        target_id=rule.id,
+        target_type="inv_balance",
+        target_id=balance.id,
         operator_id=operator_id,
-        detail=f"修改订货点规则 {rule.id}",
+        detail=f"修改订货点 结存{balance.id}（订货点 {balance.reorder_point} / 订货量 {balance.reorder_quantity}）",
     )
-    return rule
-
-
-def set_reorder_rule_status(
-    db: Session, rule_id: int, status: str, operator_id: Optional[int] = None
-) -> models.InvReorderRule:
-    if status not in _RECORD_STATUS:
-        raise BusinessException(CODE_PARAM_INVALID, f"非法状态：{status}")
-    rule = get_reorder_rule(db, rule_id)
-    rule.status = status
-    rule.updated_by = operator_id
-    log_operation(
-        db,
-        module=MODULE,
-        action="STATUS",
-        target_type="inv_reorder_rule",
-        target_id=rule.id,
-        operator_id=operator_id,
-        detail=f"订货点规则 {rule.id} 状态改为 {status}",
-    )
-    return rule
+    materials = _material_map(db, [balance.material_id])
+    warehouses = _warehouse_name_map(db, [balance.warehouse_id])
+    material = materials.get(balance.material_id, {})
+    return {
+        "id": balance.id,
+        "material_id": balance.material_id,
+        "material_code": material.get("material_code"),
+        "material_name": material.get("material_name"),
+        "warehouse_id": balance.warehouse_id,
+        "warehouse_name": warehouses.get(balance.warehouse_id),
+        "reorder_point": _as_decimal(balance.reorder_point),
+        "reorder_quantity": _as_decimal(balance.reorder_quantity),
+        **_balance_dict(balance),
+    }
 
 
 def list_reorder_suggestions(db: Session) -> List[Dict[str, Any]]:
-    """对所有 ACTIVE 规则，现存量低于订货点的返回补库建议。"""
+    """对所有**配置了订货点**的结存，现存量低于订货点的返回补库建议。
+
+    订货点（reorder_point）为可选字段，仅 A 类高价值关键物料配置；
+    未配置（None）的结存不产生补库建议。
+    """
     suggestions: List[Dict[str, Any]] = []
-    for rule in repository.list_active_reorder_rules(db):
-        current = repository.sum_quantity(db, rule.material_id, rule.warehouse_id)
-        point = _as_decimal(rule.reorder_point)
+    balances = list(db.scalars(select(models.InvBalance).order_by(models.InvBalance.id)))
+    for balance in balances:
+        if balance.reorder_point is None:
+            continue
+        point = _as_decimal(balance.reorder_point)
+        if point <= 0:
+            continue
+        current = _as_decimal(balance.quantity)
         if current >= point:
             continue
-        suggested = _as_decimal(rule.reorder_quantity)
+        suggested = _as_decimal(balance.reorder_quantity) if balance.reorder_quantity is not None else Decimal("0")
         suggestions.append(
             {
-                "material_id": rule.material_id,
-                "warehouse_id": rule.warehouse_id,
+                "balance_id": balance.id,
+                "material_id": balance.material_id,
+                "warehouse_id": balance.warehouse_id,
                 "reorder_point": point,
                 "current_qty": current,
                 "suggested_qty": suggested,
@@ -1583,17 +1132,21 @@ def low_stock_report(db: Session) -> List[Dict[str, Any]]:
 
 
 def flow_summary(db: Session, date_from: date, date_to: date) -> List[Dict[str, Any]]:
-    """出入库汇总：按流水类型 + 物料统计数量合计（出库为负）。"""
+    """出入库汇总：从库存操作单（移库/盘点）按物料统计数量合计。
+
+    流水表删除后，出入库汇总基于 inv_stock_operation 聚合；
+    手工入/出库无单据，不在此汇总中体现。
+    """
     if date_from > date_to:
         raise BusinessException(CODE_PARAM_INVALID, "开始日期不能晚于结束日期")
     rows = repository.aggregate_flow(db, date_from, date_to)
     materials = _material_map(db, [mid for _, mid, _ in rows])
     result = []
-    for transaction_type, material_id, total in rows:
+    for operation_type, material_id, total in rows:
         material = materials.get(material_id, {})
         result.append(
             {
-                "transaction_type": transaction_type,
+                "transaction_type": operation_type,
                 "material_id": material_id,
                 "material_code": material.get("material_code"),
                 "material_name": material.get("material_name"),
@@ -1607,12 +1160,10 @@ def stats(db: Session) -> Dict[str, Any]:
     """库存模块统计（供 dashboard 使用）。"""
     return {
         "warehouse_count": repository.count_all(db, models.InvWarehouse),
-        "location_count": repository.count_all(db, models.InvLocation),
         "balance_count": repository.count_all(db, models.InvBalance),
-        "transaction_count": repository.count_all(db, models.InvTransaction),
-        "transfer_count": repository.count_all(db, models.InvTransfer),
-        "stocktake_count": repository.count_all(db, models.InvStocktake),
-        "reorder_rule_count": repository.count_all(db, models.InvReorderRule),
+        "stock_operation_count": repository.count_all(db, models.InvStockOperation),
+        "transfer_count": repository.count_operations_by_type(db, "TRANSFER"),
+        "stocktake_count": repository.count_operations_by_type(db, "STOCKTAKE"),
         "replenishment_request_count": repository.count_all(
             db, models.InvReplenishmentRequest
         ),
@@ -1696,12 +1247,9 @@ def _validate_import_rows(
     db: Session,
     *,
     warehouse_id: int,
-    location_id: Optional[int],
     rows: Sequence[Mapping[str, Any]],
 ) -> Tuple[List[Dict[str, Any]], List[Dict[str, str]]]:
     """逐行校验：物料编码必须存在、数量必须为正；未知编码记为错误而非静默跳过。"""
-    if location_id is not None:
-        _require_location(db, location_id, warehouse_id)
     entries: List[Dict[str, Any]] = []
     errors: List[Dict[str, str]] = []
     for row in rows:
@@ -1748,15 +1296,12 @@ def preview_initial_stock_import(
     source: Optional[str] = None,
     warehouse_id: Optional[int] = None,
     warehouse_code: Optional[str] = None,
-    location_id: Optional[int] = None,
     rows: Optional[Sequence[Mapping[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """期初库存导入预览：**只校验、不写任何数据**（规格 §37）。"""
     warehouse = _resolve_import_warehouse(db, warehouse_id, warehouse_code)
     collected = _collect_import_rows(source, rows)
-    entries, errors = _validate_import_rows(
-        db, warehouse_id=warehouse.id, location_id=location_id, rows=collected
-    )
+    entries, errors = _validate_import_rows(db, warehouse_id=warehouse.id, rows=collected)
     valid = sum(1 for entry in entries if entry["status"] == "VALID")
     return {
         "rows": [
@@ -1779,16 +1324,13 @@ def confirm_initial_stock_import(
     source: Optional[str] = None,
     warehouse_id: Optional[int] = None,
     warehouse_code: Optional[str] = None,
-    location_id: Optional[int] = None,
     rows: Optional[Sequence[Mapping[str, Any]]] = None,
     operator_id: Optional[int] = None,
 ) -> Dict[str, Any]:
     """确认期初库存导入：重新校验后逐行走 `increase_stock`（写真实流水），同一事务内完成。"""
     warehouse = _resolve_import_warehouse(db, warehouse_id, warehouse_code)
     collected = _collect_import_rows(source, rows)
-    entries, errors = _validate_import_rows(
-        db, warehouse_id=warehouse.id, location_id=location_id, rows=collected
-    )
+    entries, errors = _validate_import_rows(db, warehouse_id=warehouse.id, rows=collected)
     imported = 0
     for entry in entries:
         if entry["status"] != "VALID":
@@ -1798,7 +1340,6 @@ def confirm_initial_stock_import(
             material_id=entry["material_id"],
             quantity=entry["quantity"],
             warehouse_id=warehouse.id,
-            location_id=location_id,
             source_module=MODULE,
             source_type="MANUAL",
             biz_date=date.today(),

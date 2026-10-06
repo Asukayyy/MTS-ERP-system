@@ -1,27 +1,27 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 
-import {
-  createReorderRule,
-  listReorderRules,
-  listReorderSuggestions,
-  listWarehouses,
-  setReorderRuleStatus,
-  updateReorderRule,
-} from '@/api/inventory'
+import { listBalances, listReorderSuggestions, listWarehouses, updateBalanceReorder } from '@/api/inventory'
 import { listMaterials } from '@/api/system'
 import RemoteSelect from '@/components/common/RemoteSelect.vue'
-import StatusTag from '@/components/common/StatusTag.vue'
 import { usePagedTable } from '@/composables/usePagedTable'
-import type { ReorderRule, ReorderSuggestion, RemoteOption } from '@/types/erp'
+import type { Balance, ReorderSuggestion, RemoteOption } from '@/types/erp'
 
-const { loading, rows, total, page, pageSize, query, load, search, reset, changePage, changeSize } =
-  usePagedTable<ReorderRule, { status: string; material_id: number | undefined; warehouse_id: number | undefined }>(
-    (params) => listReorderRules(params),
-    { status: '', material_id: undefined, warehouse_id: undefined },
+/**
+ * 订货点维护页：订货点 / 建议订货量直接维护在库存结存（inv_balance）上，
+ * 不再使用独立的订货点规则表。
+ */
+const { loading, rows, page, pageSize, query, load, search, reset, changePage, changeSize } =
+  usePagedTable<Balance, { material_id: number | undefined; warehouse_id: number | undefined }>(
+    (params) => listBalances(params),
+    { material_id: undefined, warehouse_id: undefined },
   )
+
+/** 只展示已配置订货点（reorder_point 不为空）的结存行 */
+const configuredRows = computed(() => rows.value.filter((r) => r.reorder_point != null))
+const configuredTotal = computed(() => configuredRows.value.length)
 
 async function loadMaterialOptions(keyword: string): Promise<RemoteOption[]> {
   const data = await listMaterials({ keyword, page: 1, page_size: 50 })
@@ -35,43 +35,23 @@ async function loadWarehouseOptions(keyword: string): Promise<RemoteOption[]> {
 
 const dialogVisible = ref(false)
 const submitting = ref(false)
-const editingId = ref<number | null>(null)
+const editingBalance = ref<Balance | null>(null)
 const formRef = ref<FormInstance>()
-const form = reactive<{
-  material_id: number | undefined
-  warehouse_id: number | undefined
-  reorder_point: number
-  reorder_quantity: number
-  remark: string
-}>({ material_id: undefined, warehouse_id: undefined, reorder_point: 0, reorder_quantity: 0, remark: '' })
+const form = reactive<{ reorder_point: number; reorder_quantity: number }>({
+  reorder_point: 0,
+  reorder_quantity: 0,
+})
 
 const rules: FormRules = {
-  material_id: [{ required: true, message: '请选择物料', trigger: 'change' }],
-  warehouse_id: [{ required: true, message: '请选择仓库', trigger: 'change' }],
   reorder_point: [{ required: true, message: '请输入订货点', trigger: 'blur' }],
   reorder_quantity: [{ required: true, message: '请输入建议订货量', trigger: 'blur' }],
 }
 
-function openCreate(): void {
-  editingId.value = null
+function openEdit(row: Balance): void {
+  editingBalance.value = row
   Object.assign(form, {
-    material_id: undefined,
-    warehouse_id: undefined,
-    reorder_point: 0,
-    reorder_quantity: 0,
-    remark: '',
-  })
-  dialogVisible.value = true
-}
-
-function openEdit(row: ReorderRule): void {
-  editingId.value = row.id
-  Object.assign(form, {
-    material_id: row.material_id,
-    warehouse_id: row.warehouse_id,
-    reorder_point: Number(row.reorder_point),
-    reorder_quantity: Number(row.reorder_quantity),
-    remark: row.remark ?? '',
+    reorder_point: Number(row.reorder_point) || 0,
+    reorder_quantity: Number(row.reorder_quantity) || 0,
   })
   dialogVisible.value = true
 }
@@ -79,25 +59,14 @@ function openEdit(row: ReorderRule): void {
 async function submit(): Promise<void> {
   const valid = await formRef.value?.validate().catch(() => false)
   if (!valid) return
+  if (!editingBalance.value) return
   submitting.value = true
   try {
-    if (editingId.value === null) {
-      await createReorderRule({
-        material_id: form.material_id,
-        warehouse_id: form.warehouse_id,
-        reorder_point: form.reorder_point,
-        reorder_quantity: form.reorder_quantity,
-        remark: form.remark || null,
-      })
-      ElMessage.success('订货点规则已新增')
-    } else {
-      await updateReorderRule(editingId.value, {
-        reorder_point: form.reorder_point,
-        reorder_quantity: form.reorder_quantity,
-        remark: form.remark || null,
-      })
-      ElMessage.success('订货点规则已更新')
-    }
+    await updateBalanceReorder(editingBalance.value.id, {
+      reorder_point: form.reorder_point,
+      reorder_quantity: form.reorder_quantity,
+    })
+    ElMessage.success('订货点已更新')
     dialogVisible.value = false
     await load()
     await loadSuggestions()
@@ -105,18 +74,6 @@ async function submit(): Promise<void> {
     ElMessage.error((error as Error).message)
   } finally {
     submitting.value = false
-  }
-}
-
-async function toggleStatus(row: ReorderRule): Promise<void> {
-  const next = row.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE'
-  try {
-    await setReorderRuleStatus(row.id, next)
-    ElMessage.success(next === 'ACTIVE' ? '规则已启用' : '规则已停用')
-    await load()
-    await loadSuggestions()
-  } catch (error) {
-    ElMessage.error((error as Error).message)
   }
 }
 
@@ -148,8 +105,6 @@ onMounted(() => {
       <template #header>
         <div class="table-toolbar">
           <span class="page-title">订货点</span>
-          <span class="table-toolbar__spacer" />
-          <el-button type="primary" @click="openCreate">新增订货点规则</el-button>
         </div>
       </template>
 
@@ -160,44 +115,33 @@ onMounted(() => {
         <el-form-item label="仓库">
           <RemoteSelect v-model="query.warehouse_id" :loader="loadWarehouseOptions" placeholder="全部" style="width: 200px" />
         </el-form-item>
-        <el-form-item label="状态">
-          <el-select v-model="query.status" clearable placeholder="全部" style="width: 120px">
-            <el-option label="启用" value="ACTIVE" />
-            <el-option label="停用" value="INACTIVE" />
-          </el-select>
-        </el-form-item>
         <el-form-item>
           <el-button type="primary" @click="search">查询</el-button>
           <el-button @click="reset">重置</el-button>
         </el-form-item>
       </el-form>
 
-      <el-table v-loading="loading" :data="rows" border size="small">
+      <el-table v-loading="loading" :data="configuredRows" border size="small">
         <el-table-column label="物料编码" prop="material_code" min-width="130" />
         <el-table-column label="物料名称" prop="material_name" min-width="160" />
         <el-table-column label="仓库ID" prop="warehouse_id" width="100" align="right" />
+        <el-table-column label="现存量" prop="on_hand" width="110" align="right" />
+        <el-table-column label="可用量" prop="available_quantity" width="110" align="right" />
         <el-table-column label="订货点" prop="reorder_point" width="110" align="right" />
         <el-table-column label="建议订货量" prop="reorder_quantity" width="120" align="right" />
-        <el-table-column label="状态" width="90">
-          <template #default="{ row }"><StatusTag :status="row.status" /></template>
-        </el-table-column>
-        <el-table-column label="备注" prop="remark" min-width="140" />
-        <el-table-column label="操作" width="150" fixed="right">
+        <el-table-column label="操作" width="100" fixed="right">
           <template #default="{ row }">
-            <el-button link type="primary" @click="openEdit(row)">编辑</el-button>
-            <el-button link :type="row.status === 'ACTIVE' ? 'danger' : 'success'" @click="toggleStatus(row)">
-              {{ row.status === 'ACTIVE' ? '停用' : '启用' }}
-            </el-button>
+            <el-button link type="primary" @click="openEdit(row)">编辑订货点</el-button>
           </template>
         </el-table-column>
-        <template #empty>暂无订货点规则</template>
+        <template #empty>暂无已配置订货点的库存结存</template>
       </el-table>
 
       <div class="pager">
         <el-pagination
           :current-page="page"
           :page-size="pageSize"
-          :total="total"
+          :total="configuredTotal"
           :page-sizes="[10, 20, 50, 100]"
           layout="total, sizes, prev, pager, next"
           @current-change="changePage"
@@ -225,38 +169,19 @@ onMounted(() => {
       </el-table>
     </el-card>
 
-    <el-dialog
-      v-model="dialogVisible"
-      :title="editingId === null ? '新增订货点规则' : '编辑订货点规则'"
-      width="620px"
-    >
+    <el-dialog v-model="dialogVisible" title="编辑订货点" width="520px">
       <el-form ref="formRef" :model="form" :rules="rules" label-width="120px">
-        <el-form-item label="物料" prop="material_id">
-          <RemoteSelect
-            v-model="form.material_id"
-            :loader="loadMaterialOptions"
-            :disabled="editingId !== null"
-            placeholder="请选择物料"
-            style="width: 100%"
-          />
+        <el-form-item label="物料">
+          <span>{{ editingBalance?.material_code }} {{ editingBalance?.material_name }}</span>
         </el-form-item>
-        <el-form-item label="仓库" prop="warehouse_id">
-          <RemoteSelect
-            v-model="form.warehouse_id"
-            :loader="loadWarehouseOptions"
-            :disabled="editingId !== null"
-            placeholder="请选择仓库"
-            style="width: 100%"
-          />
+        <el-form-item label="仓库ID">
+          <span>{{ editingBalance?.warehouse_id }}</span>
         </el-form-item>
         <el-form-item label="订货点" prop="reorder_point">
           <el-input-number v-model="form.reorder_point" :min="0" :controls="false" style="width: 100%" />
         </el-form-item>
         <el-form-item label="建议订货量" prop="reorder_quantity">
           <el-input-number v-model="form.reorder_quantity" :min="0" :controls="false" style="width: 100%" />
-        </el-form-item>
-        <el-form-item label="备注">
-          <el-input v-model="form.remark" type="textarea" :rows="2" />
         </el-form-item>
       </el-form>
       <template #footer>
