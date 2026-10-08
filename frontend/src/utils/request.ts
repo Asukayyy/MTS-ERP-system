@@ -37,6 +37,21 @@ function toErrorMessage(error: AxiosError<ApiResponse<unknown>>): string {
   return error.response ? `请求失败（HTTP ${error.response.status}）` : error.message
 }
 
+request.interceptors.request.use((config) => {
+  // 过滤空串 / null / undefined 查询参数：空值表示“不参与过滤”，
+  // 否则后端日期/枚举参数会把空串当作非法值返回 422。
+  if (config.params !== null && typeof config.params === 'object') {
+    const cleaned: Record<string, unknown> = {}
+    for (const [key, value] of Object.entries(config.params as Record<string, unknown>)) {
+      if (value !== '' && value !== null && value !== undefined) {
+        cleaned[key] = value
+      }
+    }
+    config.params = cleaned
+  }
+  return config
+})
+
 request.interceptors.response.use(undefined, (error: AxiosError<ApiResponse<unknown>>) =>
   Promise.reject(new Error(toErrorMessage(error))),
 )

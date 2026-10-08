@@ -10,7 +10,7 @@
 
 库存变动唯一入口：
 - `increase_stock` / `decrease_stock`：任何模块改库存都必须走这里，
-  内部会同时写 `inv_transaction` 流水并更新 `inv_balance` 结存，且禁止负库存。
+  内部直接更新 `inv_balance` 结存，且禁止负库存（不再维护独立流水表）。
 - `create_replenishment_request`：库存不足时**只产生补库需求**，
   不直接创建正式生产/采购计划（规格 §14），由 planning / procurement 受理。
 """
@@ -51,7 +51,6 @@ def increase_stock(
     material_id: int,
     quantity: Decimal,
     warehouse_id: int,
-    location_id: Optional[int] = None,
     source_module: str,
     source_type: str,
     source_reference_id: Optional[int] = None,
@@ -61,13 +60,12 @@ def increase_stock(
     operator_id: Optional[int] = None,
     remark: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """入库：写 `IN` 流水 + 加结存。返回 `{"transaction_id", "transaction_no", "quantity_after"}`。"""
+    """入库：直接加结存。返回 `{"quantity_after"}`。"""
     return service.increase_stock(
         db,
         material_id=material_id,
         quantity=quantity,
         warehouse_id=warehouse_id,
-        location_id=location_id,
         source_module=source_module,
         source_type=source_type,
         source_reference_id=source_reference_id,
@@ -85,7 +83,6 @@ def decrease_stock(
     material_id: int,
     quantity: Decimal,
     warehouse_id: int,
-    location_id: Optional[int] = None,
     source_module: str,
     source_type: str,
     source_reference_id: Optional[int] = None,
@@ -95,13 +92,12 @@ def decrease_stock(
     operator_id: Optional[int] = None,
     remark: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """出库：事务内加锁复核可用量，不足抛 `BusinessException(5001)`；写 `OUT` 流水 + 减结存。"""
+    """出库：事务内加锁复核可用量，不足抛 `BusinessException(5001)`；直接减结存。"""
     return service.decrease_stock(
         db,
         material_id=material_id,
         quantity=quantity,
         warehouse_id=warehouse_id,
-        location_id=location_id,
         source_module=source_module,
         source_type=source_type,
         source_reference_id=source_reference_id,

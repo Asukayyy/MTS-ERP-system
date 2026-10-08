@@ -2,11 +2,10 @@
 import { onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 
-import { getLowStockReport, listBalances, listTransactions, listWarehouses } from '@/api/inventory'
+import { getLowStockReport, listBalances, listWarehouses } from '@/api/inventory'
 import RemoteSelect from '@/components/common/RemoteSelect.vue'
-import StatusTag from '@/components/common/StatusTag.vue'
 import { usePagedTable, toNumber } from '@/composables/usePagedTable'
-import type { Balance, LowStock, RemoteOption, Transaction } from '@/types/erp'
+import type { Balance, LowStock, RemoteOption } from '@/types/erp'
 
 const { loading, rows, total, page, pageSize, query, load, search, reset, changePage, changeSize } =
   usePagedTable<Balance, { keyword: string; warehouse_id: number | undefined }>(
@@ -35,32 +34,7 @@ async function loadLowStock(): Promise<void> {
   }
 }
 
-// ---------------- 库存流水弹窗 ----------------
-
-const flowVisible = ref(false)
-const flowLoading = ref(false)
-const flowRows = ref<Transaction[]>([])
-const flowTitle = ref('')
-
-async function openFlow(row: Balance): Promise<void> {
-  flowVisible.value = true
-  flowLoading.value = true
-  flowRows.value = []
-  flowTitle.value = `${row.material_code || `物料${row.material_id}`} 库存流水`
-  try {
-    const data = await listTransactions({
-      material_id: row.material_id,
-      warehouse_id: row.warehouse_id,
-      page: 1,
-      page_size: 20,
-    })
-    flowRows.value = data.items
-  } catch (error) {
-    ElMessage.error((error as Error).message)
-  } finally {
-    flowLoading.value = false
-  }
-}
+// ---------------- 低库存 / 缺料报表 ----------------
 
 function refreshAll(): void {
   search()
@@ -103,17 +77,11 @@ onMounted(() => {
         <el-table-column label="仓库" min-width="150">
           <template #default="{ row }">{{ row.warehouse_name || `ID ${row.warehouse_id}` }}</template>
         </el-table-column>
-        <el-table-column label="库位ID" prop="location_id" width="90" align="right" />
         <el-table-column label="现有量" prop="on_hand" width="110" align="right" />
         <el-table-column label="锁定量" prop="locked_quantity" width="110" align="right" />
         <el-table-column label="可用量" width="110" align="right">
           <template #default="{ row }">
             <span :class="{ 'qty-zero': toNumber(row.available_quantity) <= 0 }">{{ row.available_quantity }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="操作" width="110" fixed="right">
-          <template #default="{ row }">
-            <el-button link type="primary" @click="openFlow(row)">查看流水</el-button>
           </template>
         </el-table-column>
         <template #empty>暂无库存结存数据</template>
@@ -149,20 +117,6 @@ onMounted(() => {
         <template #empty>暂无低于安全库存的物料</template>
       </el-table>
     </el-card>
-
-    <el-dialog v-model="flowVisible" :title="flowTitle" width="900px">
-      <el-table v-loading="flowLoading" :data="flowRows" border size="small">
-        <el-table-column label="流水号" prop="transaction_no" min-width="150" />
-        <el-table-column label="类型" width="110">
-          <template #default="{ row }"><StatusTag :status="row.transaction_type" /></template>
-        </el-table-column>
-        <el-table-column label="变动数量" prop="quantity_change" width="110" align="right" />
-        <el-table-column label="结存" prop="quantity_after" width="110" align="right" />
-        <el-table-column label="业务日期" prop="biz_date" width="110" />
-        <el-table-column label="来源单据" prop="source_no" min-width="130" />
-        <template #empty>暂无流水记录</template>
-      </el-table>
-    </el-dialog>
   </div>
 </template>
 

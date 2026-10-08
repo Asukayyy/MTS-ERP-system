@@ -3,7 +3,7 @@ import { onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 
-import { listLocations, listWarehouses } from '@/api/inventory'
+import { listWarehouses } from '@/api/inventory'
 import { cancelRequisition, confirmRequisition, createRequisition, listRequisitions, listProductionPlans } from '@/api/planning'
 import { listMaterials } from '@/api/system'
 import RemoteSelect from '@/components/common/RemoteSelect.vue'
@@ -35,7 +35,6 @@ async function loadWarehouseOptions(keyword: string): Promise<RemoteOption[]> {
 interface ReqLineForm {
   material_id: number | undefined
   required_qty: number
-  location_id: number | undefined
   remark: string
 }
 
@@ -62,15 +61,8 @@ const rules: FormRules = {
   req_date: [{ required: true, message: '请选择领料日期', trigger: 'change' }],
 }
 
-/** 行内库位下拉：限定当前单据仓库（未选仓库时不加载） */
-async function loadLocationOptions(keyword: string): Promise<RemoteOption[]> {
-  if (!form.warehouse_id) return []
-  const data = await listLocations({ warehouse_id: form.warehouse_id, keyword, page: 1, page_size: 50 })
-  return data.items.map((item) => ({ id: item.id, label: `${item.location_code} ${item.location_name}` }))
-}
-
 function addLine(): void {
-  form.items.push({ material_id: undefined, required_qty: 1, location_id: undefined, remark: '' })
+  form.items.push({ material_id: undefined, required_qty: 1, remark: '' })
 }
 
 function removeLine(index: number): void {
@@ -112,7 +104,6 @@ async function submit(): Promise<void> {
       items: form.items.map((item) => ({
         material_id: item.material_id,
         required_qty: item.required_qty,
-        location_id: item.location_id ?? null,
         remark: item.remark || null,
       })),
     })
@@ -187,7 +178,6 @@ onMounted(load)
               <el-table-column label="物料ID" prop="material_id" width="90" align="right" />
               <el-table-column label="需求数量" prop="required_qty" width="110" align="right" />
               <el-table-column label="已发数量" prop="issued_qty" width="110" align="right" />
-              <el-table-column label="库位ID" prop="location_id" width="90" align="right" />
               <el-table-column label="备注" prop="remark" min-width="140" />
               <template #empty>暂无领料明细</template>
             </el-table>
@@ -281,16 +271,6 @@ onMounted(load)
           <el-table-column label="需求数量" width="140">
             <template #default="{ row }">
               <el-input-number v-model="row.required_qty" :min="0.0001" :controls="false" style="width: 100%" />
-            </template>
-          </el-table-column>
-          <el-table-column label="领料库位" min-width="200">
-            <template #default="{ row }">
-              <RemoteSelect
-                v-model="row.location_id"
-                :loader="loadLocationOptions"
-                placeholder="可选（须先选仓库）"
-                style="width: 100%"
-              />
             </template>
           </el-table-column>
           <el-table-column label="备注" min-width="140">

@@ -3,7 +3,7 @@ import { onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 
-import { listLocations, listWarehouses } from '@/api/inventory'
+import { listWarehouses } from '@/api/inventory'
 import {
   cancelCompletionReport,
   confirmCompletionReport,
@@ -59,7 +59,6 @@ const form = reactive<{
   qualified_qty: number
   scrap_qty: number
   warehouse_id: number | undefined
-  location_id: number | undefined
   report_date: string
   remark: string
 }>({
@@ -71,7 +70,6 @@ const form = reactive<{
   qualified_qty: 1,
   scrap_qty: 0,
   warehouse_id: undefined,
-  location_id: undefined,
   report_date: '',
   remark: '',
 })
@@ -84,12 +82,6 @@ const rules: FormRules = {
   report_date: [{ required: true, message: '请选择报工日期', trigger: 'change' }],
 }
 
-async function loadLocationOptions(keyword: string): Promise<RemoteOption[]> {
-  if (!form.warehouse_id) return []
-  const data = await listLocations({ warehouse_id: form.warehouse_id, keyword, page: 1, page_size: 50 })
-  return data.items.map((item) => ({ id: item.id, label: `${item.location_code} ${item.location_name}` }))
-}
-
 function openCreate(): void {
   Object.assign(form, {
     report_no: '',
@@ -100,7 +92,6 @@ function openCreate(): void {
     qualified_qty: 1,
     scrap_qty: 0,
     warehouse_id: undefined,
-    location_id: undefined,
     report_date: '',
     remark: '',
   })
@@ -121,7 +112,6 @@ async function submit(): Promise<void> {
       qualified_qty: form.qualified_qty,
       scrap_qty: form.scrap_qty,
       warehouse_id: form.warehouse_id,
-      location_id: form.location_id ?? null,
       report_date: form.report_date,
       remark: form.remark || null,
     })
@@ -263,16 +253,6 @@ onMounted(load)
           <el-col :span="12">
             <el-form-item label="入库仓库" prop="warehouse_id">
               <RemoteSelect v-model="form.warehouse_id" :loader="loadWarehouseOptions" placeholder="请选择仓库" style="width: 100%" />
-            </el-form-item>
-          </el-col>
-          <el-col :span="12">
-            <el-form-item label="入库库位">
-              <RemoteSelect
-                v-model="form.location_id"
-                :loader="loadLocationOptions"
-                placeholder="可选（须先选仓库）"
-                style="width: 100%"
-              />
             </el-form-item>
           </el-col>
           <el-col :span="12">
