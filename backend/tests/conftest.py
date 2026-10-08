@@ -1,63 +1,77 @@
-"""pytest 公共 fixture。"""
+"""pytest 公共 fixture：共享库事务隔离。
+
+所有用例运行在一个**外层事务**里：API 经 ``get_db`` 依赖覆盖，与测试直连的
+``db`` 会话共用同一条连接、同一个事务。用例结束统一 ``rollback``，因此共享库
+``bh_erp`` 不会残留任何测试数据（无需再手工清理）。
+
+要点：
+
+- ``join_transaction_mode="create_savepoint"``：测试内 ``db.commit()`` 只释放
+  保存点，外层事务仍在，最终回滚可撤销全部写入；
+- 无 MySQL 时自动降级为不隔离，健康检查等不访问数据库的用例仍可跑通。
+"""
 
 from collections.abc import Iterator
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy.orm import Session
 
+from app.core.database import engine, get_db
 from app.main import app
 
 
 @pytest.fixture(scope="session")
 def client() -> Iterator[TestClient]:
-    """全测试共享的 TestClient。
-
-    健康检查接口不访问数据库，因此即使本机没有 MySQL 也能正常跑通。
-    """
+    """全测试共享的 TestClient。"""
     with TestClient(app) as test_client:
         yield test_client
 
 
-@pytest.fixture(scope="session", autouse=True)
-def _isolate_test_mps() -> Iterator[None]:
-    """会话级隔离：测试结束后清理本会话新建的 MPS，避免污染共享库。
-
-    做法：会话开始记录 ``pln_mps`` 当前最大 ID 作为基线，结束后删除所有
-    ID 大于基线的 MPS（含行明细）。删除前先把引用它们的 ``pln_mrp_run.mps_id``
-    置空以绕过 RESTRICT 外键（保留 MRP 历史）。基线方式只清理本会话产生的
-    数据，不会误删人工创建或应用运行中产生的计划。
-
-    本机无 MySQL 时（例如只跑健康检查用例）自动跳过，不阻断测试。
-    """
-    from sqlalchemy import text
-
-    from app.core.database import engine
-
-    baseline: int | None
+@pytest.fixture()
+def _db_transaction() -> Iterator[Session | None]:
+    """每用例一条外层事务 + 绑定其上的会话；结束统一回滚。无 MySQL 时返回 None。"""
     try:
-        with engine.begin() as conn:
-            baseline = int(
-                conn.execute(text("SELECT COALESCE(MAX(id), 0) FROM pln_mps")).scalar() or 0
-            )
-    except Exception:  # noqa: BLE001 - 无数据库时静默跳过清理
-        baseline = None
+        connection = engine.connect()
+    except Exception:  # noqa: BLE001 - 无数据库时降级，不阻断测试
+        yield None
+        return
 
+    transaction = connection.begin()
+    session = Session(
+        bind=connection,
+        join_transaction_mode="create_savepoint",
+        autoflush=False,
+        expire_on_commit=False,
+    )
+    try:
+        yield session
+    finally:
+        session.close()
+        transaction.rollback()
+        connection.close()
+
+
+@pytest.fixture()
+def db(_db_transaction: Session | None) -> Session:
+    """测试直连会话：与 API 共用同一外层事务，用例结束整体回滚。"""
+    if _db_transaction is None:
+        pytest.skip("本机无可用 MySQL")
+    return _db_transaction
+
+
+@pytest.fixture(autouse=True)
+def _isolate_shared_db(_db_transaction: Session | None) -> Iterator[None]:
+    """把 API 的数据库会话重定向到用例事务，保证共享库零残留。"""
+    if _db_transaction is None:
+        yield
+        return
+
+    def _override_get_db() -> Iterator[Session]:
+        yield _db_transaction
+
+    app.dependency_overrides[get_db] = _override_get_db
     try:
         yield
     finally:
-        if baseline is None:
-            return
-        with engine.begin() as conn:
-            ids = [
-                row[0]
-                for row in conn.execute(
-                    text("SELECT id FROM pln_mps WHERE id > :baseline"),
-                    {"baseline": baseline},
-                ).fetchall()
-            ]
-            if not ids:
-                return
-            id_list = ",".join(str(i) for i in ids)
-            conn.execute(text(f"UPDATE pln_mrp_run SET mps_id = NULL WHERE mps_id IN ({id_list})"))
-            conn.execute(text(f"DELETE FROM pln_mps_item WHERE mps_id IN ({id_list})"))
-            conn.execute(text(f"DELETE FROM pln_mps WHERE id IN ({id_list})"))
+        app.dependency_overrides.pop(get_db, None)

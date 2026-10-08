@@ -73,8 +73,20 @@ uvicorn app.main:app --reload --port 8000
 
 ```bash
 cd backend
-pytest
+pytest                    # 跑全部用例
+pytest tests/test_planning.py -v   # 只跑某个模块
+pytest -k 关键字           # 只跑匹配的用例
 ```
+
+> **共享库事务隔离**：`tests/conftest.py` 让每个用例运行在一个外层事务里，API 经 `get_db`
+> 依赖覆盖与用例共用同一连接、同一事务，用例结束统一 `rollback`。因此**跑测试不需要手工清理
+> 数据**，`bh_erp` 不会残留测试写入。
+>
+> 写测试时的硬性规则：直连写库用 `db` fixture、打接口用 `client` fixture，
+> **不要自己 `SessionLocal()`** —— 那样会绕过回滚保护，真实写进共享库。
+>
+> 本机连不上 MySQL 时相关用例会显示 `s`（跳过），不是失败；`alembic upgrade head`
+> 与手工 SQL 属于真实写库，不在隔离范围内。
 
 ## 四、启动前端
 

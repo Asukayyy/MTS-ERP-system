@@ -23,21 +23,9 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.common.exceptions import BusinessException
-from app.core.database import SessionLocal
 from app.modules.inventory import contract as inventory_contract
 from app.modules.inventory import repository as inventory_repository
 from app.modules.inventory import service
-
-
-@pytest.fixture()
-def db() -> Session:
-    """真实 MySQL 会话；测试内自行 commit，结束回滚残留。"""
-    session = SessionLocal()
-    try:
-        yield session
-    finally:
-        session.rollback()
-        session.close()
 
 
 def _tag() -> str:
