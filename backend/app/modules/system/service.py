@@ -623,9 +623,16 @@ def list_routings(
     status: Optional[str] = None,
 ):
     """分页查询工艺路线。"""
-    return repo.list_routings(
+    items, total = repo.list_routings(
         db, page=page, page_size=page_size, material_id=material_id, status=status
     )
+    # 附带自制件编码/名称，便于前端识别每条路线属于哪个零件
+    for routing in items:
+        material = repo.get_material(db, routing.material_id)
+        if material is not None:
+            routing.material_code = material.material_code
+            routing.material_name = material.material_name
+    return items, total
 
 
 def get_routing(db: Session, routing_id: int) -> models.SysRouting:

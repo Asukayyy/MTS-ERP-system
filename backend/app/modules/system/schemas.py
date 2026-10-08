@@ -239,6 +239,8 @@ class RoutingOperationOut(_IdOut):
 class RoutingOut(_IdOut):
     routing_code: str
     material_id: int
+    material_code: Optional[str] = None
+    material_name: Optional[str] = None
     routing_version: str
     status: str
     remark: Optional[str] = None
