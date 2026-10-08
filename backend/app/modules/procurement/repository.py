@@ -518,7 +518,6 @@ def receipt_report_rows(db: Session, date_from: date, date_to: date) -> List[Tup
             models.PurReceipt.supplier_id,
             models.PurReceiptItem.material_id,
             models.PurReceipt.warehouse_id,
-            models.PurReceiptItem.location_id,
             models.PurReceiptItem.quantity,
             models.PurReceiptItem.qualified_qty,
         )
