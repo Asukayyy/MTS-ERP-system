@@ -2,8 +2,8 @@
 
 硬性约定（规格 §24 / §35 / §36）：
 
-1. **任何库存变动都必须同时写 `inv_transaction` 流水并更新 `inv_balance` 结存**，
-   二者在同一事务内完成，禁止只改结存不写流水。
+1. **任何库存变动都在同一事务内直接更新 `inv_balance` 结存**
+   （`inv_transaction` 流水表已删除，不再维护独立流水），禁止绕过契约直接改结存。
 2. **禁止负库存**：出库 / 盘点调减前必须在事务内加锁复核可用量。
 3. 本层**不调用 `db.commit()`**：由 router 提交；contract 函数运行在调用方事务里。
 4. **库存永远不直接创建正式生产计划**：库存不足只产生“补库需求”，
@@ -165,7 +165,7 @@ def _increase_stock(
     operator_id: Optional[int] = None,
     remark: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """入库内部实现：结存加数量 + 写一条指定类型的流水（同一事务）。"""
+    """入库内部实现：加锁后直接给结存加数量（同一事务，不写独立流水表）。"""
     qty = _validate_stock_args(
         db,
         material_id=material_id,
@@ -198,7 +198,7 @@ def increase_stock(
     operator_id: Optional[int] = None,
     remark: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """入库：结存加数量 + 写一条 `IN` 流水（同一事务）。"""
+    """入库：直接给结存加数量（同一事务），返回变动后的结存数量。"""
     return _increase_stock(
         db,
         transaction_type="IN",
@@ -232,7 +232,7 @@ def _decrease_stock(
     operator_id: Optional[int] = None,
     remark: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """出库内部实现：加锁复核可用量 → 减结存 + 写一条指定类型的流水。"""
+    """出库内部实现：加锁复核可用量 → 直接减结存（不写独立流水表）。"""
     qty = _validate_stock_args(
         db,
         material_id=material_id,
@@ -280,7 +280,7 @@ def decrease_stock(
     operator_id: Optional[int] = None,
     remark: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """出库：加锁复核可用量 → 减结存 + 写一条 `OUT` 流水；不足则抛 5001，结存不变。"""
+    """出库：加锁复核可用量 → 直接减结存；不足则抛 5001，结存不变。"""
     return _decrease_stock(
         db,
         transaction_type="OUT",
@@ -664,8 +664,8 @@ def confirm_stock_operation(
 ) -> models.InvStockOperation:
     """确认操作单（仅 DRAFT 可确认）：
 
-    - TRANSFER：对每条明细写 TRANSFER_OUT + TRANSFER_IN 两条流水（同一事务）；
-    - STOCKTAKE：按差异写 `ADJUST` 流水（差异为 0 的行不写流水）。
+    - TRANSFER：对每条明细在同一事务内更新调出仓 / 调入仓两边结存；
+    - STOCKTAKE：按盘盈/盘亏差异直接调整结存（差异为 0 的行不调整）。
     """
     operation = get_stock_operation(db, operation_id)
     if operation.status != "DRAFT":
@@ -1329,7 +1329,7 @@ def confirm_initial_stock_import(
     rows: Optional[Sequence[Mapping[str, Any]]] = None,
     operator_id: Optional[int] = None,
 ) -> Dict[str, Any]:
-    """确认期初库存导入：重新校验后逐行走 `increase_stock`（写真实流水），同一事务内完成。"""
+    """确认期初库存导入：重新校验后逐行走 `increase_stock` 直接更新结存，同一事务内完成。"""
     warehouse = _resolve_import_warehouse(db, warehouse_id, warehouse_code)
     collected = _collect_import_rows(source, rows)
     entries, errors = _validate_import_rows(db, warehouse_id=warehouse.id, rows=collected)
