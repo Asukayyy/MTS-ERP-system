@@ -53,6 +53,19 @@ def status_counts(db: Session, model) -> Dict[str, int]:
     return {status: count for status, count in db.execute(stmt).all()}
 
 
+def status_counts_since(
+    db: Session, model, date_col, since: date
+) -> Dict[str, int]:
+    """按日期过滤后再按状态分组统计数量（用于本期统计）。"""
+    stmt = (
+        select(model.status, func.count())
+        .select_from(model)
+        .where(date_col >= since)
+        .group_by(model.status)
+    )
+    return {status: count for status, count in db.execute(stmt).all()}
+
+
 # ==================== 供应商 ====================
 
 
@@ -252,6 +265,32 @@ def find_plan_items_by_source(
             )
         )
     )
+
+
+def find_active_plan_by_source_type(
+    db: Session, source_type: str
+) -> Optional[models.PurPurchasePlan]:
+    """按来源类型查找未终结的采购计划（fallback 幂等去重）。
+
+    当源单据 ID 每次变化（如 MRP 重新运行生成新 result ID）时，
+    ``find_plan_items_by_source`` 按 ``source_reference_id`` 查不到旧计划行，
+    此函数按 ``source_type`` 做第二层去重，避免重复生成内容相同的计划。
+    """
+    plan_id = db.scalar(
+        select(models.PurPurchasePlanItem.plan_id)
+        .join(
+            models.PurPurchasePlan,
+            models.PurPurchasePlan.id == models.PurPurchasePlanItem.plan_id,
+        )
+        .where(
+            models.PurPurchasePlanItem.source_type == source_type,
+            models.PurPurchasePlan.status.notin_(["COMPLETED", "CANCELLED"]),
+        )
+        .limit(1)
+    )
+    if plan_id:
+        return get_plan(db, plan_id)
+    return None
 
 
 # ==================== 采购订单 ====================
