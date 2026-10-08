@@ -815,6 +815,53 @@ def test_end_to_end_chair_mts(client: TestClient) -> None:
         f"PRODUCTION 补库 → 生产计划#{production_confirmed['handled_ref_id']}（source=REPLENISHMENT）"
     )
 
+    # 7.3 补库需求 → 计划需求（拉取式：从库存契约接口批量导入 STOCKFILL 需求，已导入的跳过）
+    import_first = _ok(client, "POST", f"{PLANNING}/demands/from-replenishment/import")
+    assert import_first["created_count"] >= 2, import_first
+    import_second = _ok(client, "POST", f"{PLANNING}/demands/from-replenishment/import")
+    assert import_second["created_count"] <= import_first["created_count"], "重复导入不应新增"
+
+    def _all_stockfill_demands() -> List[Dict[str, Any]]:
+        """分页拉全量 STOCKFILL 需求（共享库长期累积，避免按单页漏查）。"""
+        items: List[Dict[str, Any]] = []
+        page = 1
+        while True:
+            data = _ok(
+                client,
+                "GET",
+                f"{PLANNING}/demands",
+                params={"source_type": "STOCKFILL", "page": page, "page_size": 200},
+            )
+            items.extend(data["items"])
+            if len(data["items"]) < 200 or page * 200 >= int(data["total"]):
+                break
+            page += 1
+        return items
+
+    def _stockfill_demand(source_reference_id: int) -> Dict[str, Any]:
+        matched = [
+            item
+            for item in _all_stockfill_demands()
+            if int(item.get("source_reference_id") or -1) == source_reference_id
+        ]
+        assert len(matched) == 1, f"补库需求#{source_reference_id} 应恰好生成一条 STOCKFILL 需求"
+        return matched[0]
+
+    prod_demand = _stockfill_demand(int(production_request["id"]))
+    assert prod_demand["source_no"] == production_request["request_no"]
+    assert prod_demand["source_type"] == "STOCKFILL"
+    assert int(prod_demand["material_id"]) == semi_id
+    assert _d(prod_demand["quantity"]) == Decimal("10")
+    reorder_demand = _stockfill_demand(int(reorder_request["id"]))
+    assert reorder_demand["source_no"] == reorder_request["request_no"]
+    assert int(reorder_demand["material_id"]) == reorder_material_id
+
+    note(
+        f"[7.3] 拉取式导入：从库存接口批量导入 STOCKFILL 计划需求 "
+        f"（新建 {import_first['created_count']} / 重复导入跳过 {import_second['skipped_count']}），"
+        f"补库需求#{production_request['id']}、#{reorder_request['id']} 均生成需求且幂等"
+    )
+
     # ------------------------------------------------------------------
     # Step 8 — 负库存保护（规格 §36）
     # ------------------------------------------------------------------
