@@ -15,7 +15,7 @@
 错误码区段：`4000~4999`。
 """
 
-from datetime import date, timedelta
+from datetime import date
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -211,7 +211,6 @@ def _supplier_material_dict(
         **_material_fields(materials.get(row.material_id)),
         "is_primary": row.is_primary,
         "supply_price": _as_decimal(row.supply_price),
-        "lead_time_days": row.lead_time_days,
         "min_order_qty": _as_decimal(row.min_order_qty),
         "status": row.status,
     }
@@ -516,7 +515,6 @@ def create_supplier_material(
     material_id: int,
     is_primary: bool = False,
     supply_price: Decimal = Decimal("0"),
-    lead_time_days: int = 0,
     min_order_qty: Decimal = Decimal("0"),
     status: Optional[str] = None,
     operator_id: Optional[int] = None,
@@ -536,7 +534,6 @@ def create_supplier_material(
         material_id=material_id,
         is_primary=is_primary,
         supply_price=_as_decimal(supply_price),
-        lead_time_days=int(lead_time_days or 0),
         min_order_qty=_as_decimal(min_order_qty),
         status=link_status,
         created_by=operator_id,
@@ -560,7 +557,6 @@ def update_supplier_material(
     *,
     is_primary: Optional[bool] = None,
     supply_price: Optional[Decimal] = None,
-    lead_time_days: Optional[int] = None,
     min_order_qty: Optional[Decimal] = None,
     status: Optional[str] = None,
     operator_id: Optional[int] = None,
@@ -572,8 +568,6 @@ def update_supplier_material(
         link.is_primary = is_primary
     if supply_price is not None:
         link.supply_price = _as_decimal(supply_price)
-    if lead_time_days is not None:
-        link.lead_time_days = int(lead_time_days)
     if min_order_qty is not None:
         link.min_order_qty = _as_decimal(min_order_qty)
     if status is not None:
@@ -1058,7 +1052,6 @@ def create_order_from_plan(
     """按采购计划生成 DRAFT 采购订单，并回写计划行已下单数量。
 
     - 单价优先取供应商-物料关系的 `supply_price`，缺失时取 0；
-    - 预计到货日期未指定时 = 下单日期 + 供应商对该批物料的最大供货提前期；
     - 仅取「未下单数量 = required_qty − ordered_qty > 0」的计划行。
     """
     plan = _require_plan(db, plan_id)
@@ -1072,11 +1065,6 @@ def create_order_from_plan(
         db, supplier_id, [item.material_id for item in plan_items]
     )
     order_date = order_date or date.today()
-    lead_time_days = max(
-        (int(term.lead_time_days) for term in terms.values()), default=0
-    )
-    if expected_date is None:
-        expected_date = order_date + timedelta(days=lead_time_days)
 
     pending: List[Tuple[models.PurPurchasePlanItem, Decimal]] = []
     for item in plan_items:

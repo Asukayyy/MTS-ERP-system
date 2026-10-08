@@ -420,7 +420,7 @@ onMounted(load)
           <RemoteSelect
             v-model="orderForm.supplier_id"
             :loader="loadSupplierOptions"
-            placeholder="请选择供应商（决定供货价与提前期）"
+            placeholder="请选择供应商（决定供货价）"
             style="width: 100%"
           />
         </el-form-item>
@@ -442,7 +442,7 @@ onMounted(load)
                 v-model="orderForm.expected_date"
                 type="date"
                 value-format="YYYY-MM-DD"
-                placeholder="按供货提前期推算"
+                placeholder="选填"
                 style="width: 100%"
               />
             </el-form-item>
