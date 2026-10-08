@@ -293,7 +293,6 @@ export interface ShipmentItem {
   material_code?: string | null
   material_name?: string | null
   warehouse_id: number
-  location_id?: number | null
   quantity: Num
   remark?: string | null
 }
@@ -318,7 +317,6 @@ export interface ReturnItem {
   material_code?: string | null
   material_name?: string | null
   warehouse_id: number
-  location_id?: number | null
   quantity: Num
   quality_status: string
   reason?: string | null
@@ -519,7 +517,6 @@ export interface RequisitionItem {
   material_id: number
   required_qty: Num
   issued_qty: Num
-  location_id?: number | null
   remark?: string | null
 }
 
@@ -544,7 +541,6 @@ export interface CompletionReport {
   qualified_qty: Num
   scrap_qty: Num
   warehouse_id: number
-  location_id?: number | null
   report_date: string
   status: string
   remark?: string | null
@@ -564,25 +560,17 @@ export interface PlanningStats {
 
 // ==================== inventory ====================
 
-export interface Location {
-  id: number
-  location_code: string
-  location_name: string
-  warehouse_id: number
-  status: string
-  remark?: string | null
-}
-
 export interface Warehouse {
   id: number
   warehouse_code: string
   warehouse_name: string
+  location_code?: string | null
+  location_name?: string | null
   org_id?: number | null
   manager_id?: number | null
   address?: string | null
   status: string
   remark?: string | null
-  locations: Location[]
 }
 
 export interface Balance {
@@ -592,95 +580,44 @@ export interface Balance {
   material_name?: string | null
   warehouse_id: number
   warehouse_name?: string | null
-  location_id?: number | null
   on_hand: Num
   locked_quantity: Num
   available_quantity: Num
-}
-
-export interface Transaction {
-  id: number
-  transaction_no: string
-  transaction_type: string
-  material_id: number
-  material_code?: string | null
-  material_name?: string | null
-  warehouse_id: number
-  location_id?: number | null
-  quantity_change: Num
-  quantity_after: Num
-  unit_cost: Num
-  biz_date: string
-  source_module: string
-  source_type: string
-  source_reference_id?: number | null
-  source_no?: string | null
-  operator_id?: number | null
-  remark?: string | null
-  created_at: string
+  reorder_point?: Num | null
+  reorder_quantity?: Num | null
 }
 
 export interface StockChangeResult {
-  transaction_id: number
-  transaction_no: string
   quantity_after: Num
 }
 
-export interface TransferItem {
+/** 库存操作单（op_type 区分 TRANSFER 移库 / STOCKTAKE 盘点） */
+export interface StockOperationItem {
   id: number
-  transfer_id: number
+  operation_id: number
   material_id: number
-  from_location_id?: number | null
-  to_location_id?: number | null
-  quantity: Num
+  quantity?: Num | null
+  book_qty?: Num | null
+  actual_qty?: Num | null
+  difference?: Num | null
   remark?: string | null
 }
 
-export interface Transfer {
+export interface StockOperation {
   id: number
-  transfer_no: string
-  from_warehouse_id: number
-  to_warehouse_id: number
-  transfer_date: string
+  operation_no: string
+  op_type: string
+  from_warehouse_id?: number | null
+  to_warehouse_id?: number | null
+  warehouse_id?: number | null
+  op_date: string
   status: string
   remark?: string | null
-  items: TransferItem[]
-}
-
-export interface StocktakeItem {
-  id: number
-  stocktake_id: number
-  material_id: number
-  location_id?: number | null
-  book_qty: Num
-  actual_qty: Num
-  difference: Num
-  remark?: string | null
-}
-
-export interface Stocktake {
-  id: number
-  stocktake_no: string
-  warehouse_id: number
-  stocktake_date: string
-  status: string
-  remark?: string | null
-  items: StocktakeItem[]
-}
-
-export interface ReorderRule {
-  id: number
-  material_id: number
-  material_code?: string | null
-  material_name?: string | null
-  warehouse_id: number
-  reorder_point: Num
-  reorder_quantity: Num
-  status: string
-  remark?: string | null
+  items: StockOperationItem[]
 }
 
 export interface ReorderSuggestion {
+  balance_id: number
   material_id: number
   warehouse_id: number
   reorder_point: Num
@@ -736,12 +673,10 @@ export interface FlowSummaryRow {
 
 export interface InventoryStats {
   warehouse_count: number
-  location_count: number
   balance_count: number
-  transaction_count: number
+  stock_operation_count: number
   transfer_count: number
   stocktake_count: number
-  reorder_rule_count: number
   replenishment_request_count: number
   low_stock_count: number
 }
@@ -850,7 +785,6 @@ export interface ReceiptItem {
   material_id: number
   material_code?: string | null
   material_name?: string | null
-  location_id?: number | null
   quantity: Num
   qualified_qty: Num
   remark?: string | null
@@ -933,7 +867,6 @@ export interface ReceiptReportRow {
   material_code?: string | null
   material_name?: string | null
   warehouse_id: number
-  location_id?: number | null
   quantity: Num
   qualified_qty: Num
 }

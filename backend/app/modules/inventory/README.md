@@ -38,11 +38,11 @@ sales（发货 / 退货）、procurement（到货入库）、planning（领料 /
 - 库存流水（审计与追溯的唯一依据）
 - 补库需求（交 procurement 或 planning 执行）
 
-## 数据表（Owner: inventory，共 10 张）
+## 数据表（Owner: inventory，共 6 张物理表 / 5 张概念表）
 
-`inv_warehouse`、`inv_location`、`inv_balance`、`inv_transaction`、`inv_transfer`、
-`inv_transfer_item`、`inv_stocktake`、`inv_stocktake_item`、`inv_reorder_rule`、
-`inv_replenishment_request`
+`inv_warehouse`（库位编码/名称并入为文本字段）、`inv_balance`（含订货点字段）、
+`inv_transaction`、`inv_stock_operation`（op_type 区分 TRANSFER/STOCKTAKE，含 item 明细）、
+`inv_stock_operation_item`、`inv_replenishment_request`
 
 > 表结构详见 `docs/database/inventory-er.md`。
 
@@ -51,7 +51,7 @@ sales（发货 / 退货）、procurement（到货入库）、planning（领料 /
 `backend/app/modules/inventory/contract.py`：
 
 - 查询：`get_on_hand_qty` / `get_available_qty` / `get_stock_snapshot`
-- 变动：`increase_stock(db, *, material_id, quantity, warehouse_id, location_id=None,
+- 变动：`increase_stock(db, *, material_id, quantity, warehouse_id,
   source_module, source_type, source_reference_id=None, source_no=None,
   unit_cost=0, biz_date=None, operator_id=None, remark=None)`
 - 变动：`decrease_stock(...)`（同上签名，库存不足抛 `5001`）

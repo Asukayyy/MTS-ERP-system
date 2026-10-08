@@ -183,7 +183,6 @@ onMounted(load)
               <el-table-column label="物料编码" prop="material_code" min-width="130" />
               <el-table-column label="物料名称" prop="material_name" min-width="150" />
               <el-table-column label="仓库ID" prop="warehouse_id" width="100" align="right" />
-              <el-table-column label="库位ID" prop="location_id" width="100" align="right" />
               <el-table-column label="发货数量" prop="quantity" width="110" align="right" />
               <el-table-column label="备注" prop="remark" min-width="140" />
             </el-table>

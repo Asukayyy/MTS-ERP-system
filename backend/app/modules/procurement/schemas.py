@@ -277,7 +277,6 @@ class ReceiptItemCreate(BaseModel):
     order_item_id: int = Field(description="采购订单行ID")
     quantity: Decimal = Field(gt=0, description="到货数量")
     qualified_qty: Optional[Decimal] = Field(default=None, ge=0, description="合格数量，默认等于到货数量")
-    location_id: Optional[int] = Field(default=None, description="收货库位ID")
     remark: Optional[str] = Field(default=None, max_length=200)
 
 
@@ -299,7 +298,6 @@ class ReceiptItemOut(_IdOut):
     material_id: int
     material_code: Optional[str] = None
     material_name: Optional[str] = None
-    location_id: Optional[int] = None
     quantity: Decimal
     qualified_qty: Decimal
     remark: Optional[str] = None
@@ -401,7 +399,6 @@ class ReceiptReportOut(BaseModel):
     material_code: Optional[str] = None
     material_name: Optional[str] = None
     warehouse_id: int
-    location_id: Optional[int] = None
     quantity: Decimal
     qualified_qty: Decimal
 

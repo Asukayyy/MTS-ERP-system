@@ -193,7 +193,6 @@ onMounted(load)
               <el-table-column label="物料ID" prop="material_id" width="90" align="right" />
               <el-table-column label="到货数量" prop="quantity" width="110" align="right" />
               <el-table-column label="合格数量" prop="qualified_qty" width="110" align="right" />
-              <el-table-column label="收货库位ID" prop="location_id" width="110" align="right" />
               <el-table-column label="备注" prop="remark" min-width="140" />
               <template #empty>暂无到货明细</template>
             </el-table>

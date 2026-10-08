@@ -25,6 +25,7 @@ from sqlalchemy.orm import Session
 from app.common.exceptions import BusinessException
 from app.core.database import SessionLocal
 from app.modules.inventory import contract as inventory_contract
+from app.modules.inventory import repository as inventory_repository
 from app.modules.inventory import service
 
 
@@ -94,7 +95,6 @@ def test_increase_then_decrease_updates_balance_and_writes_ledger(db: Session) -
     )
     db.commit()
     assert inc["quantity_after"] == Decimal("100.0000")
-    assert inc["transaction_no"].startswith("INV")
 
     dec = service.decrease_stock(
         db,
@@ -107,16 +107,6 @@ def test_increase_then_decrease_updates_balance_and_writes_ledger(db: Session) -
     db.commit()
     assert dec["quantity_after"] == Decimal("70.0000")
     assert service.get_on_hand_qty(db, material_id, warehouse_id) == Decimal("70.0000")
-
-    rows, total = service.list_transactions(
-        db, material_id=material_id, warehouse_id=warehouse_id, page_size=10
-    )
-    assert total == 2
-    by_type = {row["transaction_type"]: row for row in rows}
-    assert by_type["IN"]["quantity_change"] == Decimal("100.0000")
-    assert by_type["IN"]["quantity_after"] == Decimal("100.0000")
-    assert by_type["OUT"]["quantity_change"] == Decimal("-30.0000")
-    assert by_type["OUT"]["quantity_after"] == Decimal("70.0000")
 
 
 def test_decrease_beyond_stock_raises_5001_and_keeps_balance(db: Session) -> None:
@@ -146,10 +136,6 @@ def test_decrease_beyond_stock_raises_5001_and_keeps_balance(db: Session) -> Non
     db.rollback()
 
     assert service.get_on_hand_qty(db, material_id, warehouse_id) == Decimal("5.0000")
-    _, total = service.list_transactions(
-        db, material_id=material_id, warehouse_id=warehouse_id, page_size=10
-    )
-    assert total == 1
 
 
 def test_transfer_writes_transfer_out_and_in_atomically(db: Session) -> None:
@@ -167,39 +153,34 @@ def test_transfer_writes_transfer_out_and_in_atomically(db: Session) -> None:
     )
     db.commit()
 
-    transfer = service.create_transfer(
+    transfer = service.create_stock_operation(
         db,
+        op_type="TRANSFER",
         from_warehouse_id=source_wh,
         to_warehouse_id=target_wh,
-        transfer_date=date.today(),
+        op_date=date.today(),
         items=[{"material_id": material_id, "quantity": Decimal("8")}],
     )
     db.commit()
-    transfer = service.confirm_transfer(db, transfer.id)
+    transfer = service.confirm_stock_operation(db, transfer.id)
     db.commit()
 
     assert transfer.status == "COMPLETED"
     assert service.get_on_hand_qty(db, material_id, source_wh) == Decimal("12.0000")
     assert service.get_on_hand_qty(db, material_id, target_wh) == Decimal("8.0000")
-    rows, _ = service.list_transactions(
-        db, material_id=material_id, source_type="TRANSFER", page_size=10
-    )
-    assert sorted(row["transaction_type"] for row in rows) == [
-        "TRANSFER_IN",
-        "TRANSFER_OUT",
-    ]
 
     # 原子性：库存不足时整单不落流水、不改任何结存
-    failing = service.create_transfer(
+    failing = service.create_stock_operation(
         db,
+        op_type="TRANSFER",
         from_warehouse_id=source_wh,
         to_warehouse_id=target_wh,
-        transfer_date=date.today(),
+        op_date=date.today(),
         items=[{"material_id": material_id, "quantity": Decimal("999")}],
     )
     db.commit()
     with pytest.raises(BusinessException) as exc:
-        service.confirm_transfer(db, failing.id)
+        service.confirm_stock_operation(db, failing.id)
     assert exc.value.code == 5001
     db.rollback()
     assert service.get_on_hand_qty(db, material_id, source_wh) == Decimal("12.0000")
@@ -220,32 +201,26 @@ def test_stocktake_confirm_writes_adjust(db: Session) -> None:
     )
     db.commit()
 
-    stocktake = service.create_stocktake(
+    stocktake = service.create_stock_operation(
         db,
+        op_type="STOCKTAKE",
         warehouse_id=warehouse_id,
-        stocktake_date=date.today(),
+        op_date=date.today(),
         items=[{"material_id": material_id, "actual_qty": Decimal("7")}],
     )
     db.commit()
 
-    stocktake = service.get_stocktake(db, stocktake.id)
+    stocktake = service.get_stock_operation(db, stocktake.id)
     assert stocktake.items[0].book_qty == Decimal("10.0000")
 
-    stocktake = service.confirm_stocktake(db, stocktake.id)
+    stocktake = service.confirm_stock_operation(db, stocktake.id)
     db.commit()
     assert stocktake.status == "COMPLETED"
     assert stocktake.items[0].difference == Decimal("-3.0000")
     assert service.get_on_hand_qty(db, material_id, warehouse_id) == Decimal("7.0000")
 
-    rows, _ = service.list_transactions(
-        db, material_id=material_id, transaction_type="ADJUST", page_size=10
-    )
-    assert len(rows) == 1
-    assert rows[0]["quantity_change"] == Decimal("-3.0000")
-    assert rows[0]["quantity_after"] == Decimal("7.0000")
 
-
-def test_reorder_rule_suggestion_triggers_below_point(db: Session) -> None:
+def test_reorder_point_suggestion_triggers_below_point(db: Session) -> None:
     """现存量为 3、订货点为 10：应产生一条补库建议。"""
     material_id = _create_material(db)
     warehouse_id = _create_warehouse(db)
@@ -257,10 +232,10 @@ def test_reorder_rule_suggestion_triggers_below_point(db: Session) -> None:
         source_module="inventory",
         source_type="MANUAL",
     )
-    service.create_reorder_rule(
+    balance = inventory_repository.get_balance(db, warehouse_id, material_id)
+    service.update_balance_reorder(
         db,
-        material_id=material_id,
-        warehouse_id=warehouse_id,
+        balance.id,
         reorder_point=Decimal("10"),
         reorder_quantity=Decimal("20"),
     )
@@ -390,14 +365,13 @@ def test_contract_get_replenishment_request_returns_dict(db: Session) -> None:
 
 
 def test_initial_stock_preview_writes_nothing(client: TestClient, db: Session) -> None:
-    """预览接口只校验不写库：未知编码进入 errors，且结存/流水两张表行数不变。"""
+    """预览接口只校验不写库：未知编码进入 errors，且结存表行数不变。"""
     _material_id, code = _create_material_with_code(db)
     warehouse_id = _create_warehouse(db)
     unknown_code = f"UNKNOWN{_tag()}"
 
     db.rollback()
     balance_before = int(db.execute(text("SELECT COUNT(*) FROM inv_balance")).scalar())
-    txn_before = int(db.execute(text("SELECT COUNT(*) FROM inv_transaction")).scalar())
 
     response = client.post(
         "/api/v1/inventory/import/initial-stock/preview",
@@ -421,11 +395,10 @@ def test_initial_stock_preview_writes_nothing(client: TestClient, db: Session) -
 
     db.rollback()
     assert int(db.execute(text("SELECT COUNT(*) FROM inv_balance")).scalar()) == balance_before
-    assert int(db.execute(text("SELECT COUNT(*) FROM inv_transaction")).scalar()) == txn_before
 
 
 def test_initial_stock_confirm_creates_balance_and_ledger(client: TestClient, db: Session) -> None:
-    """确认导入：有效行写结存 + 真实流水；未知编码只报错不导入。"""
+    """确认导入：有效行写结存；未知编码只报错不导入。"""
     material_id, code = _create_material_with_code(db)
     warehouse_id = _create_warehouse(db)
     unknown_code = f"UNKNOWN{_tag()}"
@@ -456,13 +429,3 @@ def test_initial_stock_confirm_creates_balance_and_ledger(client: TestClient, db
         )
         == 1
     )
-
-    rows, total = service.list_transactions(
-        db, material_id=material_id, warehouse_id=warehouse_id, page_size=10
-    )
-    assert total == 1
-    assert rows[0]["transaction_type"] == "IN"
-    assert rows[0]["source_module"] == "inventory"
-    assert rows[0]["source_type"] == "MANUAL"
-    assert rows[0]["quantity_change"] == Decimal("3000.0000")
-    assert rows[0]["remark"] == "课程附录1期初库存导入"

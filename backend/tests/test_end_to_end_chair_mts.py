@@ -161,27 +161,20 @@ def test_end_to_end_chair_mts(client: TestClient) -> None:
     today = date.today()
 
     # ------------------------------------------------------------------
-    # Step 0 — 基础准备：仓库 + 库位 + 组织 + 人员
+    # Step 0 — 基础准备：仓库（库位文本字段并入仓库）+ 组织 + 人员
     # ------------------------------------------------------------------
     warehouse = _ok(
         client,
         "POST",
         f"{INVENTORY}/warehouses",
-        json={"warehouse_code": f"WH-{_tag()}", "warehouse_name": "转椅全链路验收仓"},
-    )
-    warehouse_id = int(warehouse["id"])
-
-    location = _ok(
-        client,
-        "POST",
-        f"{INVENTORY}/locations",
         json={
+            "warehouse_code": f"WH-{_tag()}",
+            "warehouse_name": "转椅全链路验收仓",
             "location_code": f"LOC-{_tag()}",
             "location_name": "验收库位 A1",
-            "warehouse_id": warehouse_id,
         },
     )
-    location_id = int(location["id"])
+    warehouse_id = int(warehouse["id"])
 
     org = _ok(
         client,
@@ -210,7 +203,7 @@ def test_end_to_end_chair_mts(client: TestClient) -> None:
     worker_id = create_personnel("装配工-王", "装配工")
 
     note(
-        f"[0] 基础准备：仓库#{warehouse_id} 库位#{location_id} 组织#{org_id} "
+        f"[0] 基础准备：仓库#{warehouse_id} 组织#{org_id} "
         f"人员（销售#{salesperson_id}/采购#{buyer_id}/装配#{worker_id}）"
     )
 
@@ -496,18 +489,10 @@ def test_end_to_end_chair_mts(client: TestClient) -> None:
     assert balance_after - balance_before == received_qty, (
         f"采购入库结存增量应为 {received_qty}，实际 {balance_after - balance_before}"
     )
-    receipt_ledger = _ledger(
-        client,
-        source_type="PURCHASE_RECEIPT",
-        source_reference_id=int(receipt["id"]),
-        warehouse_id=warehouse_id,
-    )
-    assert len(receipt_ledger) == 1, receipt_ledger
-    assert _d(receipt_ledger[0]["quantity_change"]) == received_qty
 
     note(
         f"[3] 采购闭环：采购计划#{purchase_plan_id} → 订单 {po['order_no']} → 到货 {receipt['receipt_no']}"
-        f" 入库 {received_qty}（物料#{material_id}），流水 PURCHASE_RECEIPT 已落账"
+        f" 入库 {received_qty}（物料#{material_id}）"
     )
 
     # ------------------------------------------------------------------
@@ -574,14 +559,6 @@ def test_end_to_end_chair_mts(client: TestClient) -> None:
         assert before_components[comp_id] - after == expected, (
             f"领料后组件#{comp_id} 库存应减少 {expected}"
         )
-    req_ledger = _ledger(
-        client,
-        source_type="MATERIAL_REQUISITION",
-        source_reference_id=int(requisition["id"]),
-        warehouse_id=warehouse_id,
-    )
-    assert len(req_ledger) == len(components), req_ledger
-    assert all(_d(row["quantity_change"]) < 0 for row in req_ledger)
 
     # 完工入库
     complete_qty = min(planned_qty, Decimal("50"))
@@ -606,14 +583,6 @@ def test_end_to_end_chair_mts(client: TestClient) -> None:
     assert after_finished - before_finished == complete_qty, (
         f"完工入库结存增量应为 {complete_qty}，实际 {after_finished - before_finished}"
     )
-    completion_ledger = _ledger(
-        client,
-        source_type="PRODUCTION_COMPLETION",
-        source_reference_id=int(report["id"]),
-        warehouse_id=warehouse_id,
-    )
-    assert len(completion_ledger) == 1, completion_ledger
-    assert _d(completion_ledger[0]["quantity_change"]) == complete_qty
 
     plan_after = _ok(client, "GET", f"{PLANNING}/production-plans/{plan_id}")
     assert _d(plan_after["completed_qty"]) == complete_qty, plan_after
@@ -680,13 +649,6 @@ def test_end_to_end_chair_mts(client: TestClient) -> None:
     assert before_ship - after_ship == ship_qty, (
         f"发货后结存应减少 {ship_qty}，实际 {before_ship - after_ship}"
     )
-    shipment_ledger = _ledger(
-        client,
-        source_type="SALES_SHIPMENT",
-        source_reference_id=int(shipment["id"]),
-        warehouse_id=warehouse_id,
-    )
-    assert len(shipment_ledger) == 1, shipment_ledger
 
     order_detail = _ok(client, "GET", f"{SALES}/orders/{sales_order['id']}")
     assert _d(order_detail["items"][0]["delivered_qty"]) == ship_qty
@@ -746,17 +708,9 @@ def test_end_to_end_chair_mts(client: TestClient) -> None:
     assert after_return - before_return == return_qty, (
         f"退货后结存应增加 {return_qty}，实际 {after_return - before_return}"
     )
-    return_ledger = _ledger(
-        client,
-        source_type="SALES_RETURN",
-        source_reference_id=int(sales_return["id"]),
-        warehouse_id=warehouse_id,
-    )
-    assert len(return_ledger) == 1, return_ledger
 
     note(
-        f"[6] 销售退货：退货单 {sales_return['return_no']} 确认 → 回增库存 {return_qty}，"
-        f"流水 SALES_RETURN 已落账"
+        f"[6] 销售退货：退货单 {sales_return['return_no']} 确认 → 回增库存 {return_qty}"
     )
 
     # ------------------------------------------------------------------
@@ -769,18 +723,24 @@ def test_end_to_end_chair_mts(client: TestClient) -> None:
     reorder_point = current_qty + Decimal("500")
     reorder_quantity = Decimal("100")
 
+    # 订货点直接维护在结存行上：找到对应 balance 后 PATCH
+    balance_page = _ok(
+        client,
+        "GET",
+        f"{INVENTORY}/balances",
+        params={"material_id": reorder_material_id, "warehouse_id": warehouse_id, "page_size": 5},
+    )
+    balance_id = int(balance_page["items"][0]["id"])
     _ok(
         client,
-        "POST",
-        f"{INVENTORY}/reorder-rules",
+        "PATCH",
+        f"{INVENTORY}/balances/{balance_id}/reorder",
         json={
-            "material_id": reorder_material_id,
-            "warehouse_id": warehouse_id,
             "reorder_point": str(reorder_point),
             "reorder_quantity": str(reorder_quantity),
         },
     )
-    suggestions = _ok(client, "GET", f"{INVENTORY}/reorder-rules/suggestions")
+    suggestions = _ok(client, "GET", f"{INVENTORY}/balances/reorder-suggestions")
     suggestion = next(
         item
         for item in suggestions

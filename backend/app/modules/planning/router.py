@@ -686,7 +686,6 @@ def create_completion_report(
         report_date=payload.report_date,
         plan_id=payload.plan_id,
         dispatch_id=payload.dispatch_id,
-        location_id=payload.location_id,
         scrap_qty=payload.scrap_qty,
         report_no=payload.report_no,
         remark=payload.remark,
