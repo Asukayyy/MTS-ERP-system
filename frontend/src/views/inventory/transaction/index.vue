@@ -1,49 +1,33 @@
 <script setup lang="ts">
 import { onMounted } from 'vue'
 
-import { listTransactions, listWarehouses } from '@/api/inventory'
+import { listStockOperations, listWarehouses } from '@/api/inventory'
 import RemoteSelect from '@/components/common/RemoteSelect.vue'
 import StatusTag from '@/components/common/StatusTag.vue'
 import { usePagedTable } from '@/composables/usePagedTable'
-import type { RemoteOption, Transaction } from '@/types/erp'
+import type { RemoteOption, StockOperation } from '@/types/erp'
 
+/**
+ * 库存变动记录页：流水表已删除，变动记录从库存操作单（移库+盘点）聚合展示。
+ * 手工入/出库直接改结存、不留单据，不在此页展示。
+ */
 const { loading, rows, total, page, pageSize, query, load, search, reset, changePage, changeSize } =
   usePagedTable<
-    Transaction,
+    StockOperation,
     {
-      keyword: string
-      transaction_type: string
-      source_type: string
+      op_type: string
       warehouse_id: number | undefined
-      date_from: string
-      date_to: string
+      status: string
     }
-  >((params) => listTransactions(params), {
-    keyword: '',
-    transaction_type: '',
-    source_type: '',
+  >((params) => listStockOperations(params), {
+    op_type: '',
     warehouse_id: undefined,
-    date_from: '',
-    date_to: '',
+    status: '',
   })
 
-const TXN_TYPES = [
-  { label: '入库', value: 'IN' },
-  { label: '出库', value: 'OUT' },
-  { label: '移库入库', value: 'TRANSFER_IN' },
-  { label: '移库出库', value: 'TRANSFER_OUT' },
-  { label: '盘点调整', value: 'ADJUST' },
-]
-
-const SOURCE_TYPES = [
-  { label: '采购到货', value: 'PURCHASE_RECEIPT' },
-  { label: '生产完工', value: 'PRODUCTION_COMPLETION' },
-  { label: '生产领料', value: 'MATERIAL_REQUISITION' },
-  { label: '销售发货', value: 'SALES_SHIPMENT' },
-  { label: '销售退货', value: 'SALES_RETURN' },
+const OP_TYPES = [
   { label: '移库', value: 'TRANSFER' },
   { label: '盘点', value: 'STOCKTAKE' },
-  { label: '手工', value: 'MANUAL' },
 ]
 
 async function loadWarehouseOptions(keyword: string): Promise<RemoteOption[]> {
@@ -59,31 +43,25 @@ onMounted(load)
     <el-card shadow="never">
       <template #header>
         <div class="table-toolbar">
-          <span class="page-title">库存流水</span>
+          <span class="page-title">库存变动记录</span>
         </div>
       </template>
 
       <el-form class="filter-bar" :inline="true" @submit.prevent>
-        <el-form-item label="物料">
-          <el-input v-model="query.keyword" placeholder="物料编码 / 名称" clearable style="width: 180px" />
-        </el-form-item>
-        <el-form-item label="流水类型">
-          <el-select v-model="query.transaction_type" clearable placeholder="全部" style="width: 140px">
-            <el-option v-for="item in TXN_TYPES" :key="item.value" :label="item.label" :value="item.value" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="来源业务">
-          <el-select v-model="query.source_type" clearable placeholder="全部" style="width: 150px">
-            <el-option v-for="item in SOURCE_TYPES" :key="item.value" :label="item.label" :value="item.value" />
+        <el-form-item label="操作类型">
+          <el-select v-model="query.op_type" clearable placeholder="全部" style="width: 140px">
+            <el-option v-for="item in OP_TYPES" :key="item.value" :label="item.label" :value="item.value" />
           </el-select>
         </el-form-item>
         <el-form-item label="仓库">
           <RemoteSelect v-model="query.warehouse_id" :loader="loadWarehouseOptions" placeholder="全部" style="width: 200px" />
         </el-form-item>
-        <el-form-item label="业务日期">
-          <el-date-picker v-model="query.date_from" type="date" value-format="YYYY-MM-DD" placeholder="开始" style="width: 150px" />
-          <span style="margin: 0 6px">至</span>
-          <el-date-picker v-model="query.date_to" type="date" value-format="YYYY-MM-DD" placeholder="结束" style="width: 150px" />
+        <el-form-item label="状态">
+          <el-select v-model="query.status" clearable placeholder="全部" style="width: 130px">
+            <el-option label="草稿" value="DRAFT" />
+            <el-option label="已完成" value="COMPLETED" />
+            <el-option label="已取消" value="CANCELLED" />
+          </el-select>
         </el-form-item>
         <el-form-item>
           <el-button type="primary" @click="search">查询</el-button>
@@ -92,26 +70,35 @@ onMounted(load)
       </el-form>
 
       <el-table v-loading="loading" :data="rows" border size="small">
-        <el-table-column label="流水号" prop="transaction_no" min-width="150" />
-        <el-table-column label="类型" width="110">
-          <template #default="{ row }"><StatusTag :status="row.transaction_type" /></template>
-        </el-table-column>
-        <el-table-column label="物料编码" prop="material_code" min-width="120" />
-        <el-table-column label="物料名称" prop="material_name" min-width="150" />
-        <el-table-column label="仓库ID" prop="warehouse_id" width="90" align="right" />
-        <el-table-column label="库位ID" prop="location_id" width="90" align="right" />
-        <el-table-column label="变动数量" prop="quantity_change" width="110" align="right" />
-        <el-table-column label="结存数量" prop="quantity_after" width="110" align="right" />
-        <el-table-column label="单位成本" prop="unit_cost" width="110" align="right" />
-        <el-table-column label="业务日期" prop="biz_date" width="110" />
-        <el-table-column label="来源单据" prop="source_no" min-width="140" />
-        <el-table-column label="来源" width="130">
+        <el-table-column type="expand">
           <template #default="{ row }">
-            {{ SOURCE_TYPES.find((item) => item.value === row.source_type)?.label || row.source_type }}
+            <el-table class="nested-table" :data="row.items" border size="small">
+              <el-table-column label="物料ID" prop="material_id" width="90" align="right" />
+              <template v-if="row.op_type === 'TRANSFER'">
+                <el-table-column label="移库数量" prop="quantity" width="110" align="right" />
+              </template>
+              <template v-else>
+                <el-table-column label="账面数量" prop="book_qty" width="110" align="right" />
+                <el-table-column label="实盘数量" prop="actual_qty" width="110" align="right" />
+                <el-table-column label="差异" prop="difference" width="110" align="right" />
+              </template>
+              <el-table-column label="备注" prop="remark" min-width="140" />
+              <template #empty>暂无明细</template>
+            </el-table>
           </template>
         </el-table-column>
+        <el-table-column label="单号" prop="operation_no" min-width="150" />
+        <el-table-column label="类型" prop="op_type" width="100">
+          <template #default="{ row }">{{ OP_TYPES.find((t) => t.value === row.op_type)?.label || row.op_type }}</template>
+        </el-table-column>
+        <el-table-column label="源仓库ID" prop="from_warehouse_id" width="100" align="right" />
+        <el-table-column label="目标/盘点仓库ID" prop="warehouse_id" width="130" align="right" />
+        <el-table-column label="日期" prop="op_date" width="110" />
+        <el-table-column label="状态" width="100">
+          <template #default="{ row }"><StatusTag :status="row.status" /></template>
+        </el-table-column>
         <el-table-column label="备注" prop="remark" min-width="140" />
-        <template #empty>暂无库存流水数据</template>
+        <template #empty>暂无库存变动记录</template>
       </el-table>
 
       <div class="pager">
@@ -128,3 +115,10 @@ onMounted(load)
     </el-card>
   </div>
 </template>
+
+<style scoped>
+.nested-table {
+  margin: 4px 0 4px 48px;
+  width: calc(100% - 48px);
+}
+</style>

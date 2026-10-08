@@ -43,6 +43,8 @@ class WarehouseCreate(BaseModel):
     org_id: Optional[int] = Field(default=None, description="所属组织ID")
     manager_id: Optional[int] = Field(default=None, description="仓库负责人ID（sys_personnel.id）")
     address: Optional[str] = Field(default=None, max_length=200, description="地址")
+    location_code: Optional[str] = Field(default=None, max_length=50, description="库位编码（文本）")
+    location_name: Optional[str] = Field(default=None, max_length=100, description="库位名称（文本）")
     remark: Optional[str] = None
     operator_id: Optional[int] = Field(default=None, description="操作人ID")
 
@@ -54,6 +56,8 @@ class WarehouseUpdate(BaseModel):
     org_id: Optional[int] = None
     manager_id: Optional[int] = None
     address: Optional[str] = Field(default=None, max_length=200)
+    location_code: Optional[str] = Field(default=None, max_length=50)
+    location_name: Optional[str] = Field(default=None, max_length=100)
     remark: Optional[str] = None
     operator_id: Optional[int] = None
 
@@ -65,44 +69,16 @@ class StatusUpdate(BaseModel):
     operator_id: Optional[int] = Field(default=None, description="操作人ID")
 
 
-class LocationOut(_IdOut):
-    location_code: str
-    location_name: str
-    warehouse_id: int
-    status: str
-    remark: Optional[str] = None
-
-
 class WarehouseOut(_IdOut):
     warehouse_code: str
     warehouse_name: str
     org_id: Optional[int] = None
     manager_id: Optional[int] = None
     address: Optional[str] = None
+    location_code: Optional[str] = None
+    location_name: Optional[str] = None
     status: str
     remark: Optional[str] = None
-    locations: List[LocationOut] = Field(default_factory=list)
-
-
-# ==================== 库位 ====================
-
-
-class LocationCreate(BaseModel):
-    """库位新增入参。"""
-
-    location_code: str = Field(max_length=50, description="库位编码")
-    location_name: str = Field(max_length=100, description="库位名称")
-    warehouse_id: int = Field(description="所属仓库ID")
-    remark: Optional[str] = None
-    operator_id: Optional[int] = None
-
-
-class LocationUpdate(BaseModel):
-    """库位修改入参。"""
-
-    location_name: Optional[str] = Field(default=None, max_length=100)
-    remark: Optional[str] = None
-    operator_id: Optional[int] = None
 
 
 # ==================== 实时库存 ====================
@@ -116,10 +92,19 @@ class BalanceOut(_IdOut):
     material_name: Optional[str] = None
     warehouse_id: int
     warehouse_name: Optional[str] = None
-    location_id: Optional[int] = None
     on_hand: Decimal
     locked_quantity: Decimal
     available_quantity: Decimal
+    reorder_point: Optional[Decimal] = Field(default=None, description="订货点（仅 A 类物料配置，未配置为 null）")
+    reorder_quantity: Optional[Decimal] = Field(default=None, description="建议订货量（仅 A 类物料配置）")
+
+
+class BalanceReorderUpdate(BaseModel):
+    """结存订货点修改入参（原订货点规则维护并入结存行）。"""
+
+    reorder_point: Optional[Decimal] = Field(default=None, ge=0, description="订货点")
+    reorder_quantity: Optional[Decimal] = Field(default=None, ge=0, description="建议订货量")
+    operator_id: Optional[int] = None
 
 
 class AvailableStockOut(BaseModel):
@@ -132,30 +117,6 @@ class AvailableStockOut(BaseModel):
     available_quantity: Decimal
 
 
-# ==================== 库存流水 ====================
-
-
-class TransactionOut(_IdOut):
-    transaction_no: str
-    transaction_type: str
-    material_id: int
-    material_code: Optional[str] = None
-    material_name: Optional[str] = None
-    warehouse_id: int
-    location_id: Optional[int] = None
-    quantity_change: Decimal
-    quantity_after: Decimal
-    unit_cost: Decimal
-    biz_date: date
-    source_module: str
-    source_type: str
-    source_reference_id: Optional[int] = None
-    source_no: Optional[str] = None
-    operator_id: Optional[int] = None
-    remark: Optional[str] = None
-    created_at: datetime
-
-
 # ==================== 手工入 / 出库 ====================
 
 
@@ -164,7 +125,6 @@ class StockIncreaseCreate(BaseModel):
 
     material_id: int = Field(description="物料ID")
     warehouse_id: int = Field(description="仓库ID")
-    location_id: Optional[int] = Field(default=None, description="库位ID")
     quantity: Decimal = Field(gt=0, description="入库数量（正数）")
     unit_cost: Decimal = Field(default=Decimal("0"), ge=0, description="单位成本")
     biz_date: Optional[date] = Field(default=None, description="业务日期，缺省为当天")
@@ -177,7 +137,6 @@ class StockDecreaseCreate(BaseModel):
 
     material_id: int = Field(description="物料ID")
     warehouse_id: int = Field(description="仓库ID")
-    location_id: Optional[int] = Field(default=None, description="库位ID")
     quantity: Decimal = Field(gt=0, description="出库数量（正数）")
     unit_cost: Decimal = Field(default=Decimal("0"), ge=0, description="单位成本")
     biz_date: Optional[date] = Field(default=None, description="业务日期，缺省为当天")
@@ -188,135 +147,69 @@ class StockDecreaseCreate(BaseModel):
 class StockChangeOut(BaseModel):
     """库存变动结果出参。"""
 
-    transaction_id: int
-    transaction_no: str
     quantity_after: Decimal
 
 
-# ==================== 移库 ====================
+# ==================== 库存操作单（移库 / 盘点） ====================
 
 
-class TransferItemCreate(BaseModel):
-    """移库明细行入参。"""
+class StockOperationItemCreate(BaseModel):
+    """操作单明细行入参。
+
+    - TRANSFER：填 `quantity`；
+    - STOCKTAKE：填 `actual_qty`（`book_qty` 留空时按当前结存自动带出）。
+    """
 
     material_id: int
-    from_location_id: Optional[int] = Field(default=None, description="源库位ID")
-    to_location_id: Optional[int] = Field(default=None, description="目标库位ID")
-    quantity: Decimal = Field(gt=0, description="移库数量")
+    quantity: Optional[Decimal] = Field(default=None, gt=0, description="移库数量（TRANSFER 用）")
+    book_qty: Optional[Decimal] = Field(default=None, ge=0, description="账面数量（STOCKTAKE 用，留空自动取当前结存）")
+    actual_qty: Optional[Decimal] = Field(default=None, ge=0, description="实盘数量（STOCKTAKE 用）")
     remark: Optional[str] = None
 
 
-class TransferCreate(BaseModel):
-    """移库单新增入参（单头 + 明细）。"""
+class StockOperationCreate(BaseModel):
+    """库存操作单新增入参（单头 + 明细），`op_type` 区分移库 / 盘点。"""
 
-    transfer_no: Optional[str] = Field(default=None, description="移库单号，留空自动生成")
-    from_warehouse_id: int = Field(description="源仓库ID")
-    to_warehouse_id: int = Field(description="目标仓库ID")
-    transfer_date: date = Field(description="移库日期")
+    op_type: str = Field(description="操作类型 TRANSFER/STOCKTAKE")
+    operation_no: Optional[str] = Field(default=None, description="操作单号，留空自动生成")
+    from_warehouse_id: Optional[int] = Field(default=None, description="源仓库ID（TRANSFER 必填）")
+    to_warehouse_id: Optional[int] = Field(default=None, description="目标仓库ID（TRANSFER 必填）")
+    warehouse_id: Optional[int] = Field(default=None, description="仓库ID（STOCKTAKE 必填）")
+    op_date: date = Field(description="业务日期（移库/盘点日期）")
     remark: Optional[str] = None
     operator_id: Optional[int] = None
-    items: List[TransferItemCreate] = Field(default_factory=list, description="移库明细")
+    items: List[StockOperationItemCreate] = Field(default_factory=list, description="明细")
 
 
-class TransferItemOut(_IdOut):
-    transfer_id: int
+class StockOperationItemOut(_IdOut):
+    operation_id: int
     material_id: int
-    from_location_id: Optional[int] = None
-    to_location_id: Optional[int] = None
-    quantity: Decimal
+    quantity: Optional[Decimal] = None
+    book_qty: Optional[Decimal] = None
+    actual_qty: Optional[Decimal] = None
+    difference: Optional[Decimal] = None
     remark: Optional[str] = None
 
 
-class TransferOut(_IdOut):
-    transfer_no: str
-    from_warehouse_id: int
-    to_warehouse_id: int
-    transfer_date: date
+class StockOperationOut(_IdOut):
+    operation_no: str
+    op_type: str
+    from_warehouse_id: Optional[int] = None
+    to_warehouse_id: Optional[int] = None
+    warehouse_id: Optional[int] = None
+    op_date: date
     status: str
     remark: Optional[str] = None
-    items: List[TransferItemOut] = Field(default_factory=list)
+    items: List[StockOperationItemOut] = Field(default_factory=list)
 
 
-# ==================== 盘点 ====================
-
-
-class StocktakeItemCreate(BaseModel):
-    """盘点明细行入参。`book_qty` 留空时按当前结存自动带出。"""
-
-    material_id: int
-    location_id: Optional[int] = Field(default=None, description="库位ID")
-    book_qty: Optional[Decimal] = Field(default=None, ge=0, description="账面数量，留空自动取当前结存")
-    actual_qty: Decimal = Field(ge=0, description="实盘数量")
-    remark: Optional[str] = None
-
-
-class StocktakeCreate(BaseModel):
-    """盘点单新增入参（单头 + 明细）。"""
-
-    stocktake_no: Optional[str] = Field(default=None, description="盘点单号，留空自动生成")
-    warehouse_id: int = Field(description="盘点仓库ID")
-    stocktake_date: date = Field(description="盘点日期")
-    remark: Optional[str] = None
-    operator_id: Optional[int] = None
-    items: List[StocktakeItemCreate] = Field(default_factory=list, description="盘点明细")
-
-
-class StocktakeItemOut(_IdOut):
-    stocktake_id: int
-    material_id: int
-    location_id: Optional[int] = None
-    book_qty: Decimal
-    actual_qty: Decimal
-    difference: Decimal
-    remark: Optional[str] = None
-
-
-class StocktakeOut(_IdOut):
-    stocktake_no: str
-    warehouse_id: int
-    stocktake_date: date
-    status: str
-    remark: Optional[str] = None
-    items: List[StocktakeItemOut] = Field(default_factory=list)
-
-
-# ==================== 订货点规则 ====================
-
-
-class ReorderRuleCreate(BaseModel):
-    """订货点规则新增入参。"""
-
-    material_id: int
-    warehouse_id: int
-    reorder_point: Decimal = Field(ge=0, description="订货点")
-    reorder_quantity: Decimal = Field(ge=0, description="建议订货量")
-    remark: Optional[str] = None
-    operator_id: Optional[int] = None
-
-
-class ReorderRuleUpdate(BaseModel):
-    """订货点规则修改入参。"""
-
-    reorder_point: Optional[Decimal] = Field(default=None, ge=0)
-    reorder_quantity: Optional[Decimal] = Field(default=None, ge=0)
-    remark: Optional[str] = None
-    operator_id: Optional[int] = None
-
-
-class ReorderRuleOut(_IdOut):
-    material_id: int
-    material_code: Optional[str] = None
-    material_name: Optional[str] = None
-    warehouse_id: int
-    reorder_point: Decimal
-    reorder_quantity: Decimal
-    status: str
-    remark: Optional[str] = None
+# ==================== 订货点（直接维护在结存上） ====================
 
 
 class ReorderSuggestionOut(BaseModel):
     """补库建议：当前库存低于订货点时的建议。"""
 
+    balance_id: int
     material_id: int
     warehouse_id: int
     reorder_point: Decimal
@@ -394,7 +287,7 @@ class LowStockOut(BaseModel):
 
 
 class FlowSummaryOut(BaseModel):
-    """出入库汇总行。"""
+    """出入库汇总行（基于库存操作单聚合）。"""
 
     transaction_type: str
     material_id: int
@@ -407,12 +300,10 @@ class InventoryStatsOut(BaseModel):
     """库存模块统计（供 dashboard 使用）。"""
 
     warehouse_count: int
-    location_count: int
     balance_count: int
-    transaction_count: int
+    stock_operation_count: int
     transfer_count: int
     stocktake_count: int
-    reorder_rule_count: int
     replenishment_request_count: int
     low_stock_count: int
 
@@ -433,7 +324,6 @@ class InitialStockImportRequest(BaseModel):
     source: Optional[str] = Field(default=None, description="数据来源，如 course_chair_case")
     warehouse_id: Optional[int] = Field(default=None, description="导入仓库ID")
     warehouse_code: Optional[str] = Field(default=None, max_length=50, description="导入仓库编码")
-    location_id: Optional[int] = Field(default=None, description="导入库位ID")
     rows: List[InitialStockRowCreate] = Field(default_factory=list, description="显式导入行")
     operator_id: Optional[int] = Field(default=None, description="操作人ID")
 

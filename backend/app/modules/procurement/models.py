@@ -300,9 +300,6 @@ class PurReceiptItem(Base, AuditMixin):
     material_id: Mapped[BigIntFk] = mapped_column(
         ForeignKey("sys_material.id", ondelete="RESTRICT"), nullable=False, index=True, comment="物料ID"
     )
-    location_id: Mapped[Optional[BigIntFk]] = mapped_column(
-        ForeignKey("inv_location.id", ondelete="RESTRICT"), nullable=True, comment="收货库位ID"
-    )
     quantity: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, comment="到货数量")
     qualified_qty: Mapped[Decimal] = mapped_column(
         Numeric(18, 4), nullable=False, default=0, comment="合格数量"

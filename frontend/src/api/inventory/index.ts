@@ -1,21 +1,16 @@
-import { del, get, patch, post, put } from '@/utils/request'
+import { get, patch, post, put } from '@/utils/request'
 import type { HealthData, PageData } from '@/types/api'
 import type {
   Balance,
-  FlowSummaryRow,
   InitialStockConfirm,
   InitialStockPreview,
   InventoryStats,
-  Location,
   LowStock,
-  ReorderRule,
   ReorderSuggestion,
   ReplenishmentRequest,
   StockChangeResult,
+  StockOperation,
   StockSummary,
-  Stocktake,
-  Transaction,
-  Transfer,
   Warehouse,
 } from '@/types/erp'
 
@@ -29,7 +24,7 @@ export function getInventoryStats(): Promise<InventoryStats> {
   return get<InventoryStats>('/inventory/stats')
 }
 
-// ---------------- 仓库 / 库位 ----------------
+// ---------------- 仓库（库位字段并入仓库表） ----------------
 
 export function listWarehouses(params: Record<string, unknown> = {}): Promise<PageData<Warehouse>> {
   return get<PageData<Warehouse>>('/inventory/warehouses', params)
@@ -47,37 +42,13 @@ export function setWarehouseStatus(id: number, status: string): Promise<Warehous
   return patch<Warehouse>(`/inventory/warehouses/${id}/status`, { status })
 }
 
-export function listLocations(params: Record<string, unknown> = {}): Promise<PageData<Location>> {
-  return get<PageData<Location>>('/inventory/locations', params)
-}
-
-export function createLocation(payload: Record<string, unknown>): Promise<Location> {
-  return post<Location>('/inventory/locations', payload)
-}
-
-export function updateLocation(id: number, payload: Record<string, unknown>): Promise<Location> {
-  return put<Location>(`/inventory/locations/${id}`, payload)
-}
-
-export function deleteLocation(id: number): Promise<unknown> {
-  return del(`/inventory/locations/${id}`)
-}
-
-export function setLocationStatus(id: number, status: string): Promise<Location> {
-  return patch<Location>(`/inventory/locations/${id}/status`, { status })
-}
-
 // ---------------- 实时库存 / 流水 ----------------
 
 export function listBalances(params: Record<string, unknown> = {}): Promise<PageData<Balance>> {
   return get<PageData<Balance>>('/inventory/balances', params)
 }
 
-export function listTransactions(params: Record<string, unknown> = {}): Promise<PageData<Transaction>> {
-  return get<PageData<Transaction>>('/inventory/transactions', params)
-}
-
-// ---------------- 手工入 / 出库 ----------------
+// ---------------- 实时库存 ----------------
 
 export function stockIncrease(payload: Record<string, unknown>): Promise<StockChangeResult> {
   return post<StockChangeResult>('/inventory/stock/increase', payload)
@@ -87,70 +58,44 @@ export function stockDecrease(payload: Record<string, unknown>): Promise<StockCh
   return post<StockChangeResult>('/inventory/stock/decrease', payload)
 }
 
-// ---------------- 移库 ----------------
+// ---------------- 库存操作单（移库 / 盘点共用） ----------------
 
-export function listTransfers(params: Record<string, unknown> = {}): Promise<PageData<Transfer>> {
-  return get<PageData<Transfer>>('/inventory/transfers', params)
+/** op_type：TRANSFER 移库 / STOCKTAKE 盘点 */
+export function listStockOperations(
+  params: Record<string, unknown> = {},
+): Promise<PageData<StockOperation>> {
+  return get<PageData<StockOperation>>('/inventory/stock-operations', params)
 }
 
-export function createTransfer(payload: Record<string, unknown>): Promise<Transfer> {
-  return post<Transfer>('/inventory/transfers', payload)
+export function createStockOperation(payload: Record<string, unknown>): Promise<StockOperation> {
+  return post<StockOperation>('/inventory/stock-operations', payload)
 }
 
-export function confirmTransfer(id: number, operatorId?: number): Promise<Transfer> {
-  return post<Transfer>(`/inventory/transfers/${id}/confirm`, undefined, {
+export function confirmStockOperation(id: number, operatorId?: number): Promise<StockOperation> {
+  return post<StockOperation>(`/inventory/stock-operations/${id}/confirm`, undefined, {
     params: operatorId ? { operator_id: operatorId } : undefined,
   })
 }
 
-export function cancelTransfer(id: number, operatorId?: number): Promise<Transfer> {
-  return post<Transfer>(`/inventory/transfers/${id}/cancel`, undefined, {
+export function cancelStockOperation(id: number, operatorId?: number): Promise<StockOperation> {
+  return post<StockOperation>(`/inventory/stock-operations/${id}/cancel`, undefined, {
     params: operatorId ? { operator_id: operatorId } : undefined,
   })
 }
 
-// ---------------- 盘点 ----------------
+// ---------------- 订货点（直接维护在结存行上） ----------------
 
-export function listStocktakes(params: Record<string, unknown> = {}): Promise<PageData<Stocktake>> {
-  return get<PageData<Stocktake>>('/inventory/stocktakes', params)
+/** 更新结存的订货点 / 建议订货量 */
+export function updateBalanceReorder(
+  balanceId: number,
+  payload: { reorder_point: number | string; reorder_quantity: number | string; operator_id?: number },
+): Promise<Balance> {
+  return patch<Balance>(`/inventory/balances/${balanceId}/reorder`, payload)
 }
 
-export function createStocktake(payload: Record<string, unknown>): Promise<Stocktake> {
-  return post<Stocktake>('/inventory/stocktakes', payload)
-}
-
-export function confirmStocktake(id: number, operatorId?: number): Promise<Stocktake> {
-  return post<Stocktake>(`/inventory/stocktakes/${id}/confirm`, undefined, {
-    params: operatorId ? { operator_id: operatorId } : undefined,
-  })
-}
-
-export function cancelStocktake(id: number, operatorId?: number): Promise<Stocktake> {
-  return post<Stocktake>(`/inventory/stocktakes/${id}/cancel`, undefined, {
-    params: operatorId ? { operator_id: operatorId } : undefined,
-  })
-}
-
-// ---------------- 订货点 ----------------
-
-export function listReorderRules(params: Record<string, unknown> = {}): Promise<PageData<ReorderRule>> {
-  return get<PageData<ReorderRule>>('/inventory/reorder-rules', params)
-}
-
+/** 补库建议：现存量低于订货点的结存行 */
 export function listReorderSuggestions(): Promise<ReorderSuggestion[]> {
-  return get<ReorderSuggestion[]>('/inventory/reorder-rules/suggestions')
-}
-
-export function createReorderRule(payload: Record<string, unknown>): Promise<ReorderRule> {
-  return post<ReorderRule>('/inventory/reorder-rules', payload)
-}
-
-export function updateReorderRule(id: number, payload: Record<string, unknown>): Promise<ReorderRule> {
-  return put<ReorderRule>(`/inventory/reorder-rules/${id}`, payload)
-}
-
-export function setReorderRuleStatus(id: number, status: string): Promise<ReorderRule> {
-  return patch<ReorderRule>(`/inventory/reorder-rules/${id}/status`, { status })
+  return get<ReorderSuggestion[]>('/inventory/balances/reorder-suggestions')
 }
 
 // ---------------- 补库需求 ----------------
@@ -205,13 +150,6 @@ export function getLowStockReport(): Promise<LowStock[]> {
   return get<LowStock[]>('/inventory/reports/low-stock')
 }
 
-export function getFlowSummary(params: {
-  date_from: string
-  date_to: string
-}): Promise<FlowSummaryRow[]> {
-  return get<FlowSummaryRow[]>('/inventory/reports/flow-summary', params)
-}
-
 // ---------------- 课程数据导入（规格 §37） ----------------
 
 /** 期初库存导入入参：可显式给 rows，也可只给 source 由服务端读取课程数据文件 */
@@ -219,7 +157,6 @@ export interface InitialStockImportPayload {
   source?: string
   warehouse_id?: number
   warehouse_code?: string
-  location_id?: number
   rows?: Array<{ material_code: string; quantity: number | string }>
   operator_id?: number
 }

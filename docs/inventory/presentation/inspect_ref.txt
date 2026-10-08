@@ -1,0 +1,274 @@
+﻿==========================================================================================
+REF: c:\Users\23681\Desktop\课程设计参考资料\计划管理模块.pptx
+slide size: 13.33 x 7.5 in, slides=13
+-- layouts --
+  [0] '标题幻灯片' phs=[(0, <PP_PLACEHOLDER_TYPE.CENTER_TITLE: 3>, '标题 1'), (1, <PP_PLACEHOLDER_TYPE.SUBTITLE: 4>, '副标题 2'), (10, <PP_PLACEHOLDER_TYPE.DATE: 16>, '日期占位符 3'), (11, <PP_PLACEHOLDER_TYPE.FOOTER: 15>, '页脚占位符 4'), (12, <PP_PLACEHOLDER_TYPE.SLIDE_NUMBER: 13>, '灯片编号占位符 5')]
+  [1] '标题和内容' phs=[(0, <PP_PLACEHOLDER_TYPE.TITLE: 1>, '标题 1'), (1, <PP_PLACEHOLDER_TYPE.OBJECT: 7>, '内容占位符 2'), (10, <PP_PLACEHOLDER_TYPE.DATE: 16>, '日期占位符 3'), (11, <PP_PLACEHOLDER_TYPE.FOOTER: 15>, '页脚占位符 4'), (12, <PP_PLACEHOLDER_TYPE.SLIDE_NUMBER: 13>, '灯片编号占位符 5')]
+  [2] '节标题' phs=[(0, <PP_PLACEHOLDER_TYPE.TITLE: 1>, '标题 1'), (1, <PP_PLACEHOLDER_TYPE.BODY: 2>, '文本占位符 2'), (10, <PP_PLACEHOLDER_TYPE.DATE: 16>, '日期占位符 3'), (11, <PP_PLACEHOLDER_TYPE.FOOTER: 15>, '页脚占位符 4'), (12, <PP_PLACEHOLDER_TYPE.SLIDE_NUMBER: 13>, '灯片编号占位符 5')]
+  [3] '两栏内容' phs=[(0, <PP_PLACEHOLDER_TYPE.TITLE: 1>, '标题 1'), (1, <PP_PLACEHOLDER_TYPE.OBJECT: 7>, '内容占位符 2'), (2, <PP_PLACEHOLDER_TYPE.OBJECT: 7>, '内容占位符 3'), (10, <PP_PLACEHOLDER_TYPE.DATE: 16>, '日期占位符 4'), (11, <PP_PLACEHOLDER_TYPE.FOOTER: 15>, '页脚占位符 5'), (12, <PP_PLACEHOLDER_TYPE.SLIDE_NUMBER: 13>, '灯片编号占位符 6')]
+  [4] '比较' phs=[(0, <PP_PLACEHOLDER_TYPE.TITLE: 1>, '标题 1'), (1, <PP_PLACEHOLDER_TYPE.BODY: 2>, '文本占位符 2'), (2, <PP_PLACEHOLDER_TYPE.OBJECT: 7>, '内容占位符 3'), (3, <PP_PLACEHOLDER_TYPE.BODY: 2>, '文本占位符 4'), (4, <PP_PLACEHOLDER_TYPE.OBJECT: 7>, '内容占位符 5'), (10, <PP_PLACEHOLDER_TYPE.DATE: 16>, '日期占位符 6'), (11, <PP_PLACEHOLDER_TYPE.FOOTER: 15>, '页脚占位符 7'), (12, <PP_PLACEHOLDER_TYPE.SLIDE_NUMBER: 13>, '灯片编号占位符 8')]
+  [5] '仅标题' phs=[(0, <PP_PLACEHOLDER_TYPE.TITLE: 1>, '标题 1'), (10, <PP_PLACEHOLDER_TYPE.DATE: 16>, '日期占位符 2'), (11, <PP_PLACEHOLDER_TYPE.FOOTER: 15>, '页脚占位符 3'), (12, <PP_PLACEHOLDER_TYPE.SLIDE_NUMBER: 13>, '灯片编号占位符 4')]
+  [6] '空白' phs=[(10, <PP_PLACEHOLDER_TYPE.DATE: 16>, '日期占位符 1'), (11, <PP_PLACEHOLDER_TYPE.FOOTER: 15>, '页脚占位符 2'), (12, <PP_PLACEHOLDER_TYPE.SLIDE_NUMBER: 13>, '灯片编号占位符 3')]
+  [7] '内容与标题' phs=[(0, <PP_PLACEHOLDER_TYPE.TITLE: 1>, '标题 1'), (1, <PP_PLACEHOLDER_TYPE.OBJECT: 7>, '内容占位符 2'), (2, <PP_PLACEHOLDER_TYPE.BODY: 2>, '文本占位符 3'), (10, <PP_PLACEHOLDER_TYPE.DATE: 16>, '日期占位符 4'), (11, <PP_PLACEHOLDER_TYPE.FOOTER: 15>, '页脚占位符 5'), (12, <PP_PLACEHOLDER_TYPE.SLIDE_NUMBER: 13>, '灯片编号占位符 6')]
+  [8] '图片与标题' phs=[(0, <PP_PLACEHOLDER_TYPE.TITLE: 1>, '标题 1'), (1, <PP_PLACEHOLDER_TYPE.PICTURE: 18>, '图片占位符 2'), (2, <PP_PLACEHOLDER_TYPE.BODY: 2>, '文本占位符 3'), (10, <PP_PLACEHOLDER_TYPE.DATE: 16>, '日期占位符 4'), (11, <PP_PLACEHOLDER_TYPE.FOOTER: 15>, '页脚占位符 5'), (12, <PP_PLACEHOLDER_TYPE.SLIDE_NUMBER: 13>, '灯片编号占位符 6')]
+  [9] '标题和竖排文字' phs=[(0, <PP_PLACEHOLDER_TYPE.TITLE: 1>, '标题 1'), (1, <PP_PLACEHOLDER_TYPE.BODY: 2>, '竖排文字占位符 2'), (10, <PP_PLACEHOLDER_TYPE.DATE: 16>, '日期占位符 3'), (11, <PP_PLACEHOLDER_TYPE.FOOTER: 15>, '页脚占位符 4'), (12, <PP_PLACEHOLDER_TYPE.SLIDE_NUMBER: 13>, '灯片编号占位符 5')]
+  [10] '竖排标题与文本' phs=[(0, <PP_PLACEHOLDER_TYPE.TITLE: 1>, '竖排标题 1'), (1, <PP_PLACEHOLDER_TYPE.BODY: 2>, '竖排文字占位符 2'), (10, <PP_PLACEHOLDER_TYPE.DATE: 16>, '日期占位符 3'), (11, <PP_PLACEHOLDER_TYPE.FOOTER: 15>, '页脚占位符 4'), (12, <PP_PLACEHOLDER_TYPE.SLIDE_NUMBER: 13>, '灯片编号占位符 5')]
+-- slide 1 layout='标题幻灯片' shapes=8
+  - id=50 name='图片 49' type=PICTURE (13) PICTURE pos=(3.88,2.23) size=(5.33,5.33)
+  - id=51 name='图片占位符 10' type=PICTURE (13) PICTURE pos=(0.0,0.0) size=(13.33,3.36)
+  - id=52 name='矩形 51' type=AUTO_SHAPE (1) pos=(0.0,0.0) size=(13.33,3.36)
+  - id=53 name='文本占位符 8' type=FREEFORM (5) pos=(5.27,2.02) size=(2.8,2.77)
+  - id=54 name='图片 53' type=PICTURE (13) PICTURE pos=(0.24,7.01) size=(2.29,0.37)
+  - id=55 name='标题 4' type=TEXT_BOX (17) pos=(3.75,4.77) size=(5.83,0.82) text='计划管理模块'
+      run: '计划管理模块' size=685800 bold=True font=微软雅黑 color=0C49B7
+  - id=56 name='直接连接符 55' type=LINE (9) pos=(4.07,5.74) size=(5.2,0.0)
+  - id=59 name='文本框 58' type=TEXT_BOX (17) pos=(5.74,2.61) size=(1.85,1.58) text='03'
+      run: '03' size=1117600 bold=True font=Arial Black color=None
+-- slide 2 layout='标题幻灯片' shapes=4
+  - id=2 name='组合 1' type=GROUP (6) pos=(0.0,-0.0) size=(13.33,7.5)
+  - id=39 name='组合 38' type=GROUP (6) pos=(10.47,0.06) size=(2.74,0.63)
+  - id=16 name='图片 15' type=PICTURE (13) PICTURE pos=(0.26,1.15) size=(12.81,3.35)
+  - id=20 name='图示 19' type=None pos=(0.48,5.18) size=(12.45,1.26)
+-- slide 3 layout='标题幻灯片' shapes=5
+  - id=2 name='组合 1' type=GROUP (6) pos=(0.0,-0.0) size=(13.33,7.5)
+  - id=39 name='组合 38' type=GROUP (6) pos=(10.47,0.06) size=(2.74,0.63)
+  - id=14 name='图片 13' type=PICTURE (13) PICTURE pos=(0.48,1.3) size=(6.92,5.38)
+  - id=13 name='矩形 12' type=AUTO_SHAPE (1) pos=(7.95,3.16) size=(4.21,2.77) text='id：主键 | mps_no：MPS 单号，唯一 | plan_date：计划日期 | status：状态，比如草稿、已下达 | 一张 MPS 对应多条明细'
+      run: 'id' size=None bold=None font=华文中宋 color=None
+      run: '：主键' size=None bold=None font=华文中宋 color=None
+      run: 'mps_no' size=None bold=None font=华文中宋 color=None
+      run: '：' size=None bold=None font=华文中宋 color=None
+      run: 'MPS ' size=None bold=None font=华文中宋 color=None
+      run: '单号，唯一' size=None bold=None font=华文中宋 color=None
+      run: 'plan_date' size=None bold=None font=华文中宋 color=None
+      run: '：计划日期' size=None bold=None font=华文中宋 color=None
+      run: 'status' size=None bold=None font=华文中宋 color=None
+      run: '：状态，比如草稿、已下达' size=None bold=None font=华文中宋 color=None
+      run: '一张 ' size=None bold=True font=华文中宋 color=None
+      run: 'MPS ' size=None bold=True font=华文中宋 color=None
+      run: '对应多条明细' size=None bold=True font=华文中宋 color=None
+  - id=15 name='矩形 14' type=AUTO_SHAPE (1) pos=(7.95,2.52) size=(3.96,0.5) text='pln_mps：主生产计划头'
+      run: 'pln_mps' size=304800 bold=True font=华文中宋 color=None
+      run: '：主生产计划头' size=304800 bold=True font=华文中宋 color=None
+-- slide 4 layout='标题幻灯片' shapes=5
+  - id=2 name='组合 1' type=GROUP (6) pos=(0.0,-0.0) size=(13.33,7.5)
+  - id=39 name='组合 38' type=GROUP (6) pos=(10.47,0.06) size=(2.74,0.63)
+  - id=14 name='图片 13' type=PICTURE (13) PICTURE pos=(0.48,1.3) size=(6.92,5.38)
+  - id=13 name='矩形 12' type=AUTO_SHAPE (1) pos=(7.87,2.47) size=(4.74,3.68) text='id：主键 | mps_id：外键，指向 pln_mps.id | material_id：外键，指向物料表 | planned_qty：计划生产数量 | pe'
+      run: 'id' size=None bold=None font=华文中宋 color=None
+      run: '：主键' size=None bold=None font=华文中宋 color=None
+      run: 'mps_id' size=None bold=None font=华文中宋 color=None
+      run: '：外键，指向 ' size=None bold=None font=华文中宋 color=None
+      run: 'pln_mps.id' size=None bold=None font=华文中宋 color=None
+      run: 'material_id' size=None bold=None font=华文中宋 color=None
+      run: '：外键，指向物料表' size=None bold=None font=华文中宋 color=None
+      run: 'planned_qty' size=None bold=None font=华文中宋 color=None
+      run: '：计划生产数量' size=None bold=None font=华文中宋 color=None
+      run: 'period_start' size=None bold=None font=华文中宋 color=None
+      run: '、' size=None bold=None font=华文中宋 color=None
+      run: 'period_end' size=None bold=None font=华文中宋 color=None
+      run: '：计划期间' size=None bold=None font=华文中宋 color=None
+      run: '它回答的是：“哪个成品，在哪个期间，计划生产多少。”' size=None bold=True font=华文中宋 color=None
+  - id=15 name='矩形 14' type=AUTO_SHAPE (1) pos=(7.87,1.83) size=(4.85,0.5) text='pln_mps_item：主生产计划行'
+      run: 'pln_mps_item' size=304800 bold=True font=华文中宋 color=None
+      run: '：主生产计划行' size=304800 bold=True font=华文中宋 color=None
+-- slide 5 layout='标题幻灯片' shapes=5
+  - id=2 name='组合 1' type=GROUP (6) pos=(0.0,-0.0) size=(13.33,7.5)
+  - id=39 name='组合 38' type=GROUP (6) pos=(10.47,0.06) size=(2.74,0.63)
+  - id=14 name='图片 13' type=PICTURE (13) PICTURE pos=(0.48,1.3) size=(6.92,5.38)
+  - id=13 name='矩形 12' type=AUTO_SHAPE (1) pos=(7.96,2.69) size=(4.72,3.23) text='id：主键 | run_no：运算批次号，唯一 | run_time：运算时间 | status：运算状态 | 一次 MRP 运算产生一个 run 记录，方便追'
+      run: 'id' size=None bold=None font=华文中宋 color=None
+      run: '：主键' size=None bold=None font=华文中宋 color=None
+      run: 'run_no' size=None bold=None font=华文中宋 color=None
+      run: '：运算批次号，唯一' size=None bold=None font=华文中宋 color=None
+      run: 'run_time' size=None bold=None font=华文中宋 color=None
+      run: '：运算时间' size=None bold=None font=华文中宋 color=None
+      run: 'status' size=None bold=None font=华文中宋 color=None
+      run: '：运算状态' size=None bold=None font=华文中宋 color=None
+      run: '一次 ' size=None bold=True font=华文中宋 color=None
+      run: 'MRP ' size=None bold=True font=华文中宋 color=None
+      run: '运算产生一个 ' size=None bold=True font=华文中宋 color=None
+      run: 'run ' size=None bold=True font=华文中宋 color=None
+      run: '记录，方便追溯“这次结果是什么时候算出来的”' size=None bold=True font=华文中宋 color=None
+  - id=15 name='矩形 14' type=AUTO_SHAPE (1) pos=(7.96,2.05) size=(4.9,0.5) text='pln_mrp_run：MRP 运算批次'
+      run: 'pln_mrp_run' size=304800 bold=True font=华文中宋 color=None
+      run: '：' size=304800 bold=True font=华文中宋 color=None
+      run: 'MRP ' size=304800 bold=True font=华文中宋 color=None
+      run: '运算批次' size=304800 bold=True font=华文中宋 color=None
+-- slide 6 layout='标题幻灯片' shapes=5
+  - id=2 name='组合 1' type=GROUP (6) pos=(0.0,-0.0) size=(13.33,7.5)
+  - id=39 name='组合 38' type=GROUP (6) pos=(10.47,0.06) size=(2.74,0.63)
+  - id=14 name='图片 13' type=PICTURE (13) PICTURE pos=(0.48,1.3) size=(6.92,5.38)
+  - id=13 name='矩形 12' type=AUTO_SHAPE (1) pos=(7.68,1.74) size=(5.46,5.05) text='id：主键 | run_id：外键，指向 pln_mrp_run.id | material_id：外键，指向物料 | gross_req：毛需求 | avai'
+      run: 'id' size=None bold=None font=华文中宋 color=None
+      run: '：主键' size=None bold=None font=华文中宋 color=None
+      run: 'run_id' size=None bold=None font=华文中宋 color=None
+      run: '：外键，指向 ' size=None bold=None font=华文中宋 color=None
+      run: 'pln_mrp_run.id' size=None bold=None font=华文中宋 color=None
+      run: 'material_id' size=None bold=None font=华文中宋 color=None
+      run: '：外键，指向物料' size=None bold=None font=华文中宋 color=None
+      run: 'gross_req' size=None bold=None font=华文中宋 color=None
+      run: '：毛需求' size=None bold=None font=华文中宋 color=None
+      run: 'available_qty' size=None bold=None font=华文中宋 color=None
+      run: '：可用库存' size=None bold=None font=华文中宋 color=None
+      run: 'net_req' size=None bold=None font=华文中宋 color=None
+      run: '：净需求 ' size=None bold=None font=华文中宋 color=None
+      run: '= max(' size=None bold=None font=华文中宋 color=None
+      run: '毛需求 ' size=None bold=None font=华文中宋 color=None
+      run: '+ ' size=None bold=None font=华文中宋 color=None
+      run: '安全库存 − 可用库存' size=None bold=None font=华文中宋 color=None
+      run: ', 0)' size=None bold=None font=华文中宋 color=None
+      run: 'suggested_date' size=None bold=None font=华文中宋 color=None
+      run: '：建议下达日期' size=None bold=None font=华文中宋 color=None
+      run: 'supply_type' size=None bold=None font=华文中宋 color=None
+      run: '：供应类型，' size=None bold=None font=华文中宋 color=None
+      run: 'MAKE ' size=None bold=None font=华文中宋 color=None
+      run: '或 ' size=None bold=None font=华文中宋 color=None
+      run: 'BUY' size=None bold=None font=华文中宋 color=None
+      run: '它回答的是：“这个物料，' size=None bold=True font=华文中宋 color=None
+      run: 'MRP ' size=None bold=True font=华文中宋 color=None
+      run: '算完以后，还差多少，什么时候该下达，是自制还是采购。”' size=None bold=True font=华文中宋 color=None
+  - id=15 name='矩形 14' type=AUTO_SHAPE (1) pos=(7.68,1.1) size=(5.26,0.5) text='pln_mrp_result：MRP 运算结果'
+      run: 'pln_mrp_result' size=304800 bold=True font=华文中宋 color=None
+      run: '：' size=304800 bold=True font=华文中宋 color=None
+      run: 'MRP ' size=304800 bold=True font=华文中宋 color=None
+      run: '运算结果' size=304800 bold=True font=华文中宋 color=None
+-- slide 7 layout='标题幻灯片' shapes=5
+  - id=2 name='组合 1' type=GROUP (6) pos=(0.0,-0.0) size=(13.33,7.5)
+  - id=39 name='组合 38' type=GROUP (6) pos=(10.47,0.06) size=(2.74,0.63)
+  - id=14 name='图片 13' type=PICTURE (13) PICTURE pos=(0.48,1.3) size=(6.92,5.38)
+  - id=13 name='矩形 12' type=AUTO_SHAPE (1) pos=(7.84,2.24) size=(5.01,4.14) text='id：主键 | plan_no：计划单号，唯一 | material_id：外键，产出物料 | plan_qty：计划生产数量 | start_date、end'
+      run: 'id' size=None bold=None font=华文中宋 color=None
+      run: '：主键' size=None bold=None font=华文中宋 color=None
+      run: 'plan_no' size=None bold=None font=华文中宋 color=None
+      run: '：计划单号，唯一' size=None bold=None font=华文中宋 color=None
+      run: 'material_id' size=None bold=None font=华文中宋 color=None
+      run: '：外键，产出物料' size=None bold=None font=华文中宋 color=None
+      run: 'plan_qty' size=None bold=None font=华文中宋 color=None
+      run: '：计划生产数量' size=None bold=None font=华文中宋 color=None
+      run: 'start_date' size=None bold=None font=华文中宋 color=None
+      run: '、' size=None bold=None font=华文中宋 color=None
+      run: 'end_date' size=None bold=None font=华文中宋 color=None
+      run: '：计划起止日期' size=None bold=None font=华文中宋 color=None
+      run: 'status' size=None bold=None font=华文中宋 color=None
+      run: '：状态' size=None bold=None font=华文中宋 color=None
+      run: 'MRP ' size=None bold=True font=华文中宋 color=None
+      run: '结果里 ' size=None bold=True font=华文中宋 color=None
+      run: 'supply_type' size=None bold=True font=华文中宋 color=None
+      run: ' = MAKE ' size=None bold=True font=华文中宋 color=None
+      run: '的行，会转成生产作业计划' size=None bold=True font=华文中宋 color=None
+  - id=15 name='矩形 14' type=AUTO_SHAPE (1) pos=(7.18,1.55) size=(5.96,0.5) text='pln_production_plan：生产作业计划'
+      run: 'pln_production_plan' size=304800 bold=True font=华文中宋 color=None
+      run: '：生产作业计划' size=304800 bold=True font=华文中宋 color=None
+-- slide 8 layout='标题幻灯片' shapes=5
+  - id=2 name='组合 1' type=GROUP (6) pos=(0.0,-0.0) size=(13.33,7.5)
+  - id=39 name='组合 38' type=GROUP (6) pos=(10.47,0.06) size=(2.74,0.63)
+  - id=14 name='图片 13' type=PICTURE (13) PICTURE pos=(0.48,1.3) size=(6.92,5.38)
+  - id=13 name='矩形 12' type=AUTO_SHAPE (1) pos=(7.97,2.01) size=(4.72,4.59) text='id：主键 | dispatch_no：派工单号，唯一 | plan_id：外键，指向 pln_production_plan.id | process_nam'
+      run: 'id' size=None bold=None font=华文中宋 color=None
+      run: '：主键' size=None bold=None font=华文中宋 color=None
+      run: 'dispatch_no' size=None bold=None font=华文中宋 color=None
+      run: '：派工单号，唯一' size=None bold=None font=华文中宋 color=None
+      run: 'plan_id' size=None bold=None font=华文中宋 color=None
+      run: '：外键，指向 ' size=None bold=None font=华文中宋 color=None
+      run: 'pln_production_plan.id' size=None bold=None font=华文中宋 color=None
+      run: 'process_name' size=None bold=None font=华文中宋 color=None
+      run: '：工序名称' size=None bold=None font=华文中宋 color=None
+      run: 'dispatch_qty' size=None bold=None font=华文中宋 color=None
+      run: '：派工数量' size=None bold=None font=华文中宋 color=None
+      run: 'status' size=None bold=None font=华文中宋 color=None
+      run: '：状态' size=None bold=None font=华文中宋 color=None
+      run: '一个生产计划可以拆成多张派工单，下达到具体工序' size=None bold=True font=华文中宋 color=None
+  - id=15 name='矩形 14' type=AUTO_SHAPE (1) pos=(7.97,1.37) size=(4.71,0.5) text='pln_dispatch_order：派工单'
+      run: 'pln_dispatch_order' size=304800 bold=True font=华文中宋 color=None
+      run: '：派工单' size=304800 bold=True font=华文中宋 color=None
+-- slide 9 layout='标题幻灯片' shapes=5
+  - id=2 name='组合 1' type=GROUP (6) pos=(0.0,-0.0) size=(13.33,7.5)
+  - id=39 name='组合 38' type=GROUP (6) pos=(10.47,0.06) size=(2.74,0.63)
+  - id=14 name='图片 13' type=PICTURE (13) PICTURE pos=(0.48,1.3) size=(6.92,5.38)
+  - id=13 name='矩形 12' type=AUTO_SHAPE (1) pos=(7.53,1.68) size=(5.68,5.05) text='id：主键 | report_no：报告单号，唯一 | plan_id：外键，指向生产计划 | dispatch_id：外键，指向派工单 | material_'
+      run: 'id' size=None bold=None font=华文中宋 color=None
+      run: '：主键' size=None bold=None font=华文中宋 color=None
+      run: 'report_no' size=None bold=None font=华文中宋 color=None
+      run: '：报告单号，唯一' size=None bold=None font=华文中宋 color=None
+      run: 'plan_id' size=None bold=None font=华文中宋 color=None
+      run: '：外键，指向生产计划' size=None bold=None font=华文中宋 color=None
+      run: 'dispatch_id' size=None bold=None font=华文中宋 color=None
+      run: '：外键，指向派工单' size=None bold=None font=华文中宋 color=None
+      run: 'material_id' size=None bold=None font=华文中宋 color=None
+      run: '：外键，产出物料' size=None bold=None font=华文中宋 color=None
+      run: 'completed_qty' size=None bold=None font=华文中宋 color=None
+      run: '：完工数量' size=None bold=None font=华文中宋 color=None
+      run: 'qualified_qty' size=None bold=None font=华文中宋 color=None
+      run: '：合格数量' size=None bold=None font=华文中宋 color=None
+      run: 'scrap_qty' size=None bold=None font=华文中宋 color=None
+      run: '：报废数量' size=None bold=None font=华文中宋 color=None
+      run: 'warehouse_id' size=None bold=None font=华文中宋 color=None
+      run: '：外键，入库仓库' size=None bold=None font=华文中宋 color=None
+      run: 'report_date' size=None bold=None font=华文中宋 color=None
+      run: '：报工日期' size=None bold=None font=华文中宋 color=None
+      run: '完工报告确认后，' size=None bold=True font=华文中宋 color=None
+      run: 'qualified_qty' size=None bold=True font=华文中宋 color=None
+      run: '会触发库存入库' size=None bold=True font=华文中宋 color=None
+  - id=15 name='矩形 14' type=AUTO_SHAPE (1) pos=(7.53,1.04) size=(5.56,0.5) text='pln_completion_report：完工报告'
+      run: 'pln_completion_report' size=304800 bold=True font=华文中宋 color=None
+      run: '：完工报告' size=304800 bold=True font=华文中宋 color=None
+-- slide 10 layout='标题幻灯片' shapes=4
+  - id=2 name='组合 1' type=GROUP (6) pos=(0.0,-0.0) size=(13.33,7.5)
+  - id=39 name='组合 38' type=GROUP (6) pos=(10.47,0.06) size=(2.74,0.63)
+  - id=8 name='图片 7' type=PICTURE (13) PICTURE pos=(1.04,1.1) size=(11.26,5.39)
+  - id=12 name='图片 11' type=PICTURE (13) PICTURE pos=(1.1,1.1) size=(11.32,5.42)
+-- slide 11 layout='标题幻灯片' shapes=8
+  - id=50 name='图片 49' type=PICTURE (13) PICTURE pos=(3.88,2.23) size=(5.33,5.33)
+  - id=51 name='图片占位符 10' type=PICTURE (13) PICTURE pos=(0.0,0.0) size=(13.33,3.36)
+  - id=52 name='矩形 51' type=AUTO_SHAPE (1) pos=(0.0,0.0) size=(13.33,3.36)
+  - id=53 name='文本占位符 8' type=FREEFORM (5) pos=(5.27,2.02) size=(2.8,2.77)
+  - id=54 name='图片 53' type=PICTURE (13) PICTURE pos=(0.24,7.01) size=(2.29,0.37)
+  - id=55 name='标题 4' type=TEXT_BOX (17) pos=(3.75,4.77) size=(5.83,0.82) text='版本控制'
+      run: '版本控制' size=685800 bold=True font=微软雅黑 color=0C49B7
+  - id=56 name='直接连接符 55' type=LINE (9) pos=(4.07,5.74) size=(5.2,0.0)
+  - id=59 name='文本框 58' type=TEXT_BOX (17) pos=(5.74,2.61) size=(1.85,1.58) text='06'
+      run: '06' size=1117600 bold=True font=Arial Black color=None
+-- slide 12 layout='标题幻灯片' shapes=15
+  - id=2 name='组合 1' type=GROUP (6) pos=(0.0,-0.0) size=(13.33,7.5)
+  - id=39 name='组合 38' type=GROUP (6) pos=(10.47,0.06) size=(2.74,0.63)
+  - id=18 name='系统计划管理' type=AUTO_SHAPE (1) pos=(5.65,1.54) size=(2.03,0.63) text='main'
+      run: 'main' size=304800 bold=True font=Times New Roman color=FFFFFF
+  - id=19 name='系统计划管理' type=AUTO_SHAPE (1) pos=(5.65,3.39) size=(2.03,0.63) text='develop'
+      run: 'develop' size=304800 bold=True font=Times New Roman color=FFFFFF
+  - id=20 name='系统计划管理' type=AUTO_SHAPE (1) pos=(0.25,5.52) size=(2.45,0.63) text='feature/system'
+      run: 'feature/system' size=304800 bold=True font=Times New Roman color=FFFFFF
+  - id=21 name='系统计划管理' type=AUTO_SHAPE (1) pos=(10.6,5.52) size=(2.45,0.63) text='feature/inventory'
+      run: 'feature/' size=304800 bold=True font=Times New Roman color=FFFFFF
+      run: 'inventory' size=254000 bold=True font=Times New Roman color=FFFFFF
+  - id=22 name='系统计划管理' type=AUTO_SHAPE (1) pos=(8.01,5.52) size=(2.45,0.63) text='feature/procurement'
+      run: 'feature/procurement' size=None bold=True font=Times New Roman color=FFFFFF
+  - id=23 name='系统计划管理' type=AUTO_SHAPE (1) pos=(2.84,5.52) size=(2.45,0.63) text='feature/sales'
+      run: 'feature/sales' size=304800 bold=True font=Times New Roman color=FFFFFF
+  - id=24 name='系统计划管理' type=AUTO_SHAPE (1) pos=(5.42,5.52) size=(2.45,0.63) text='feature/planning'
+      run: 'feature/planning' size=254000 bold=True font=Times New Roman color=FFFFFF
+  - id=12 name='矩形 11' type=AUTO_SHAPE (1) pos=(8.01,1.61) size=(3.63,0.4) text='稳定/演示版本，禁止直接提交'
+      run: '稳定/演示版本，禁止直接提交' size=None bold=None font=华文中宋 color=None
+  - id=16 name='箭头: 右 15' type=AUTO_SHAPE (1) pos=(6.15,2.21) size=(1.03,1.1)
+  - id=28 name='箭头: 右 27' type=AUTO_SHAPE (1) pos=(6.13,4.2) size=(1.03,1.1)
+  - id=17 name='矩形 16' type=AUTO_SHAPE (1) pos=(7.31,2.6) size=(3.57,0.4) text='PR（五模块集成测试通过后）'
+      run: 'PR（五模块集成测试通过后）' size=None bold=True font=华文中宋 color=None
+  - id=26 name='矩形 25' type=AUTO_SHAPE (1) pos=(8.01,3.52) size=(1.72,0.4) text='日常集成分支'
+      run: '日常集成分支' size=None bold=None font=华文中宋 color=None
+  - id=27 name='矩形 26' type=AUTO_SHAPE (1) pos=(7.31,4.68) size=(0.54,0.4) text='PR'
+      run: 'PR' size=None bold=True font=华文中宋 color=None
+-- slide 13 layout='标题幻灯片' shapes=10
+  - id=4 name='图片 3' type=PICTURE (13) PICTURE pos=(2.65,1.84) size=(7.79,7.79)
+  - id=5 name='Picture 2' type=PICTURE (13) PICTURE pos=(0.0,2.3) size=(13.36,3.31)
+  - id=6 name='矩形 5' type=AUTO_SHAPE (1) pos=(0.0,2.3) size=(13.36,3.31)
+  - id=14 name='直接连接符 13' type=LINE (9) pos=(0.0,6.04) size=(5.49,0.01)
+  - id=15 name='直接连接符 14' type=LINE (9) pos=(7.84,6.04) size=(5.52,0.01)
+  - id=16 name='图片 15' type=PICTURE (13) PICTURE pos=(5.51,5.85) size=(2.32,0.37)
+  - id=17 name='组合 16' type=GROUP (6) pos=(4.34,0.88) size=(4.65,1.17)
+  - id=21 name='Rectangle 10' type=AUTO_SHAPE (1) pos=(0.52,4.65) size=(12.05,0.44) text='BEIHANG UNIVERSITY GRADUATION REPLY GENERAL TEMPLATE'
+      run: 'BEIHANG UNIVERSITY ' size=254000 bold=True font=微软雅黑 Light color=None
+      run: 'GRADUATION REPLY GENERAL TEMPL' size=254000 bold=True font=微软雅黑 Light color=None
+  - id=22 name='Rectangle 9' type=AUTO_SHAPE (1) pos=(-0.03,3.06) size=(13.38,1.31) text='  感谢观看 期待您的指点！'
+      run: '  感谢观看 期待您的指点' size=914400 bold=True font=微软雅黑 color=None
+      run: '！' size=914400 bold=True font=微软雅黑 color=None
+  - id=23 name='组合 22' type=GROUP (6) pos=(2.61,6.81) size=(7.88,0.37)

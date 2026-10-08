@@ -1,6 +1,6 @@
-"""inventory 模块 ORM 模型 —— 仓库、库位、库存结存与库存流水。
+"""inventory 模块 ORM 模型 —— 仓库、库存结存、库存流水、补库需求与库存操作单。
 
-核心原则（规格 §24 / §35 / §36）：
+核心原则（规格 §24 / §35 / §36，PPT 精简版 5 表设计）：
 
 1. **库存数量只由 inventory 模块维护**，其他模块看到的库存必须来自本模块接口。
 2. **任何库存变动都必须产生一条 `inv_transaction` 流水**，不允许直接改余额。
@@ -8,7 +8,11 @@
    能追溯回具体的 PUR_RECEIPT / SAL_SHIPMENT / PLN_MATERIAL_REQUISITION 等来源单据。
 4. **禁止负库存**（`inv_balance.quantity >= 0`）；
    但 `inv_transaction.quantity_change` 允许正负数（规格 §23）。
-5. `inv_balance` 对 `(warehouse_id, location_id, material_id)` 唯一。
+5. `inv_balance` 对 `(warehouse_id, material_id)` 唯一；订货点/建议订货量
+   直接落在结存行上（原 inv_reorder_rule 并入）。
+6. 仓库表带冗余库位文本字段（原 inv_location 并入，仅作展示不再建库位维度）。
+7. 移库与盘点统一为 `inv_stock_operation`（`op_type` 区分 TRANSFER / STOCKTAKE），
+   明细行统一放 `inv_stock_operation_item`。
 """
 
 from datetime import date, datetime
@@ -21,7 +25,6 @@ from sqlalchemy import (
     Date,
     DateTime,
     ForeignKey,
-    Integer,
     Numeric,
     String,
     Text,
@@ -34,12 +37,12 @@ from app.core.mixins import AuditMixin, BigIntFk, BigIntPk, CodeStr, NameStr
 from app.shared.enums import RecordStatus
 
 # ====================================================================
-# 仓库 / 库位
+# 仓库（原 inv_location 的库位编码/名称并入为本表文本字段）
 # ====================================================================
 
 
 class InvWarehouse(Base, AuditMixin):
-    """仓库。"""
+    """仓库（含冗余库位文本字段）。"""
 
     __tablename__ = "inv_warehouse"
 
@@ -53,53 +56,32 @@ class InvWarehouse(Base, AuditMixin):
         ForeignKey("sys_personnel.id", ondelete="RESTRICT"), nullable=True, comment="仓库负责人（sys_personnel.id）"
     )
     address: Mapped[Optional[str]] = mapped_column(String(200), nullable=True, comment="地址")
+    location_code: Mapped[Optional[str]] = mapped_column(
+        String(50), nullable=True, comment="库位编码（文本，原 inv_location 并入）"
+    )
+    location_name: Mapped[Optional[str]] = mapped_column(
+        String(100), nullable=True, comment="库位名称（文本，原 inv_location 并入）"
+    )
     status: Mapped[str] = mapped_column(
         String(20), nullable=False, default=RecordStatus.ACTIVE.value, comment="状态"
     )
     remark: Mapped[Optional[str]] = mapped_column(Text, nullable=True, comment="备注")
-
-    locations: Mapped[List["InvLocation"]] = relationship(
-        back_populates="warehouse", cascade="all, delete-orphan", lazy="selectin"
-    )
 
     __table_args__ = (
         CheckConstraint("status IN ('ACTIVE','INACTIVE')", name="ck_inv_warehouse_status"),
     )
 
 
-class InvLocation(Base, AuditMixin):
-    """库位（仓库下的具体存放位置）。"""
-
-    __tablename__ = "inv_location"
-
-    id: Mapped[BigIntPk]
-    location_code: Mapped[CodeStr] = mapped_column(comment="库位编码")
-    location_name: Mapped[NameStr] = mapped_column(comment="库位名称")
-    warehouse_id: Mapped[BigIntFk] = mapped_column(
-        ForeignKey("inv_warehouse.id", ondelete="CASCADE"), nullable=False, index=True, comment="仓库ID"
-    )
-    status: Mapped[str] = mapped_column(
-        String(20), nullable=False, default=RecordStatus.ACTIVE.value, comment="状态"
-    )
-    remark: Mapped[Optional[str]] = mapped_column(Text, nullable=True, comment="备注")
-
-    warehouse: Mapped[InvWarehouse] = relationship(back_populates="locations")
-
-    __table_args__ = (
-        UniqueConstraint("warehouse_id", "location_code", name="uq_inv_location"),
-        CheckConstraint("status IN ('ACTIVE','INACTIVE')", name="ck_inv_location_status"),
-    )
-
-
 # ====================================================================
-# 库存结存（实时库存）
+# 库存结存（实时库存；原 inv_reorder_rule 的订货点字段并入）
 # ====================================================================
 
 
 class InvBalance(Base, AuditMixin):
-    """库存结存：某仓库/库位下某物料的当前数量。
+    """库存结存：某仓库下某物料的当前数量 + 订货点参数。
 
-    只能通过库存流水 `inv_transaction` 变更，**禁止直接修改 quantity**（规格 §36）。
+    库存变动由业务单据（入库/出库/移库/盘点）直接驱动，**不再维护独立流水表**。
+    `reorder_point / reorder_quantity` 为可选项，仅 A 类高价值关键物料配置。
     """
 
     __tablename__ = "inv_balance"
@@ -107,9 +89,6 @@ class InvBalance(Base, AuditMixin):
     id: Mapped[BigIntPk]
     warehouse_id: Mapped[BigIntFk] = mapped_column(
         ForeignKey("inv_warehouse.id", ondelete="RESTRICT"), nullable=False, index=True, comment="仓库ID"
-    )
-    location_id: Mapped[Optional[BigIntFk]] = mapped_column(
-        ForeignKey("inv_location.id", ondelete="RESTRICT"), nullable=True, index=True, comment="库位ID"
     )
     material_id: Mapped[BigIntFk] = mapped_column(
         ForeignKey("sys_material.id", ondelete="RESTRICT"), nullable=False, index=True, comment="物料ID"
@@ -120,111 +99,31 @@ class InvBalance(Base, AuditMixin):
     locked_quantity: Mapped[Decimal] = mapped_column(
         Numeric(18, 4), nullable=False, default=0, comment="锁定量（已分配未出库）"
     )
+    reorder_point: Mapped[Optional[Decimal]] = mapped_column(
+        Numeric(18, 4), nullable=True, default=None, comment="订货点（仅 A 类物料配置）"
+    )
+    reorder_quantity: Mapped[Optional[Decimal]] = mapped_column(
+        Numeric(18, 4), nullable=True, default=None, comment="建议订货量（仅 A 类物料配置）"
+    )
     updated_at_txn: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True, comment="最近一次变动时间")
 
     __table_args__ = (
-        UniqueConstraint(
-            "warehouse_id", "location_id", "material_id", name="uq_inv_balance_bucket"
-        ),
-        # 规格 §23 / §36：禁止负库存
+        UniqueConstraint("warehouse_id", "material_id", name="uq_inv_balance_bucket"),
+        # 规格 §23：禁止负库存
         CheckConstraint("quantity >= 0", name="ck_inv_balance_qty"),
         CheckConstraint("locked_quantity >= 0", name="ck_inv_balance_locked"),
+        CheckConstraint("reorder_point IS NULL OR reorder_point >= 0", name="ck_inv_reorder_point"),
+        CheckConstraint("reorder_quantity IS NULL OR reorder_quantity >= 0", name="ck_inv_reorder_qty"),
     )
 
 
-class InvTransaction(Base, AuditMixin):
-    """库存流水（出入库明细）—— 库存变动的唯一入口与审计凭证。
-
-    `quantity_change` 允许正数（入库）与负数（出库），因此**不加 >= 0 约束**。
-    """
-
-    __tablename__ = "inv_transaction"
-
-    id: Mapped[BigIntPk]
-    transaction_no: Mapped[CodeStr] = mapped_column(unique=True, comment="流水单号")
-    transaction_type: Mapped[str] = mapped_column(
-        String(20), nullable=False, index=True, comment="类型 IN/OUT/TRANSFER_IN/TRANSFER_OUT/ADJUST"
-    )
-    material_id: Mapped[BigIntFk] = mapped_column(
-        ForeignKey("sys_material.id", ondelete="RESTRICT"), nullable=False, index=True, comment="物料ID"
-    )
-    warehouse_id: Mapped[BigIntFk] = mapped_column(
-        ForeignKey("inv_warehouse.id", ondelete="RESTRICT"), nullable=False, index=True, comment="仓库ID"
-    )
-    location_id: Mapped[Optional[BigIntFk]] = mapped_column(
-        ForeignKey("inv_location.id", ondelete="RESTRICT"), nullable=True, comment="库位ID"
-    )
-    quantity_change: Mapped[Decimal] = mapped_column(
-        Numeric(18, 4), nullable=False, comment="变动数量（入库为正，出库为负）"
-    )
-    quantity_after: Mapped[Decimal] = mapped_column(
-        Numeric(18, 4), nullable=False, default=0, comment="变动后结存"
-    )
-    unit_cost: Mapped[Decimal] = mapped_column(
-        Numeric(18, 2), nullable=False, default=0, comment="单位成本"
-    )
-    biz_date: Mapped[date] = mapped_column(Date, nullable=False, comment="业务日期")
-    # ---- 来源可追溯（规格 §24）：能追溯回具体来源单据 ----
-    source_module: Mapped[str] = mapped_column(
-        String(20), nullable=False, comment="来源模块"
-    )
-    source_type: Mapped[str] = mapped_column(
-        String(30), nullable=False, comment="来源业务类型（PURCHASE_RECEIPT 等）"
-    )
-    source_reference_id: Mapped[Optional[int]] = mapped_column(
-        BigInteger, nullable=True, index=True, comment="来源单据ID"
-    )
-    source_no: Mapped[Optional[str]] = mapped_column(String(50), nullable=True, comment="来源单号（冗余便于查询）")
-    operator_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True, comment="操作人ID（sys_user.id）")
-    remark: Mapped[Optional[str]] = mapped_column(String(200), nullable=True, comment="备注")
-
-    __table_args__ = (
-        CheckConstraint(
-            "transaction_type IN ('IN','OUT','TRANSFER_IN','TRANSFER_OUT','ADJUST')",
-            name="ck_inv_transaction_type",
-        ),
-        CheckConstraint(
-            "source_type IN ('PURCHASE_RECEIPT','PRODUCTION_COMPLETION','MATERIAL_REQUISITION',"
-            "'SALES_SHIPMENT','SALES_RETURN','TRANSFER','STOCKTAKE','MANUAL')",
-            name="ck_inv_transaction_source_type",
-        ),
-    )
+# inv_transaction 流水表已删除：库存变动由各业务单据直接驱动 inv_balance，流水信息
+# 可从入库/出库/移库/盘点单据聚合查询，不再单独维护。
 
 
 # ====================================================================
-# 订货点 / 补库需求（规格 §14：Inventory 可主动发起计划）
+# 补库需求（规格 §14：Inventory 可主动发起计划）
 # ====================================================================
-
-
-class InvReorderRule(Base, AuditMixin):
-    """订货点规则：库存低于 `reorder_point` 时触发补库建议。"""
-
-    __tablename__ = "inv_reorder_rule"
-
-    id: Mapped[BigIntPk]
-    material_id: Mapped[BigIntFk] = mapped_column(
-        ForeignKey("sys_material.id", ondelete="RESTRICT"), nullable=False, index=True, comment="物料ID"
-    )
-    warehouse_id: Mapped[BigIntFk] = mapped_column(
-        ForeignKey("inv_warehouse.id", ondelete="RESTRICT"), nullable=False, index=True, comment="仓库ID"
-    )
-    reorder_point: Mapped[Decimal] = mapped_column(
-        Numeric(18, 4), nullable=False, default=0, comment="订货点"
-    )
-    reorder_quantity: Mapped[Decimal] = mapped_column(
-        Numeric(18, 4), nullable=False, default=0, comment="建议订货量"
-    )
-    status: Mapped[str] = mapped_column(
-        String(20), nullable=False, default=RecordStatus.ACTIVE.value, comment="状态"
-    )
-    remark: Mapped[Optional[str]] = mapped_column(Text, nullable=True, comment="备注")
-
-    __table_args__ = (
-        UniqueConstraint("material_id", "warehouse_id", name="uq_inv_reorder_rule"),
-        CheckConstraint("reorder_point >= 0", name="ck_inv_reorder_point"),
-        CheckConstraint("reorder_quantity >= 0", name="ck_inv_reorder_qty"),
-        CheckConstraint("status IN ('ACTIVE','INACTIVE')", name="ck_inv_reorder_rule_status"),
-    )
 
 
 class InvReplenishmentRequest(Base, AuditMixin):
@@ -276,118 +175,77 @@ class InvReplenishmentRequest(Base, AuditMixin):
 
 
 # ====================================================================
-# 移库
+# 库存操作单（原 inv_transfer + inv_stocktake 合并，op_type 区分）
 # ====================================================================
 
 
-class InvTransfer(Base, AuditMixin):
-    """移库单头：仓库/库位之间的库存移动。"""
+class InvStockOperation(Base, AuditMixin):
+    """库存操作单头：移库（TRANSFER）与盘点（STOCKTAKE）共用。
 
-    __tablename__ = "inv_transfer"
+    - TRANSFER：`from_warehouse_id → to_warehouse_id`，明细带移库数量；
+      确认时写 TRANSFER_OUT + TRANSFER_IN 两条流水。
+    - STOCKTAKE：`warehouse_id`，明细带账面数/实盘数/差异；
+      确认时按差异写 ADJUST 流水。
+    """
+
+    __tablename__ = "inv_stock_operation"
 
     id: Mapped[BigIntPk]
-    transfer_no: Mapped[CodeStr] = mapped_column(unique=True, comment="移库单号")
-    from_warehouse_id: Mapped[BigIntFk] = mapped_column(
-        ForeignKey("inv_warehouse.id", ondelete="RESTRICT"), nullable=False, comment="源仓库ID"
+    operation_no: Mapped[CodeStr] = mapped_column(unique=True, comment="操作单号（TRF/STK 前缀）")
+    op_type: Mapped[str] = mapped_column(String(20), nullable=False, index=True, comment="操作类型 TRANSFER/STOCKTAKE")
+    from_warehouse_id: Mapped[Optional[BigIntFk]] = mapped_column(
+        ForeignKey("inv_warehouse.id", ondelete="RESTRICT"), nullable=True, comment="源仓库ID（TRANSFER 用）"
     )
-    to_warehouse_id: Mapped[BigIntFk] = mapped_column(
-        ForeignKey("inv_warehouse.id", ondelete="RESTRICT"), nullable=False, comment="目标仓库ID"
+    to_warehouse_id: Mapped[Optional[BigIntFk]] = mapped_column(
+        ForeignKey("inv_warehouse.id", ondelete="RESTRICT"), nullable=True, comment="目标仓库ID（TRANSFER 用）"
     )
-    transfer_date: Mapped[date] = mapped_column(Date, nullable=False, comment="移库日期")
+    warehouse_id: Mapped[Optional[BigIntFk]] = mapped_column(
+        ForeignKey("inv_warehouse.id", ondelete="RESTRICT"), nullable=True, comment="仓库ID（STOCKTAKE 用）"
+    )
+    op_date: Mapped[date] = mapped_column(Date, nullable=False, comment="业务日期（移库/盘点日期）")
     status: Mapped[str] = mapped_column(
-        String(20), nullable=False, default="DRAFT", comment="状态"
+        String(20), nullable=False, default="DRAFT", index=True, comment="状态"
     )
     remark: Mapped[Optional[str]] = mapped_column(Text, nullable=True, comment="备注")
 
-    items: Mapped[List["InvTransferItem"]] = relationship(
-        back_populates="transfer", cascade="all, delete-orphan", lazy="selectin"
+    items: Mapped[List["InvStockOperationItem"]] = relationship(
+        back_populates="operation", cascade="all, delete-orphan", lazy="selectin"
     )
 
     __table_args__ = (
+        CheckConstraint("op_type IN ('TRANSFER','STOCKTAKE')", name="ck_inv_stock_op_type"),
         CheckConstraint(
-            "status IN ('DRAFT','CONFIRMED','COMPLETED','CANCELLED')", name="ck_inv_transfer_status"
+            "status IN ('DRAFT','COMPLETED','CANCELLED')", name="ck_inv_stock_op_status"
         ),
     )
 
 
-class InvTransferItem(Base, AuditMixin):
-    """移库明细行。"""
+class InvStockOperationItem(Base, AuditMixin):
+    """库存操作单明细行：移库明细（quantity）与盘点明细（book/actual/difference）共用。"""
 
-    __tablename__ = "inv_transfer_item"
+    __tablename__ = "inv_stock_operation_item"
 
     id: Mapped[BigIntPk]
-    transfer_id: Mapped[BigIntFk] = mapped_column(
-        ForeignKey("inv_transfer.id", ondelete="CASCADE"), nullable=False, index=True, comment="移库单头ID"
+    operation_id: Mapped[BigIntFk] = mapped_column(
+        ForeignKey("inv_stock_operation.id", ondelete="CASCADE"), nullable=False, index=True, comment="操作单头ID"
     )
     material_id: Mapped[BigIntFk] = mapped_column(
         ForeignKey("sys_material.id", ondelete="RESTRICT"), nullable=False, comment="物料ID"
     )
-    from_location_id: Mapped[Optional[BigIntFk]] = mapped_column(
-        ForeignKey("inv_location.id", ondelete="RESTRICT"), nullable=True, comment="源库位ID"
+    quantity: Mapped[Optional[Decimal]] = mapped_column(
+        Numeric(18, 4), nullable=True, comment="移库数量（TRANSFER 用）"
     )
-    to_location_id: Mapped[Optional[BigIntFk]] = mapped_column(
-        ForeignKey("inv_location.id", ondelete="RESTRICT"), nullable=True, comment="目标库位ID"
+    book_qty: Mapped[Optional[Decimal]] = mapped_column(
+        Numeric(18, 4), nullable=True, comment="账面数量（STOCKTAKE 用）"
     )
-    quantity: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, comment="移库数量")
+    actual_qty: Mapped[Optional[Decimal]] = mapped_column(
+        Numeric(18, 4), nullable=True, comment="实盘数量（STOCKTAKE 用）"
+    )
+    difference: Mapped[Optional[Decimal]] = mapped_column(
+        Numeric(18, 4), nullable=True, comment="差异数量（STOCKTAKE 用）"
+    )
     remark: Mapped[Optional[str]] = mapped_column(String(200), nullable=True, comment="备注")
 
-    transfer: Mapped[InvTransfer] = relationship(back_populates="items")
+    operation: Mapped[InvStockOperation] = relationship(back_populates="items")
 
-    __table_args__ = (CheckConstraint("quantity > 0", name="ck_inv_transfer_item_qty"),)
-
-
-# ====================================================================
-# 盘点
-# ====================================================================
-
-
-class InvStocktake(Base, AuditMixin):
-    """库存盘点单头。"""
-
-    __tablename__ = "inv_stocktake"
-
-    id: Mapped[BigIntPk]
-    stocktake_no: Mapped[CodeStr] = mapped_column(unique=True, comment="盘点单号")
-    warehouse_id: Mapped[BigIntFk] = mapped_column(
-        ForeignKey("inv_warehouse.id", ondelete="RESTRICT"), nullable=False, comment="仓库ID"
-    )
-    stocktake_date: Mapped[date] = mapped_column(Date, nullable=False, comment="盘点日期")
-    status: Mapped[str] = mapped_column(
-        String(20), nullable=False, default="DRAFT", comment="状态"
-    )
-    remark: Mapped[Optional[str]] = mapped_column(Text, nullable=True, comment="备注")
-
-    items: Mapped[List["InvStocktakeItem"]] = relationship(
-        back_populates="stocktake", cascade="all, delete-orphan", lazy="selectin"
-    )
-
-    __table_args__ = (
-        CheckConstraint(
-            "status IN ('DRAFT','CONFIRMED','COMPLETED','CANCELLED')", name="ck_inv_stocktake_status"
-        ),
-    )
-
-
-class InvStocktakeItem(Base, AuditMixin):
-    """盘点明细行：账面数 vs 实盘数，差异通过 `ADJUST` 流水调整。"""
-
-    __tablename__ = "inv_stocktake_item"
-
-    id: Mapped[BigIntPk]
-    stocktake_id: Mapped[BigIntFk] = mapped_column(
-        ForeignKey("inv_stocktake.id", ondelete="CASCADE"), nullable=False, index=True, comment="盘点单头ID"
-    )
-    material_id: Mapped[BigIntFk] = mapped_column(
-        ForeignKey("sys_material.id", ondelete="RESTRICT"), nullable=False, comment="物料ID"
-    )
-    location_id: Mapped[Optional[BigIntFk]] = mapped_column(
-        ForeignKey("inv_location.id", ondelete="RESTRICT"), nullable=True, comment="库位ID"
-    )
-    book_qty: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, default=0, comment="账面数量")
-    actual_qty: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, default=0, comment="实盘数量")
-    difference: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, default=0, comment="差异数量")
-    remark: Mapped[Optional[str]] = mapped_column(String(200), nullable=True, comment="备注")
-
-    stocktake: Mapped[InvStocktake] = relationship(back_populates="items")
-
-    __table_args__ = (CheckConstraint("actual_qty >= 0", name="ck_inv_stocktake_actual"),)
+    # 数量合法性（quantity>0 / actual_qty>=0）依赖 op_type，跨表 CHECK 无法表达，由 service 层校验

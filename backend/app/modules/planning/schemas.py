@@ -213,7 +213,6 @@ class DispatchOrderOut(_IdOut):
 class RequisitionItemCreate(BaseModel):
     material_id: int = Field(description="物料ID")
     required_qty: Decimal = Field(gt=0, description="需求数量")
-    location_id: Optional[int] = Field(default=None, description="领料库位ID")
     remark: Optional[str] = None
 
 
@@ -231,7 +230,6 @@ class RequisitionItemOut(_IdOut):
     material_id: int
     required_qty: Decimal
     issued_qty: Decimal
-    location_id: Optional[int] = None
     remark: Optional[str] = None
 
 
@@ -255,7 +253,6 @@ class CompletionReportCreate(BaseModel):
     qualified_qty: Decimal = Field(ge=0, description="合格数量（入库数量）")
     scrap_qty: Decimal = Field(default=Decimal("0"), ge=0, description="报废数量")
     warehouse_id: int = Field(description="入库仓库ID")
-    location_id: Optional[int] = None
     report_date: date = Field(description="报工日期")
     remark: Optional[str] = None
 
@@ -269,7 +266,6 @@ class CompletionReportOut(_IdOut):
     qualified_qty: Decimal
     scrap_qty: Decimal
     warehouse_id: int
-    location_id: Optional[int] = None
     report_date: date
     status: str
     remark: Optional[str] = None

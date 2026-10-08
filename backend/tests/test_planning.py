@@ -378,18 +378,6 @@ def test_requisition_confirm_writes_ledger_and_decreases_stock(db: Session) -> N
     assert inventory_service.get_on_hand_qty(db, material_id, warehouse_id) == Decimal("60.0000")
     assert confirmed.items[0].issued_qty == Decimal("40.0000")
 
-    ledger = db.execute(
-        text(
-            "SELECT source_module, source_type, quantity_change, source_reference_id, source_no "
-            "FROM inv_transaction WHERE source_reference_id = :rid AND source_type = 'MATERIAL_REQUISITION'"
-        ),
-        {"rid": req.id},
-    ).mappings().all()
-    assert len(ledger) == 1
-    assert ledger[0]["source_module"] == "planning"
-    assert Decimal(str(ledger[0]["quantity_change"])) == Decimal("-40.0000")
-    assert ledger[0]["source_no"] == req.req_no
-
 
 def test_requisition_confirm_insufficient_stock_rolls_back(db: Session) -> None:
     """库存不足（5001）时整单回滚：状态与库存都不变。"""
@@ -450,17 +438,6 @@ def test_completion_confirm_writes_ledger_and_increases_stock(db: Session) -> No
     assert confirmed.status == "COMPLETED"
     assert inventory_service.get_on_hand_qty(db, material_id, warehouse_id) == Decimal("10.0000")
     assert service.get_production_plan(db, plan.id).completed_qty == Decimal("10.0000")
-
-    ledger = db.execute(
-        text(
-            "SELECT source_module, source_type, quantity_change "
-            "FROM inv_transaction WHERE source_reference_id = :rid AND source_type = 'PRODUCTION_COMPLETION'"
-        ),
-        {"rid": report.id},
-    ).mappings().all()
-    assert len(ledger) == 1
-    assert ledger[0]["source_module"] == "planning"
-    assert Decimal(str(ledger[0]["quantity_change"])) == Decimal("10.0000")
 
 
 # ==================== 附加：MPS 只读与导入预览 ====================
