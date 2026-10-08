@@ -175,7 +175,6 @@ def create_supplier_material(
         material_id=payload.material_id,
         is_primary=payload.is_primary,
         supply_price=payload.supply_price,
-        lead_time_days=payload.lead_time_days,
         min_order_qty=payload.min_order_qty,
         status=payload.status,
         operator_id=payload.operator_id,
@@ -194,13 +193,12 @@ def update_supplier_material(
     payload: schemas.SupplierMaterialUpdate,
     db: Session = Depends(get_db),
 ) -> ApiResponse[schemas.SupplierMaterialOut]:
-    """修改供货价 / 提前期 / 主供应商等。"""
+    """修改供货价 / 主供应商等。"""
     link = service.update_supplier_material(
         db,
         link_id,
         is_primary=payload.is_primary,
         supply_price=payload.supply_price,
-        lead_time_days=payload.lead_time_days,
         min_order_qty=payload.min_order_qty,
         status=payload.status,
         operator_id=payload.operator_id,
