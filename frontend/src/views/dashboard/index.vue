@@ -69,8 +69,16 @@ async function loadMrpShortage(): Promise<void> {
     mrpShortageCount.value = 0
     return
   }
-  const results = await listMrpResults({ run_id: run.id, page: 1, page_size: 500 })
-  mrpShortageCount.value = results.items.filter((row) => toNumber(row.net_requirement) > 0).length
+  // 后端分页上限 200，分页循环拉全后统计净需求为正的行数
+  let page = 1
+  let shortage = 0
+  for (;;) {
+    const results = await listMrpResults({ run_id: run.id, page, page_size: 200 })
+    shortage += results.items.filter((row) => toNumber(row.net_requirement) > 0).length
+    if (page * 200 >= results.total) break
+    page += 1
+  }
+  mrpShortageCount.value = shortage
 }
 
 async function loadFinishedStock(): Promise<void> {
