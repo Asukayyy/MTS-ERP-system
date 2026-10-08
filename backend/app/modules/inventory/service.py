@@ -1159,15 +1159,36 @@ def flow_summary(db: Session, date_from: date, date_to: date) -> List[Dict[str, 
 
 
 def stats(db: Session) -> Dict[str, Any]:
-    """库存模块统计（供 dashboard 使用）。"""
+    """库存模块统计（供 dashboard 使用）。
+
+    口径：
+    - 主数据 / 结存 / 预警类取总计：warehouse_count / balance_count / low_stock_count；
+    - 流水类取「本期（本月）」范围，起始日本月 1 日：
+      stock_operation_count / transfer_count / stocktake_count 基于 op_date，
+      replenishment_request_count 基于 created_at（无业务日期字段）。
+    """
+    month_start: date = date.today().replace(day=1)
+    month_start_dt: datetime = datetime.combine(month_start, datetime.min.time())
     return {
         "warehouse_count": repository.count_all(db, models.InvWarehouse),
         "balance_count": repository.count_all(db, models.InvBalance),
-        "stock_operation_count": repository.count_all(db, models.InvStockOperation),
-        "transfer_count": repository.count_operations_by_type(db, "TRANSFER"),
-        "stocktake_count": repository.count_operations_by_type(db, "STOCKTAKE"),
-        "replenishment_request_count": repository.count_all(
-            db, models.InvReplenishmentRequest
+        "stock_operation_count": repository.count_where(
+            db, models.InvStockOperation,
+            models.InvStockOperation.op_date >= month_start,
+        ),
+        "transfer_count": repository.count_where(
+            db, models.InvStockOperation,
+            models.InvStockOperation.op_type == "TRANSFER",
+            models.InvStockOperation.op_date >= month_start,
+        ),
+        "stocktake_count": repository.count_where(
+            db, models.InvStockOperation,
+            models.InvStockOperation.op_type == "STOCKTAKE",
+            models.InvStockOperation.op_date >= month_start,
+        ),
+        "replenishment_request_count": repository.count_where(
+            db, models.InvReplenishmentRequest,
+            models.InvReplenishmentRequest.created_at >= month_start_dt,
         ),
         "low_stock_count": len(low_stock_report(db)),
     }
