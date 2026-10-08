@@ -13,7 +13,7 @@
 
 import hashlib
 import json
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session
 from app.common.exceptions import BusinessException
 from app.modules.system import models, repository as repo
 from app.modules.system.contract import log_operation
+from app.modules.system.seed import REGISTER_ROLE_CODES
 from app.modules.system.schemas import (
     BomConfirmOut,
     BomCreate,
@@ -52,6 +53,7 @@ from app.modules.system.schemas import (
     PermissionUpdate,
     PersonnelCreate,
     PersonnelUpdate,
+    RegisterIn,
     RoutingCreate,
     RoutingOperationCreate,
     RoutingOperationUpdate,
@@ -332,6 +334,12 @@ def create_bom(db: Session, payload: BomCreate) -> models.SysBom:
     if repo.get_bom_by_material_version(db, payload.material_id, payload.bom_version):
         raise BusinessException(CODE_BOM_VERSION_EXISTS, "BOM 版本已存在")
     _validate_status(payload.status)
+    _require(
+        not (payload.effective_date and payload.expiry_date)
+        or payload.expiry_date >= payload.effective_date,
+        CODE_INVALID_PARAM,
+        "失效日期不能早于生效日期",
+    )
 
     bom = models.SysBom(
         bom_code=payload.bom_code or repo.next_no(db, models.SysBom, "BOM"),
@@ -339,7 +347,8 @@ def create_bom(db: Session, payload: BomCreate) -> models.SysBom:
         bom_version=payload.bom_version,
         effective_date=payload.effective_date,
         expiry_date=payload.expiry_date,
-        is_active=payload.is_active,
+        # 停用状态的 BOM 不可能同时是"当前激活版本"，与 change_bom_status 的口径保持一致
+        is_active=payload.is_active if payload.status == RecordStatus.ACTIVE.value else False,
         status=payload.status,
         remark=payload.remark,
     )
@@ -364,6 +373,10 @@ def create_bom(db: Session, payload: BomCreate) -> models.SysBom:
             ),
         )
 
+    # 保持"同一物料至多一个激活版本"不变量：新版本若以激活身份创建，旧版本自动让位
+    if bom.is_active:
+        repo.deactivate_other_boms(db, bom.material_id, bom.id)
+
     log_operation(
         db,
         module="system",
@@ -384,8 +397,20 @@ def update_bom(db: Session, bom_id: int, payload: BomUpdate) -> models.SysBom:
             raise BusinessException(CODE_BOM_VERSION_EXISTS, "BOM 版本已存在")
     if "status" in data:
         _validate_status(data["status"])
+    new_effective = data.get("effective_date", bom.effective_date)
+    new_expiry = data.get("expiry_date", bom.expiry_date)
+    _require(
+        not (new_effective and new_expiry) or new_expiry >= new_effective,
+        CODE_INVALID_PARAM,
+        "失效日期不能早于生效日期",
+    )
     for field, value in data.items():
         setattr(bom, field, value)
+    # 状态 / 激活位一致性：停用即取消激活；主动激活某个版本时，同物料其它版本全部让位
+    if bom.status == RecordStatus.INACTIVE.value:
+        bom.is_active = False
+    elif data.get("is_active"):
+        repo.deactivate_other_boms(db, bom.material_id, bom.id)
     log_operation(
         db,
         module="system",
@@ -598,9 +623,16 @@ def list_routings(
     status: Optional[str] = None,
 ):
     """分页查询工艺路线。"""
-    return repo.list_routings(
+    items, total = repo.list_routings(
         db, page=page, page_size=page_size, material_id=material_id, status=status
     )
+    # 附带自制件编码/名称，便于前端识别每条路线属于哪个零件
+    for routing in items:
+        material = repo.get_material(db, routing.material_id)
+        if material is not None:
+            routing.material_code = material.material_code
+            routing.material_name = material.material_name
+    return items, total
 
 
 def get_routing(db: Session, routing_id: int) -> models.SysRouting:
@@ -1005,6 +1037,11 @@ def update_personnel(
         _validate_status(data["status"])
     for field, value in data.items():
         setattr(personnel, field, value)
+    # 姓名联动：修改员工姓名时，同步其登录账号（1:1 关联）的显示名
+    if "person_name" in data:
+        user = repo.get_user_by_personnel(db, personnel.id)
+        if user:
+            user.display_name = data["person_name"]
     log_operation(
         db,
         module="system",
@@ -1289,6 +1326,11 @@ def list_roles(db: Session, status: Optional[str] = None) -> List[models.SysRole
     return repo.list_roles(db, status=status)
 
 
+def list_register_roles(db: Session) -> List[models.SysRole]:
+    """返回注册页可选的九种身份（按种子定义顺序，过滤库里其它角色）。"""
+    return repo.list_roles_by_codes(db, REGISTER_ROLE_CODES)
+
+
 def create_role(db: Session, payload: RoleCreate) -> models.SysRole:
     """新增角色：编码唯一。"""
     if repo.get_role_by_code(db, payload.role_code):
@@ -1477,6 +1519,65 @@ def login(db: Session, username: str, password: str) -> Dict[str, object]:
         detail=f"用户 {user.username} 登录成功",
     )
     return {"user": user, "roles": roles, "permissions": permissions}
+
+
+def register(db: Session, payload: RegisterIn) -> models.SysUser:
+    """公开注册：创建员工档案（部门+工号）与登录账号，绑定所选身份角色。
+
+    一条注册动作串联 组织 → 员工 → 账号 → 角色 → 权限 全链路，
+    数据一致性与系统管理「员工/账号」创建路径保持一致。
+    """
+    if repo.get_user_by_username(db, payload.username):
+        raise BusinessException(CODE_CODE_EXISTS, "登录名已存在")
+    role_ids = list(dict.fromkeys(int(i) for i in payload.role_ids))
+    for role_id in role_ids:
+        if not repo.get_role(db, role_id):
+            raise BusinessException(CODE_NOT_FOUND, f"身份角色不存在：{role_id}")
+    if not repo.get_organization(db, payload.org_id):
+        raise BusinessException(CODE_NOT_FOUND, "所属组织/部门不存在")
+
+    # 工号：留空自动生成 EMP+序号，手工填写则校验唯一
+    employee_no = (payload.employee_no or "").strip()
+    if employee_no:
+        if repo.get_personnel_by_no(db, employee_no):
+            raise BusinessException(CODE_EMPLOYEE_NO_EXISTS, "员工工号已存在")
+    else:
+        employee_no = repo.next_employee_no(db)
+
+    # 先建员工档案，再建账号并挂 1:1 关联
+    personnel = models.SysPersonnel(
+        employee_no=employee_no,
+        person_name=payload.display_name,
+        org_id=payload.org_id,
+        status=RecordStatus.ACTIVE.value,
+        hire_date=date.today(),
+    )
+    repo.add_personnel(db, personnel)
+    db.flush()
+
+    user = models.SysUser(
+        username=payload.username,
+        password_hash=_hash_password(payload.password),
+        display_name=payload.display_name,
+        personnel_id=personnel.id,
+        status=RecordStatus.ACTIVE.value,
+    )
+    repo.add_user(db, user)
+    repo.replace_user_roles(db, user.id, role_ids)
+    db.flush()
+    repo.refresh(db, user)
+    log_operation(
+        db,
+        module="system",
+        action="REGISTER",
+        target_type="sys_user",
+        target_id=user.id,
+        detail=(
+            f"用户 {user.username} 注册：员工 {employee_no}，部门 {payload.org_id}，"
+            f"身份角色 {role_ids}"
+        ),
+    )
+    return user
 
 
 # ==================== 操作日志 ====================

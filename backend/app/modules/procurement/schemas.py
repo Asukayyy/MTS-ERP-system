@@ -87,7 +87,6 @@ class SupplierMaterialCreate(BaseModel):
     material_id: int = Field(description="物料ID")
     is_primary: bool = Field(default=False, description="是否主供应商")
     supply_price: Decimal = Field(default=Decimal("0"), ge=0, description="供货单价")
-    lead_time_days: int = Field(default=0, ge=0, description="供货提前期（天）")
     min_order_qty: Decimal = Field(default=Decimal("0"), ge=0, description="最小起订量")
     status: Optional[str] = Field(default=None, description="状态 ACTIVE/INACTIVE")
     operator_id: Optional[int] = None
@@ -98,7 +97,6 @@ class SupplierMaterialUpdate(BaseModel):
 
     is_primary: Optional[bool] = None
     supply_price: Optional[Decimal] = Field(default=None, ge=0)
-    lead_time_days: Optional[int] = Field(default=None, ge=0)
     min_order_qty: Optional[Decimal] = Field(default=None, ge=0)
     status: Optional[str] = None
     operator_id: Optional[int] = None
@@ -112,7 +110,6 @@ class SupplierMaterialOut(_IdOut):
     material_name: Optional[str] = None
     is_primary: bool
     supply_price: Decimal
-    lead_time_days: int
     min_order_qty: Decimal
     status: str
 
@@ -129,7 +126,6 @@ class PurchaseMaterialOut(BaseModel):
     material_type: str
     supply_type: Optional[str] = None
     unit_code: Optional[str] = None
-    lead_time_days: Optional[int] = None
     safety_stock: Optional[Decimal] = None
     status: str
 
@@ -235,7 +231,7 @@ class OrderFromPlanRequest(BaseModel):
     plan_id: int = Field(description="采购计划ID")
     supplier_id: int = Field(description="供应商ID")
     order_date: Optional[date] = Field(default=None, description="下单日期，默认今天")
-    expected_date: Optional[date] = Field(default=None, description="预计到货日期，默认按供货提前期推算")
+    expected_date: Optional[date] = Field(default=None, description="预计到货日期")
     buyer_id: Optional[int] = Field(default=None, description="采购员（sys_personnel.id）")
     remark: Optional[str] = None
     operator_id: Optional[int] = None

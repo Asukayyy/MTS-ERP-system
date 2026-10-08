@@ -3,7 +3,7 @@ import { onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 
-import { createEvaluation, listEvaluations, listSuppliers } from '@/api/procurement'
+import { createEvaluation, deleteEvaluation, listEvaluations, listSuppliers } from '@/api/procurement'
 import { listPersonnel } from '@/api/system'
 import RemoteSelect from '@/components/common/RemoteSelect.vue'
 import { usePagedTable, toNumber } from '@/composables/usePagedTable'
@@ -89,6 +89,16 @@ async function submit(): Promise<void> {
   }
 }
 
+async function handleDelete(row: SupplierEvaluation): Promise<void> {
+  try {
+    await deleteEvaluation(row.id)
+    ElMessage.success('评价已删除')
+    await load()
+  } catch (error) {
+    ElMessage.error((error as Error).message)
+  }
+}
+
 onMounted(load)
 </script>
 
@@ -129,6 +139,11 @@ onMounted(load)
           <template #default="{ row }">{{ row.evaluator_name || (row.evaluator_id ? `ID ${row.evaluator_id}` : '-') }}</template>
         </el-table-column>
         <el-table-column label="备注" prop="remark" min-width="160" />
+        <el-table-column label="操作" width="90" fixed="right">
+          <template #default="{ row }">
+            <el-button link type="danger" @click="handleDelete(row)">删除</el-button>
+          </template>
+        </el-table-column>
         <template #empty>暂无供应商评价数据</template>
       </el-table>
 

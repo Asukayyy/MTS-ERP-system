@@ -239,6 +239,8 @@ class RoutingOperationOut(_IdOut):
 class RoutingOut(_IdOut):
     routing_code: str
     material_id: int
+    material_code: Optional[str] = None
+    material_name: Optional[str] = None
     routing_version: str
     status: str
     remark: Optional[str] = None
@@ -509,6 +511,19 @@ class LoginIn(BaseModel):
 
     username: str = Field(description="登录名")
     password: str = Field(description="明文密码")
+
+
+class RegisterIn(BaseModel):
+    """公开注册入参：归入部门 + 自选一种或多种身份。"""
+
+    username: str = Field(max_length=50, description="登录名（唯一）")
+    password: str = Field(min_length=6, max_length=64, description="明文密码（服务端 sha256 后入库）")
+    display_name: str = Field(max_length=100, description="显示名（同时作为员工姓名）")
+    org_id: int = Field(description="所属组织/部门ID（注册页下拉选择）")
+    employee_no: Optional[str] = Field(
+        default=None, max_length=50, description="员工工号（留空自动生成）"
+    )
+    role_ids: List[int] = Field(min_length=1, description="身份角色ID集合（九种身份，可复选）")
 
 
 class LoginOut(BaseModel):

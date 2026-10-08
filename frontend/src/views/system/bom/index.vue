@@ -223,18 +223,63 @@ const versionRules: FormRules = {
   bom_version: [{ required: true, message: '请输入版本号，如 V2.0', trigger: 'blur' }],
 }
 
+/** 新增版本时一次填写的子项行 */
+interface ItemRow {
+  material_id?: number
+  quantity: number
+  lead_time_offset: number
+  scrap_rate: number
+  sequence_no: number
+  remark: string
+}
+
+const versionItemRows = ref<ItemRow[]>([])
+
+function addItemRow(): void {
+  versionItemRows.value.push({
+    material_id: undefined,
+    quantity: 1,
+    lead_time_offset: 0,
+    scrap_rate: 0,
+    sequence_no: versionItemRows.value.length + 1,
+    remark: '',
+  })
+}
+
+function removeItemRow(index: number): void {
+  versionItemRows.value.splice(index, 1)
+  versionItemRows.value.forEach((row, idx) => {
+    row.sequence_no = idx + 1
+  })
+}
+
 function openCreateVersion(): void {
   if (!selectedMaterialId.value) {
     ElMessage.warning('请先在左侧选择物料节点')
     return
   }
   Object.assign(versionForm, { bom_version: '', effective_date: '', remark: '' })
+  versionItemRows.value = []
+  addItemRow()
   versionDialogVisible.value = true
 }
 
 async function submitVersion(): Promise<void> {
   const valid = await versionFormRef.value?.validate().catch(() => false)
   if (!valid) return
+
+  // 校验子项：未填物料的空行直接忽略；不允许子件与母件相同
+  const rows = versionItemRows.value.filter((row) => row.material_id)
+  if (rows.some((row) => row.material_id === selectedMaterialId.value)) {
+    ElMessage.warning('子件不能是母件本身')
+    return
+  }
+  const codes = new Set(rows.map((row) => row.material_id))
+  if (codes.size !== rows.length) {
+    ElMessage.warning('同一母件下子件不能重复')
+    return
+  }
+
   versionSubmitting.value = true
   try {
     await createBom({
@@ -244,9 +289,16 @@ async function submitVersion(): Promise<void> {
       is_active: false,
       status: 'ACTIVE',
       remark: versionForm.remark,
-      items: [],
+      items: rows.map((row) => ({
+        material_id: row.material_id,
+        quantity: row.quantity,
+        lead_time_offset: row.lead_time_offset,
+        scrap_rate: row.scrap_rate,
+        sequence_no: row.sequence_no,
+        remark: row.remark || null,
+      })),
     })
-    ElMessage.success('BOM 版本已新增')
+    ElMessage.success('BOM 版本已新增，可在版本列表中「生效」，再于右侧查看子项')
     versionDialogVisible.value = false
     await loadVersions(selectedMaterialId.value as number)
   } catch (error) {
@@ -453,19 +505,65 @@ onMounted(() => {
       </template>
     </el-dialog>
 
-    <el-dialog v-model="versionDialogVisible" title="新增 BOM 版本" width="480px">
+    <el-dialog v-model="versionDialogVisible" title="新增 BOM 版本（一次性填好版本与子项）" width="860px">
       <el-form ref="versionFormRef" :model="versionForm" :rules="versionRules" label-width="100px">
-        <el-form-item label="母件物料">
-          <el-input :model-value="nodeMaterial ? `${nodeMaterial.material_code} ${nodeMaterial.material_name}` : ''" disabled />
-        </el-form-item>
-        <el-form-item label="版本号" prop="bom_version">
-          <el-input v-model="versionForm.bom_version" placeholder="如 V2.0" />
-        </el-form-item>
-        <el-form-item label="生效日期">
-          <el-date-picker v-model="versionForm.effective_date" type="date" value-format="YYYY-MM-DD" style="width: 100%" />
-        </el-form-item>
-        <el-form-item label="备注"><el-input v-model="versionForm.remark" type="textarea" :rows="2" /></el-form-item>
+        <el-row :gutter="12">
+          <el-col :span="8">
+            <el-form-item label="母件物料">
+              <el-input :model-value="nodeMaterial ? `${nodeMaterial.material_code} ${nodeMaterial.material_name}` : ''" disabled />
+            </el-form-item>
+          </el-col>
+          <el-col :span="8">
+            <el-form-item label="版本号" prop="bom_version">
+              <el-input v-model="versionForm.bom_version" placeholder="如 V1.0" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="8">
+            <el-form-item label="生效日期">
+              <el-date-picker v-model="versionForm.effective_date" type="date" value-format="YYYY-MM-DD" style="width: 100%" />
+            </el-form-item>
+          </el-col>
+        </el-row>
+        <el-form-item label="备注"><el-input v-model="versionForm.remark" type="textarea" :rows="1" /></el-form-item>
       </el-form>
+
+      <div class="bom-items-editor">
+        <div class="table-toolbar">
+          <span>子项明细（可一次填多行）</span>
+          <span class="table-toolbar__spacer" />
+          <el-button type="primary" plain size="small" @click="addItemRow">+ 添加子项</el-button>
+        </div>
+        <el-table :data="versionItemRows" size="small" border>
+          <el-table-column label="序号" width="60">
+            <template #default="{ $index }">{{ $index + 1 }}</template>
+          </el-table-column>
+          <el-table-column label="子件物料" min-width="220">
+            <template #default="{ row }">
+              <RemoteSelect v-model="row.material_id" :loader="materialOptions" placeholder="搜索物料编码/名称" />
+            </template>
+          </el-table-column>
+          <el-table-column label="单位用量" width="130">
+            <template #default="{ row }">
+              <el-input-number v-model="row.quantity" :min="0.0001" :precision="4" :controls="false" style="width: 100%" />
+            </template>
+          </el-table-column>
+          <el-table-column label="提前期偏置" width="120">
+            <template #default="{ row }">
+              <el-input-number v-model="row.lead_time_offset" :min="0" :controls="false" style="width: 100%" />
+            </template>
+          </el-table-column>
+          <el-table-column label="损耗率" width="120">
+            <template #default="{ row }">
+              <el-input-number v-model="row.scrap_rate" :min="0" :max="0.9999" :step="0.01" :precision="4" :controls="false" style="width: 100%" />
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" width="70">
+            <template #default="{ $index }">
+              <el-button link type="danger" @click="removeItemRow($index)">删除</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+      </div>
       <template #footer>
         <el-button @click="versionDialogVisible = false">取消</el-button>
         <el-button type="primary" :loading="versionSubmitting" @click="submitVersion">保存</el-button>

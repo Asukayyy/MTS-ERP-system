@@ -1,10 +1,41 @@
 <script setup lang="ts">
-import { useRouter } from 'vue-router'
+import { reactive, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { ElMessage } from 'element-plus'
+import type { FormInstance, FormRules } from 'element-plus'
+
+import { login } from '@/api/system'
 
 const router = useRouter()
+const route = useRoute()
 
-function goDashboard() {
-  router.push('/dashboard')
+const formRef = ref<FormInstance>()
+const submitting = ref(false)
+const form = reactive({
+  username: (route.query.username as string) || '',
+  password: '',
+})
+
+const rules: FormRules = {
+  username: [{ required: true, message: '请输入用户名', trigger: 'blur' }],
+  password: [{ required: true, message: '请输入密码', trigger: 'blur' }],
+}
+
+async function submit(): Promise<void> {
+  const valid = await formRef.value?.validate().catch(() => false)
+  if (!valid) return
+  submitting.value = true
+  try {
+    const result = await login({ username: form.username, password: form.password })
+    localStorage.setItem('bh-erp-user', JSON.stringify(result))
+    ElMessage.success(`欢迎，${result.user.display_name || result.user.username}`)
+    const redirect = (route.query.redirect as string) || '/dashboard'
+    router.replace(redirect)
+  } catch (error) {
+    ElMessage.error((error as Error).message)
+  } finally {
+    submitting.value = false
+  }
 }
 </script>
 
@@ -12,19 +43,29 @@ function goDashboard() {
   <div class="login-page">
     <el-card class="login-page__card" shadow="never">
       <template #header>
-        <span class="login-page__title">BH-ERP 登录</span>
+        <span class="login-page__title">BH-ERP 用户登录</span>
       </template>
 
-      <el-alert
-        type="info"
-        :closable="false"
-        title="当前为简化登录，不校验权限"
-        description="后端已提供 POST /api/v1/system/auth/login（简化版登录），但全系统不做 Authorization 校验；本页面用于建立「登录前 / 登录后」的路由结构。"
-      />
+      <el-form ref="formRef" :model="form" :rules="rules" label-width="0" @keyup.enter="submit">
+        <el-form-item prop="username">
+          <el-input v-model="form.username" placeholder="用户名" size="large" />
+        </el-form-item>
+        <el-form-item prop="password">
+          <el-input v-model="form.password" type="password" placeholder="密码" size="large" show-password />
+        </el-form-item>
+        <el-button class="login-page__button" type="primary" size="large" :loading="submitting" @click="submit">
+          登 录
+        </el-button>
+      </el-form>
 
-      <el-button class="login-page__button" type="primary" @click="goDashboard">
-        暂时跳过，进入工作台
-      </el-button>
+      <el-divider />
+
+      <div class="login-page__footer">
+        <span>没有账号？</span>
+        <router-link class="login-page__link" to="/register">去注册</router-link>
+        <span class="login-page__sep">|</span>
+        <span>请联系管理员在「系统管理 → 用户」中创建</span>
+      </div>
     </el-card>
   </div>
 </template>
@@ -49,6 +90,21 @@ function goDashboard() {
 
 .login-page__button {
   width: 100%;
-  margin-top: 20px;
+}
+
+.login-page__footer {
+  text-align: center;
+  color: #909399;
+  font-size: 13px;
+}
+
+.login-page__link {
+  margin-left: 4px;
+  color: #409eff;
+  text-decoration: none;
+}
+
+.login-page__sep {
+  margin: 0 8px;
 }
 </style>

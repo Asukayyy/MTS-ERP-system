@@ -20,5 +20,13 @@ export default defineConfig({
         changeOrigin: true,
       },
     },
+    // 提前预热入口文件，避免首次打开页面时才开始编译导致卡顿
+    warmup: {
+      clientFiles: ['./src/main.ts', './src/router/index.ts', './src/views/dashboard/index.vue'],
+    },
+  },
+  // 显式预构建重依赖：冷启动一次性完成，页面首开不再触发大量转译
+  optimizeDeps: {
+    include: ['element-plus', 'vue', 'vue-router', 'pinia', 'axios', 'dayjs'],
   },
 })

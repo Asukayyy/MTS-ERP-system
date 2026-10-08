@@ -94,7 +94,6 @@ export const menuItems: MenuItem[] = [
       { path: '/system/permission', title: '权限' },
       { path: '/system/dictionary', title: '公共字典' },
       { path: '/system/log', title: '操作日志' },
-      { path: '/system/course-import', title: '课程数据导入' },
     ],
   },
 ]

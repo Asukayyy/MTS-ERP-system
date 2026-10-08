@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { useRoute } from 'vue-router'
+import { ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { ElMessage } from 'element-plus'
 
 import { listPersonnel } from '@/api/system'
 import RemoteSelect from '@/components/common/RemoteSelect.vue'
@@ -8,6 +10,7 @@ import { useAppStore } from '@/stores/modules/app'
 import type { RemoteOption } from '@/types/erp'
 
 const route = useRoute()
+const router = useRouter()
 const appStore = useAppStore()
 
 const { currentOperator, clearOperator, setOperator } = useCurrentOperator()
@@ -35,6 +38,30 @@ function onOperatorChange(value: number | undefined): void {
   }
   setOperator({ id: value, name: optionLabels.get(value) ?? '' })
 }
+
+interface LoginUser {
+  user: { display_name?: string; username?: string }
+  roles?: { role_name?: string }[]
+}
+
+function readUser(): LoginUser | null {
+  const raw = localStorage.getItem('bh-erp-user')
+  if (!raw) return null
+  try {
+    return JSON.parse(raw) as LoginUser
+  } catch {
+    return null
+  }
+}
+
+const loginUser = ref<LoginUser | null>(readUser())
+
+function logout(): void {
+  localStorage.removeItem('bh-erp-user')
+  loginUser.value = null
+  ElMessage.success('已退出登录')
+  router.replace('/login')
+}
 </script>
 
 <template>
@@ -55,6 +82,14 @@ function onOperatorChange(value: number | undefined): void {
         @change="onOperatorChange"
       />
       <el-tag type="success" effect="plain">转椅制造 MTS · 使用中</el-tag>
+      <template v-if="loginUser">
+        <span class="app-header__role">
+          {{ (loginUser.roles ?? []).map((item) => item.role_name).filter(Boolean).join('、') || '未分配角色' }}
+        </span>
+        <span class="app-header__user">{{ loginUser.user.display_name || loginUser.user.username }}</span>
+        <el-button link type="danger" @click="logout">退出</el-button>
+      </template>
+      <el-tag v-else type="info" effect="plain">未登录</el-tag>
     </div>
   </div>
 </template>
@@ -83,5 +118,14 @@ function onOperatorChange(value: number | undefined): void {
 .app-header__operator-label {
   font-size: 13px;
   color: #606266;
+}
+
+.app-header__role {
+  color: #909399;
+  font-size: 12px;
+}
+
+.app-header__user {
+  font-weight: 600;
 }
 </style>

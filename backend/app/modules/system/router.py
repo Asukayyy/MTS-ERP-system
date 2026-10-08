@@ -55,6 +55,7 @@ from app.modules.system.schemas import (
     PersonnelCreate,
     PersonnelOut,
     PersonnelUpdate,
+    RegisterIn,
     RoleCreate,
     RoleIdsUpdate,
     RoleOut,
@@ -752,6 +753,30 @@ def login(payload: LoginIn, db: Session = Depends(get_db)) -> ApiResponse[LoginO
                 PermissionOut.model_validate(perm) for perm in result["permissions"]
             ],
         )
+    )
+
+
+@router.post("/auth/register", response_model=ApiResponse[UserOut], summary="注册账号（自选身份）")
+def register(payload: RegisterIn, db: Session = Depends(get_db)) -> ApiResponse[UserOut]:
+    """公开注册：创建 ACTIVE 账号并绑定所选身份角色（九种身份可复选）。
+
+    九种身份角色由应用启动时幂等写入（见 `app/modules/system/seed.py`），
+    注册页通过 `GET /system/auth/register-roles` 展示可选择的身份列表。
+    """
+    user = service.register(db, payload)
+    db.commit()
+    return success(UserOut.model_validate(user))
+
+
+@router.get(
+    "/auth/register-roles",
+    response_model=ApiResponse[List[RoleOut]],
+    summary="注册可选身份查询",
+)
+def list_register_roles(db: Session = Depends(get_db)) -> ApiResponse[List[RoleOut]]:
+    """返回注册页可选的九种身份角色（按种子定义顺序）。"""
+    return success(
+        [RoleOut.model_validate(role) for role in service.list_register_roles(db)]
     )
 
 

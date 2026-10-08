@@ -14,6 +14,12 @@ export const constantRoutes: RouteRecordRaw[] = [
     component: () => import('@/views/login/index.vue'),
     meta: { title: '登录' },
   },
+  {
+    path: '/register',
+    name: 'Register',
+    component: () => import('@/views/register/index.vue'),
+    meta: { title: '注册' },
+  },
 
   // ---------- 登录后（主布局） ----------
   {
@@ -260,12 +266,6 @@ export const constantRoutes: RouteRecordRaw[] = [
         name: 'SystemLog',
         component: () => import('@/views/system/log/index.vue'),
         meta: { title: '操作日志' },
-      },
-      {
-        path: 'system/course-import',
-        name: 'SystemCourseImport',
-        component: () => import('@/views/system/course-import/index.vue'),
-        meta: { title: '课程数据导入' },
       },
     ],
   },
