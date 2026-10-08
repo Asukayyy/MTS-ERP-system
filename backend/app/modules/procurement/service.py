@@ -1052,6 +1052,7 @@ def create_order_from_plan(
     """按采购计划生成 DRAFT 采购订单，并回写计划行已下单数量。
 
     - 单价优先取供应商-物料关系的 `supply_price`，缺失时取 0；
+    - 预计到货日期未指定时取下单日期（采购不涉及提前期，由采购员自行填写）；
     - 仅取「未下单数量 = required_qty − ordered_qty > 0」的计划行。
     """
     plan = _require_plan(db, plan_id)
@@ -1065,6 +1066,8 @@ def create_order_from_plan(
         db, supplier_id, [item.material_id for item in plan_items]
     )
     order_date = order_date or date.today()
+    if expected_date is None:
+        expected_date = order_date
 
     pending: List[Tuple[models.PurPurchasePlanItem, Decimal]] = []
     for item in plan_items:

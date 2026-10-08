@@ -21,23 +21,11 @@ from fastapi.testclient import TestClient
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app.core.database import SessionLocal
 from app.modules.inventory import contract as inventory_contract
 from app.modules.sales import contract as sales_contract
 
 SALES = "/api/v1/sales"
 INVENTORY = "/api/v1/inventory"
-
-
-@pytest.fixture()
-def db() -> Session:
-    """真实 MySQL 会话；测试结束回滚残留。"""
-    session = SessionLocal()
-    try:
-        yield session
-    finally:
-        session.rollback()
-        session.close()
 
 
 def _tag() -> str:
