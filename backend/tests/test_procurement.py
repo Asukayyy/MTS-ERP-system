@@ -24,22 +24,10 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.common.exceptions import BusinessException
-from app.core.database import SessionLocal
 from app.modules.inventory import contract as inventory_contract
 from app.modules.inventory import service as inventory_service
 from app.modules.procurement import contract as procurement_contract
 from app.modules.procurement import service
-
-
-@pytest.fixture()
-def db() -> Session:
-    """真实 MySQL 会话；测试内自行 commit，结束回滚残留。"""
-    session = SessionLocal()
-    try:
-        yield session
-    finally:
-        session.rollback()
-        session.close()
 
 
 def _tag() -> str:
@@ -147,7 +135,6 @@ def test_supplier_material_unique_rejected(db: Session) -> None:
         supplier_id=supplier["id"],
         material_id=material_id,
         supply_price=Decimal("12.5"),
-        lead_time_days=5,
     )
     db.commit()
 
@@ -275,15 +262,14 @@ def test_purchase_plan_from_replenishment(
 
 
 def test_order_from_plan_writes_back_ordered_qty(db: Session) -> None:
-    """按计划生成 DRAFT 订单：单价取供货价，回写计划行已下单数量。"""
-    material_id = _create_material(db)
+    """按计划生成 DRAFT 订单：单价取供货价，预计到货日按物料提前期推算，回写计划行已下单数量。"""
+    material_id = _create_material(db, lead_time_days=3)
     supplier = _create_supplier(db)
     service.create_supplier_material(
         db,
         supplier_id=supplier["id"],
         material_id=material_id,
         supply_price=Decimal("7.50"),
-        lead_time_days=3,
     )
     plan = service.create_plan(
         db,
