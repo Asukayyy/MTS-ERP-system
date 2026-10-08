@@ -1,29 +1,32 @@
 # Inventory Module（库存管理）
 
-> 状态：**已实现**（后端 36 个路径；库存变动一律「写流水 + 更新结存」）
+> 状态：**已实现**（后端 29 个路径；库存变动一律在事务内直接更新结存，不维护独立流水表）
 
 ## 模块职责
 
-管理仓库、库位、库存结存与库存流水，维护实时库存状态，并向 planning（MRP 可用量）、
+管理仓库、库存结存与补库需求，维护实时库存状态，并向 planning（MRP 可用量）、
 sales（发货 / 退货）、procurement（到货入库）、planning（领料 / 完工）提供库存能力。
 
-**库存铁律**：任何库存变动必须在同一事务内同时写入 `inv_transaction` 流水并更新
-`inv_balance` 结存；禁止绕过流水直接改结存；禁止出现负库存。
+**库存铁律**：任何库存变动必须通过本模块契约（`increase_stock` / `decrease_stock`
+或库存操作单确认）在同一事务内直接更新 `inv_balance` 结存；禁止绕过契约直接改结存；
+禁止出现负库存。
+
+> 历史方案中的 `inv_transaction` 流水表已删除（迁移 `c4d2e1f3a6b0`）。
+> 移库 / 盘点以库存操作单（`inv_stock_operation`）留痕；手工入 / 出库及跨模块
+> 入 / 出库直接改结存，来源信息记录在调用方业务单据上。
 
 ## 已实现功能
 
 | 功能 | 说明 |
 | --- | --- |
-| 仓库 / 库位 | 增删改查、状态流转；库位被结存引用时禁止删除（`5007`） |
+| 仓库 | 增删改查、状态流转（库位信息为仓库上的文本字段，无独立库位表） |
 | 库存结存 | `/balances` 分页查询、`/balances/available` 可用量查询 |
-| 库存流水 | `/transactions` 按类型 / 来源 / 仓库 / 日期区间查询 |
-| 入出库 | `/stock/increase`、`/stock/decrease`（`SELECT ... FOR UPDATE` + 事务内复校，不足抛 `5001`） |
-| 移库 | 头 + 明细，确认时写 `TRANSFER_OUT` + `TRANSFER_IN` 两条流水 |
-| 盘点 | 头 + 明细，确认时按差异写 `ADJUST` 流水 |
-| 订货点 | `/reorder-rules` 维护 + `/reorder-rules/suggestions` 补货建议 |
+| 手工入 / 出库 | `/stock/increase`、`/stock/decrease`（`SELECT ... FOR UPDATE` + 事务内复校，不足抛 `5001`） |
+| 移库 / 盘点 | 统一为库存操作单：`/stock-operations`，`op_type=TRANSFER/STOCKTAKE`，确认时直接更新结存 |
+| 订货点 | 结存行上的可空字段（仅 A 类物料配置）：`/balances/reorder-suggestions`、`/balances/{id}/reorder` |
 | 补库需求 | `/replenishment-requests`，`generate-from-reorder-rules` 批量生成，确认时按供需分流到 procurement / planning |
 | 课程期初库存导入 | `/import/initial-stock/{preview,confirm}` 两段式导入 |
-| 报表与统计 | 库存汇总 / 低库存 / 流水汇总报表 + `/stats` |
+| 报表与统计 | 库存汇总 / 低库存 / 出入库汇总（基于操作单）+ `/stats` |
 
 ## 输入
 
@@ -35,14 +38,18 @@ sales（发货 / 退货）、procurement（到货入库）、planning（领料 /
 ## 输出
 
 - 实时库存结存与可用量（供 planning MRP 抵扣）
-- 库存流水（审计与追溯的唯一依据）
+- 移库 / 盘点操作单（库存变动留痕）
 - 补库需求（交 procurement 或 planning 执行）
 
-## 数据表（Owner: inventory，共 6 张物理表 / 5 张概念表）
+## 数据表（Owner: inventory，共 5 张物理表）
 
-`inv_warehouse`（库位编码/名称并入为文本字段）、`inv_balance`（含订货点字段）、
-`inv_transaction`、`inv_stock_operation`（op_type 区分 TRANSFER/STOCKTAKE，含 item 明细）、
-`inv_stock_operation_item`、`inv_replenishment_request`
+| 表 | 说明 |
+| --- | --- |
+| `inv_warehouse` | 仓库，含库位编码 / 名称文本字段（原 inv_location 并入，仅展示） |
+| `inv_balance` | 库存结存，对 `(warehouse_id, material_id)` 唯一；含可空的 reorder_point / reorder_quantity |
+| `inv_replenishment_request` | 补库需求 |
+| `inv_stock_operation` | 库存操作单头，op_type 区分 TRANSFER / STOCKTAKE |
+| `inv_stock_operation_item` | 库存操作单明细 |
 
 > 表结构详见 `docs/database/inventory-er.md`。
 
@@ -71,16 +78,15 @@ sales（发货 / 退货）、procurement（到货入库）、planning（领料 /
 
 | 分组 | 前缀 |
 | --- | --- |
-| 仓库 / 库位 | `/api/v1/inventory/warehouses`、`/locations` |
-| 结存 / 流水 | `/api/v1/inventory/balances`、`/transactions` |
-| 入出库 | `/api/v1/inventory/stock/increase`、`/stock/decrease` |
-| 移库 | `/api/v1/inventory/transfers` |
-| 盘点 | `/api/v1/inventory/stocktakes` |
-| 订货点 / 补库 | `/api/v1/inventory/reorder-rules`、`/replenishment-requests` |
+| 仓库 | `/api/v1/inventory/warehouses` |
+| 结存 / 订货点 | `/api/v1/inventory/balances`、`/balances/available`、`/balances/reorder-suggestions` |
+| 手工入出库 | `/api/v1/inventory/stock/increase`、`/stock/decrease` |
+| 移库 / 盘点 | `/api/v1/inventory/stock-operations` |
+| 补库需求 | `/api/v1/inventory/replenishment-requests` |
 | 课程期初库存导入 | `/api/v1/inventory/import/initial-stock/{preview,confirm}` |
 | 报表 / 统计 | `/api/v1/inventory/reports/*`、`/stats`、`/health` |
 
-完整清单见 `docs/api/api-contract.md`。
+完整清单见 `docs/api/api-contract.md` 与 FastAPI 自动文档 `/docs`。
 
 ## 目录对应关系
 
@@ -110,4 +116,3 @@ sales（发货 / 退货）、procurement（到货入库）、planning（领料 /
 | 5004 | 资源不存在 |
 | 5005 | 唯一性冲突 |
 | 5006 | 调整后库存会为负 |
-| 5007 | 库位已被库存引用，禁止删除 |

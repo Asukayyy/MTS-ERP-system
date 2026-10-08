@@ -189,7 +189,7 @@ const flow = computed(() => [
   { title: 'MRP', value: planning.value?.mrp_run_count ?? 0, hint: '运算批次', path: '/planning/mrp' },
   { title: 'BUY', value: planning.value?.buy_count ?? 0, hint: '采购件需求', path: '/procurement/plan' },
   { title: 'MAKE', value: planning.value?.make_count ?? 0, hint: '自制件需求', path: '/planning/work-plan' },
-  { title: '库存操作', value: inventory.value?.stock_operation_count ?? 0, hint: '移库/盘点单', path: '/inventory/transaction' },
+  { title: '本期操作', value: inventory.value?.stock_operation_count ?? 0, hint: '本月移库/盘点单', path: '/inventory/transaction' },
   { title: '库存', value: inventory.value?.balance_count ?? 0, hint: '结存记录', path: '/inventory/balance' },
   { title: '发货/退货', value: sales.value?.shipment_count ?? 0, hint: '发货单', path: '/sales/shipment' },
 ])
