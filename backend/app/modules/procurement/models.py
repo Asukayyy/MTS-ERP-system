@@ -58,7 +58,7 @@ class PurSupplier(Base, AuditMixin):
 
 
 class PurSupplierMaterial(Base, AuditMixin):
-    """供应商 N:M 物料 关联表（含供货价与供货提前期）。"""
+    """供应商 N:M 物料 关联表（含供货价）。"""
 
     __tablename__ = "pur_supplier_material"
 

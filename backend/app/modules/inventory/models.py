@@ -1,15 +1,15 @@
-"""inventory 模块 ORM 模型 —— 仓库、库存结存、库存流水、补库需求与库存操作单。
+"""inventory 模块 ORM 模型 —— 仓库、库存结存、补库需求与库存操作单。
 
 核心原则（规格 §24 / §35 / §36，PPT 精简版 5 表设计）：
 
 1. **库存数量只由 inventory 模块维护**，其他模块看到的库存必须来自本模块接口。
-2. **任何库存变动都必须产生一条 `inv_transaction` 流水**，不允许直接改余额。
-3. 库存业务必须可追踪：流水带 `source_module / source_type / source_reference_id`，
-   能追溯回具体的 PUR_RECEIPT / SAL_SHIPMENT / PLN_MATERIAL_REQUISITION 等来源单据。
-4. **禁止负库存**（`inv_balance.quantity >= 0`）；
-   但 `inv_transaction.quantity_change` 允许正负数（规格 §23）。
+2. **任何库存变动都在同一事务内直接更新 `inv_balance` 结存**（不再维护独立流水表），
+   不允许绕过契约直接改余额。
+3. 库存业务必须可追踪：跨模块入/出库由来源单据（PUR_RECEIPT / SAL_SHIPMENT /
+   PLN_MATERIAL_REQUISITION 等）直接驱动结存；移库 / 盘点以库存操作单留痕。
+4. **禁止负库存**（`inv_balance.quantity >= 0`，规格 §23）。
 5. `inv_balance` 对 `(warehouse_id, material_id)` 唯一；订货点/建议订货量
-   直接落在结存行上（原 inv_reorder_rule 并入）。
+   直接落在结存行上（原 inv_reorder_rule 并入，仅 A 类物料配置，默认 NULL）。
 6. 仓库表带冗余库位文本字段（原 inv_location 并入，仅作展示不再建库位维度）。
 7. 移库与盘点统一为 `inv_stock_operation`（`op_type` 区分 TRANSFER / STOCKTAKE），
    明细行统一放 `inv_stock_operation_item`。
@@ -183,9 +183,9 @@ class InvStockOperation(Base, AuditMixin):
     """库存操作单头：移库（TRANSFER）与盘点（STOCKTAKE）共用。
 
     - TRANSFER：`from_warehouse_id → to_warehouse_id`，明细带移库数量；
-      确认时写 TRANSFER_OUT + TRANSFER_IN 两条流水。
+      确认时对调出/调入两个仓库的结存各更新一次。
     - STOCKTAKE：`warehouse_id`，明细带账面数/实盘数/差异；
-      确认时按差异写 ADJUST 流水。
+      确认时按盘盈/盘亏差异直接调整结存。
     """
 
     __tablename__ = "inv_stock_operation"

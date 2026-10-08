@@ -15,7 +15,7 @@ import StatusTag from '@/components/common/StatusTag.vue'
 import { usePagedTable, toNumber } from '@/composables/usePagedTable'
 import type { RemoteOption, SupplierMaterial } from '@/types/erp'
 
-/** 供应商-物料供货关系：维护供货价、提前期、最小起订量，供采购计划取价 */
+/** 供应商-物料供货关系：维护供货价、最小起订量，供采购计划取价 */
 const { loading, rows, total, page, pageSize, query, load, search, reset, changePage, changeSize } =
   usePagedTable<SupplierMaterial, { supplier_id: number | undefined; material_id: number | undefined }>(
     (params) => listSupplierMaterials(params),
@@ -40,14 +40,12 @@ const form = reactive<{
   material_id: number | undefined
   is_primary: boolean
   supply_price: number
-  lead_time_days: number
   min_order_qty: number
 }>({
   supplier_id: undefined,
   material_id: undefined,
   is_primary: false,
   supply_price: 0,
-  lead_time_days: 0,
   min_order_qty: 0,
 })
 
@@ -58,7 +56,6 @@ function openCreate(): void {
     material_id: undefined,
     is_primary: false,
     supply_price: 0,
-    lead_time_days: 0,
     min_order_qty: 0,
   })
   dialogVisible.value = true
@@ -71,7 +68,6 @@ function openEdit(row: SupplierMaterial): void {
     material_id: row.material_id,
     is_primary: row.is_primary,
     supply_price: toNumber(row.supply_price),
-    lead_time_days: row.lead_time_days,
     min_order_qty: toNumber(row.min_order_qty),
   })
   dialogVisible.value = true
@@ -92,7 +88,6 @@ async function submit(): Promise<void> {
         material_id: form.material_id,
         is_primary: form.is_primary,
         supply_price: form.supply_price,
-        lead_time_days: form.lead_time_days,
         min_order_qty: form.min_order_qty,
       })
       ElMessage.success('供货关系已新增')
@@ -100,7 +95,6 @@ async function submit(): Promise<void> {
       await updateSupplierMaterial(editingId.value, {
         is_primary: form.is_primary,
         supply_price: form.supply_price,
-        lead_time_days: form.lead_time_days,
         min_order_qty: form.min_order_qty,
       })
       ElMessage.success('供货关系已更新')
@@ -173,7 +167,6 @@ onMounted(load)
           </template>
         </el-table-column>
         <el-table-column label="供货单价" prop="supply_price" width="110" align="right" />
-        <el-table-column label="提前期(天)" prop="lead_time_days" width="110" align="right" />
         <el-table-column label="最小起订量" prop="min_order_qty" width="110" align="right" />
         <el-table-column label="状态" width="90">
           <template #default="{ row }"><StatusTag :status="row.status" /></template>
@@ -229,9 +222,6 @@ onMounted(load)
         </el-form-item>
         <el-form-item label="供货单价">
           <el-input-number v-model="form.supply_price" :min="0" :precision="2" :controls="false" style="width: 100%" />
-        </el-form-item>
-        <el-form-item label="供货提前期(天)">
-          <el-input-number v-model="form.lead_time_days" :min="0" :controls="false" style="width: 100%" />
         </el-form-item>
         <el-form-item label="最小起订量">
           <el-input-number v-model="form.min_order_qty" :min="0" :controls="false" style="width: 100%" />
