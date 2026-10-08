@@ -224,13 +224,49 @@ def find_run_result(
     )
 
 
-def count_mrp_results_by_supply(db: Session, supply_type: str) -> int:
-    return count_where(db, models.PlnMrpResult, models.PlnMrpResult.supply_type == supply_type)
+def latest_mrp_run_id(db: Session) -> Optional[int]:
+    """最新一次 MRP 运算批次 ID（无批次返回 None）。"""
+    return db.scalar(select(func.max(models.PlnMrpRun.id)))
+
+
+def count_mrp_results_by_supply(
+    db: Session, supply_type: str, run_id: Optional[int] = None
+) -> int:
+    """统计某供应类型的 MRP 结果条数；给定 `run_id` 时只统计该批次。"""
+    criteria = [models.PlnMrpResult.supply_type == supply_type]
+    if run_id is not None:
+        criteria.append(models.PlnMrpResult.run_id == run_id)
+    return count_where(db, models.PlnMrpResult, *criteria)
+
+
+def sum_mps_planned_qty(db: Session, period_label: str, statuses: Sequence[str]) -> Decimal:
+    """按期间标签与状态汇总 MPS 行计划量（「本期计划量」口径）。"""
+    total = db.scalar(
+        select(func.coalesce(func.sum(models.PlnMpsItem.planned_qty), 0)).where(
+            models.PlnMpsItem.period_label == period_label,
+            models.PlnMpsItem.status.in_(list(statuses)),
+        )
+    )
+    return _as_decimal(total)
+
+
+def _as_decimal(value) -> Decimal:
+    """把数据库返回的聚合值统一转成 Decimal。"""
+    if value is None:
+        return Decimal("0")
+    if isinstance(value, Decimal):
+        return value
+    return Decimal(str(value))
 
 
 def count_open(db: Session, model, open_statuses: Sequence[str]) -> int:
     """统计未结束（不处于给定终态）的单据数。"""
     return count_where(db, model, model.status.notin_(list(open_statuses)))
+
+
+def count_demands_by_statuses(db: Session, statuses: Sequence[str]) -> int:
+    """统计指定状态的计划需求条数（「需求总量」口径，排除 DRAFT/CANCELLED）。"""
+    return count_where(db, models.PlnDemand, models.PlnDemand.status.in_(list(statuses)))
 
 
 # ==================== 生产作业计划 ====================

@@ -275,7 +275,12 @@ class CompletionReportOut(_IdOut):
 class PlanningStatsOut(BaseModel):
     """计划管理统计（供首页 / 综合查询使用）。"""
 
+    current_period: str = Field(default="", description="本期期间（如 2026-10）")
+    mps_planned_qty: Decimal = Field(
+        default=Decimal("0"), description="本期已确认及以上 MPS 计划量合计"
+    )
     mps_count: int = Field(description="MPS 数量")
+    demand_count: int = Field(default=0, description="需求总量（已确认及以上，排除草稿/已取消）")
     mrp_run_count: int = Field(description="MRP 运算批次数量")
     mrp_result_count: int = Field(description="MRP 结果条数")
     make_count: int = Field(description="自制件需求条数")
