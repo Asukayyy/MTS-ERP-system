@@ -80,6 +80,12 @@ _DEMAND_TRANSITIONS: Dict[str, set] = {
 
 _TERMINAL_STATUSES = ("COMPLETED", "CANCELLED")
 
+#: 计入「本期计划量」的有效状态：排除 DRAFT 草稿与 CANCELLED 已取消
+_ACTIVE_PLAN_STATUSES = ("CONFIRMED", "RELEASED", "IN_PROGRESS", "COMPLETED")
+
+#: 计入「需求总量」的有效状态：排除 DRAFT 草稿与 CANCELLED 已取消
+_ACTIVE_DEMAND_STATUSES = ("CONFIRMED", "RELEASED", "COMPLETED")
+
 
 # ==================== 小工具 ====================
 
@@ -1707,14 +1713,28 @@ def cancel_completion_report(
 # ==================== 统计 ====================
 
 
-def stats(db: Session) -> Dict[str, int]:
-    """计划模块统计（供首页 / 综合查询使用）。"""
+def stats(db: Session) -> Dict[str, Any]:
+    """计划模块统计（供首页 / 综合查询使用）。
+
+    「本期」= 当前年月（如 `2026-10`），按 MPS **行明细**的 `period_label` 月度时段统计，
+    且仅计入已确认及以上状态（`_ACTIVE_PLAN_STATUSES`），排除 DRAFT 草稿与 CANCELLED。
+    `buy_count` / `make_count` 只统计**最新一次 MRP 批次**的供需分流结果，
+    避免随每次运算无限累加。`demand_count`（需求总量）同样排除 DRAFT 草稿与
+    CANCELLED，与 `mps_planned_qty` 口径保持一致。
+    """
+    current_period = date.today().strftime("%Y-%m")
+    latest_run_id = repository.latest_mrp_run_id(db)
     return {
+        "current_period": current_period,
+        "mps_planned_qty": repository.sum_mps_planned_qty(
+            db, current_period, _ACTIVE_PLAN_STATUSES
+        ),
         "mps_count": repository.count_all(db, models.PlnMps),
+        "demand_count": repository.count_demands_by_statuses(db, _ACTIVE_DEMAND_STATUSES),
         "mrp_run_count": repository.count_all(db, models.PlnMrpRun),
         "mrp_result_count": repository.count_all(db, models.PlnMrpResult),
-        "make_count": repository.count_mrp_results_by_supply(db, "MAKE"),
-        "buy_count": repository.count_mrp_results_by_supply(db, "BUY"),
+        "make_count": repository.count_mrp_results_by_supply(db, "MAKE", latest_run_id),
+        "buy_count": repository.count_mrp_results_by_supply(db, "BUY", latest_run_id),
         "open_plan_count": repository.count_open(db, models.PlnProductionPlan, _TERMINAL_STATUSES),
         "open_dispatch_count": repository.count_open(db, models.PlnDispatchOrder, _TERMINAL_STATUSES),
         "open_requisition_count": repository.count_open(
