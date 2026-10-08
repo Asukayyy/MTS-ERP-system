@@ -120,12 +120,19 @@ def _supplier_name_map(db: Session, supplier_ids: Sequence[int]) -> Dict[int, st
     }
 
 
-def _require_supplier(db: Session, supplier_id: Optional[int]) -> models.PurSupplier:
+def _require_supplier(
+    db: Session, supplier_id: Optional[int], *, require_active: bool = False
+) -> models.PurSupplier:
     if not supplier_id:
         raise BusinessException(CODE_PARAM_INVALID, "供应商ID不能为空")
     supplier = repository.get_supplier(db, supplier_id)
     if not supplier:
         raise BusinessException(CODE_NOT_FOUND, f"供应商不存在：{supplier_id}")
+    if require_active and supplier.status != "ACTIVE":
+        raise BusinessException(
+            CODE_PARAM_INVALID,
+            f"供应商 {supplier.supplier_name} 已停用，不可被新单据引用",
+        )
     return supplier
 
 
@@ -514,7 +521,7 @@ def create_supplier_material(
     status: Optional[str] = None,
     operator_id: Optional[int] = None,
 ) -> Dict[str, Any]:
-    _require_supplier(db, supplier_id)
+    _require_supplier(db, supplier_id, require_active=True)
     _require_material(db, material_id)
     if repository.get_supplier_material_by_pair(db, supplier_id, material_id):
         raise BusinessException(
@@ -639,7 +646,7 @@ def _add_plan_item(
         raise BusinessException(CODE_PARAM_INVALID, "计划行需求日期不能为空")
     supplier_id = raw.get("supplier_id")
     if supplier_id:
-        _require_supplier(db, supplier_id)
+        _require_supplier(db, supplier_id, require_active=True)
     item = models.PurPurchasePlanItem(
         plan_id=plan_id,
         material_id=raw["material_id"],
@@ -876,7 +883,7 @@ def create_order(
     remark: Optional[str] = None,
     operator_id: Optional[int] = None,
 ) -> Dict[str, Any]:
-    _require_supplier(db, supplier_id)
+    _require_supplier(db, supplier_id, require_active=True)
     if buyer_id:
         _require_personnel(db, buyer_id)
     if not items:
@@ -961,7 +968,7 @@ def update_order(
     if order.status != "DRAFT":
         raise BusinessException(CODE_STATUS_INVALID, "仅 DRAFT 状态的采购订单可修改")
     if supplier_id is not None:
-        _require_supplier(db, supplier_id)
+        _require_supplier(db, supplier_id, require_active=True)
         order.supplier_id = supplier_id
     if order_date is not None:
         order.order_date = order_date
@@ -1057,7 +1064,7 @@ def create_order_from_plan(
     plan = _require_plan(db, plan_id)
     if plan.status in _PLAN_TERMINAL:
         raise BusinessException(CODE_IMMUTABLE, f"采购计划已 {plan.status}，不可生成订单")
-    _require_supplier(db, supplier_id)
+    _require_supplier(db, supplier_id, require_active=True)
     if buyer_id:
         _require_personnel(db, buyer_id)
     plan_items = repository.get_plan_items(db, plan.id)
@@ -1646,17 +1653,43 @@ def supplier_evaluation_report(db: Session) -> List[Dict[str, Any]]:
 
 
 def stats(db: Session) -> Dict[str, Any]:
-    """采购模块统计（供 dashboard 使用）。"""
+    """采购模块统计（供 dashboard 使用），口径为本月（本期）。"""
+    month_start = date(date.today().year, date.today().month, 1)
     return {
-        "supplier_count": repository.count_all(db, models.PurSupplier),
-        "supplier_material_count": repository.count_all(db, models.PurSupplierMaterial),
-        "plan_count": repository.count_all(db, models.PurPurchasePlan),
-        "plan_counts": repository.status_counts(db, models.PurPurchasePlan),
-        "order_count": repository.count_all(db, models.PurOrder),
-        "order_counts": repository.status_counts(db, models.PurOrder),
+        "supplier_count": repository.count_where(
+            db, models.PurSupplier, models.PurSupplier.created_at >= month_start
+        ),
+        "supplier_material_count": repository.count_where(
+            db,
+            models.PurSupplierMaterial,
+            models.PurSupplierMaterial.created_at >= month_start,
+        ),
+        "plan_count": repository.count_where(
+            db,
+            models.PurPurchasePlan,
+            models.PurPurchasePlan.plan_date >= month_start,
+        ),
+        "plan_counts": repository.status_counts_since(
+            db,
+            models.PurPurchasePlan,
+            models.PurPurchasePlan.plan_date,
+            month_start,
+        ),
+        "order_count": repository.count_where(
+            db, models.PurOrder, models.PurOrder.order_date >= month_start
+        ),
+        "order_counts": repository.status_counts_since(
+            db, models.PurOrder, models.PurOrder.order_date, month_start
+        ),
         "pending_receipt_line_count": repository.pending_receipt_line_count(db),
-        "receipt_count": repository.count_all(db, models.PurReceipt),
-        "evaluation_count": repository.count_all(db, models.PurSupplierEvaluation),
+        "receipt_count": repository.count_where(
+            db, models.PurReceipt, models.PurReceipt.receipt_date >= month_start
+        ),
+        "evaluation_count": repository.count_where(
+            db,
+            models.PurSupplierEvaluation,
+            models.PurSupplierEvaluation.evaluate_date >= month_start,
+        ),
     }
 
 
@@ -1686,6 +1719,8 @@ def create_purchase_plan_from_mrp(
 
     reference_ids = [int(row["id"]) for row in buy_results]
     plan = _resolve_reusable_plan(db, "MRP", reference_ids)
+    if plan is None:
+        plan = repository.find_active_plan_by_source_type(db, "MRP")
     if plan is None:
         plan = _create_plan_header(
             db,
@@ -1757,6 +1792,8 @@ def create_purchase_plan_from_replenishment(
     request_qty = _as_decimal(_field("request_qty"))
 
     plan = _resolve_reusable_plan(db, "REORDER", [request_id])
+    if plan is None:
+        plan = repository.find_active_plan_by_source_type(db, "REORDER")
     if plan is None:
         plan = _create_plan_header(
             db,

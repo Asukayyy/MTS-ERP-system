@@ -10,6 +10,7 @@ import {
   listPurchasePlans,
   listSuppliers,
   setPurchasePlanStatus,
+  updatePurchasePlan,
 } from '@/api/procurement'
 import { listMaterials } from '@/api/system'
 import RemoteSelect from '@/components/common/RemoteSelect.vue'
@@ -48,6 +49,7 @@ interface PlanLineForm {
 
 const dialogVisible = ref(false)
 const submitting = ref(false)
+const editingId = ref<number | null>(null)
 const formRef = ref<FormInstance>()
 const form = reactive<{
   plan_no: string
@@ -81,9 +83,35 @@ function removeLine(index: number): void {
 }
 
 function openCreate(): void {
+  editingId.value = null
   Object.assign(form, { plan_no: '', plan_date: '', remark: '', items: [] })
   addLine()
   dialogVisible.value = true
+}
+
+async function openEdit(row: PurchasePlan): Promise<void> {
+  try {
+    const data = await getPurchasePlan(row.id)
+    editingId.value = row.id
+    Object.assign(form, {
+      plan_no: data.plan_no || '',
+      plan_date: data.plan_date || '',
+      remark: data.remark || '',
+      items: (data.items || []).map((item) => ({
+        material_id: item.material_id,
+        required_qty: item.required_qty,
+        required_date: item.required_date,
+        source_type: item.source_type || 'MANUAL',
+        source_reference_id: item.source_reference_id ?? undefined,
+        supplier_id: item.supplier_id ?? undefined,
+        remark: item.remark || '',
+      })),
+    })
+    if (form.items.length === 0) addLine()
+    dialogVisible.value = true
+  } catch (error) {
+    ElMessage.error((error as Error).message)
+  }
 }
 
 async function submit(): Promise<void> {
@@ -99,7 +127,7 @@ async function submit(): Promise<void> {
   }
   submitting.value = true
   try {
-    await createPurchasePlan({
+    const payload = {
       plan_no: form.plan_no || null,
       plan_date: form.plan_date,
       remark: form.remark || null,
@@ -112,8 +140,14 @@ async function submit(): Promise<void> {
         supplier_id: item.supplier_id ?? null,
         remark: item.remark || null,
       })),
-    })
-    ElMessage.success('采购计划已新增')
+    }
+    if (editingId.value) {
+      await updatePurchasePlan(editingId.value, payload)
+      ElMessage.success('采购计划已更新')
+    } else {
+      await createPurchasePlan(payload)
+      ElMessage.success('采购计划已新增')
+    }
     dialogVisible.value = false
     await load()
   } catch (error) {
@@ -232,6 +266,7 @@ onMounted(load)
         <el-table-column label="操作" width="320" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" @click="openDetail(row)">查看明细</el-button>
+            <el-button v-if="row.status === 'DRAFT'" link type="primary" @click="openEdit(row)">编辑</el-button>
             <el-button v-if="row.status === 'DRAFT'" link type="primary" @click="changeStatus(row, 'CONFIRMED')">
               确认
             </el-button>
@@ -275,7 +310,7 @@ onMounted(load)
       </div>
     </el-card>
 
-    <el-dialog v-model="dialogVisible" title="新增采购计划" width="960px">
+    <el-dialog v-model="dialogVisible" :title="editingId ? '编辑采购计划' : '新增采购计划'" width="960px">
       <el-form ref="formRef" :model="form" :rules="rules" label-width="110px">
         <el-row :gutter="12">
           <el-col :span="12">
