@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """「大众自动钳」演示数据种子脚本（幂等，可重复执行）。
 
 功能：
@@ -23,6 +23,8 @@ from sqlalchemy import inspect, text
 
 from app.core.database import SessionLocal, engine
 from app.modules.system import models
+from app.modules.inventory import models as inv_models
+from app.modules.planning import models as pln_models
 
 # ============================ 1. 清空历史示例数据 ============================
 
@@ -203,12 +205,52 @@ ROUTINGS = [
 ]
 
 
-# ============================ 5. 主流程 ============================
+# ============================ 5. 演示业务数据 ============================
+
+# (仓库编码, 仓库名称)
+WAREHOUSES = [
+    ("WH-FG-01", "成品库"),
+    ("WH-SF-01", "半成品库"),
+    ("WH-RM-01", "原料库"),
+]
+
+# 市场需求 1000：pln_demand（source_type=SALES）
+DEMO_DEMAND = {
+    "demand_no": "DM-2026-0001",
+    "source_type": "SALES",
+    "material_code": "FG-CLAMP-001",
+    "quantity": 1000,
+    "due_date": date(2026, 11, 30),
+    "status": "CONFIRMED",
+}
+
+# 计划生产 500：pln_mps + 行
+DEMO_MPS = {
+    "mps_no": "MPS-2026-0001",
+    "plan_year": 2026,
+    "start_date": date(2026, 11, 1),
+    "end_date": date(2026, 11, 30),
+    "status": "CONFIRMED",
+    "item": {
+        "material_code": "FG-CLAMP-001",
+        "period_label": "2026-11",
+        "planned_qty": 500,
+    },
+}
+
+# 成品初始库存 500
+DEMO_STOCK = {
+    "warehouse_code": "WH-FG-01",
+    "material_code": "FG-CLAMP-001",
+    "quantity": 500,
+}
+
+# ============================ 6. 主流程 ============================
 
 
 def seed() -> None:
     cleared = clear_demo_data()
-    print(f"[1/4] 已清空示例表 {len(cleared)} 张：{', '.join(cleared)}")
+    print(f"[1/5] 已清空示例表 {len(cleared)} 张：{', '.join(cleared)}")
 
     db = SessionLocal()
     try:
@@ -231,7 +273,7 @@ def seed() -> None:
             db.add(m)
             db.flush()
             mat_ids[code] = m.id
-        print(f"[2/4] 已创建物料 {len(mat_ids)} 个（成品 1 / 半成品 2 / 自制件 7 / 外购件 6）")
+        print(f"[2/5] 已创建物料 {len(mat_ids)} 个（成品 1 / 半成品 2 / 自制件 7 / 外购件 6）")
 
         # BOM
         for parent, items in BOMS:
@@ -256,7 +298,7 @@ def seed() -> None:
                         lead_time_offset=offset,
                     )
                 )
-        print(f"[3/4] 已创建 BOM {len(BOMS)} 张（含多层结构）")
+        print(f"[3/5] 已创建 BOM {len(BOMS)} 张（含多层结构）")
 
         # 工艺路线
         for material_code, ops in ROUTINGS:
@@ -281,7 +323,64 @@ def seed() -> None:
                     )
                 )
                 op_count += 1
-        print(f"[4/4] 已创建工艺路线 {len(ROUTINGS)} 条、工序 {op_count} 道")
+        print(f"[4/5] 已创建工艺路线 {len(ROUTINGS)} 条、工序 {op_count} 道")
+
+        # 仓库 + 成品库存 500 + 市场需求 1000 + 计划生产 500
+        wh_ids: dict[str, int] = {}
+        for code, name in WAREHOUSES:
+            wh = inv_models.InvWarehouse(warehouse_code=code, warehouse_name=name, status="ACTIVE")
+            db.add(wh)
+            db.flush()
+            wh_ids[code] = wh.id
+
+        db.add(
+            inv_models.InvBalance(
+                warehouse_id=wh_ids[DEMO_STOCK["warehouse_code"]],
+                material_id=mat_ids[DEMO_STOCK["material_code"]],
+                quantity=Decimal(DEMO_STOCK["quantity"]),
+                locked_quantity=Decimal(0),
+            )
+        )
+
+        db.add(
+            pln_models.PlnDemand(
+                demand_no=DEMO_DEMAND["demand_no"],
+                source_type=DEMO_DEMAND["source_type"],
+                material_id=mat_ids[DEMO_DEMAND["material_code"]],
+                quantity=Decimal(DEMO_DEMAND["quantity"]),
+                due_date=DEMO_DEMAND["due_date"],
+                status=DEMO_DEMAND["status"],
+                remark="市场销售需求（演示数据）",
+            )
+        )
+
+        mps = pln_models.PlnMps(
+            mps_no=DEMO_MPS["mps_no"],
+            mps_name="大众自动钳 11 月主生产计划",
+            plan_year=DEMO_MPS["plan_year"],
+            start_date=DEMO_MPS["start_date"],
+            end_date=DEMO_MPS["end_date"],
+            status=DEMO_MPS["status"],
+        )
+        db.add(mps)
+        db.flush()
+        item = DEMO_MPS["item"]
+        db.add(
+            pln_models.PlnMpsItem(
+                mps_id=mps.id,
+                material_id=mat_ids[item["material_code"]],
+                period_label=item["period_label"],
+                planned_qty=Decimal(item["planned_qty"]),
+                finished_qty=Decimal(0),
+                start_date=DEMO_MPS["start_date"],
+                end_date=DEMO_MPS["end_date"],
+                status="CONFIRMED",
+            )
+        )
+        print(
+            f"[5/5] 已创建仓库 {len(WAREHOUSES)} 个、成品库存 {DEMO_STOCK['quantity']}、"
+            f"市场需求 {DEMO_DEMAND['quantity']}、计划生产 {item['planned_qty']}"
+        )
 
         db.commit()
         print("种子执行完成，数据已写入共享库。")
