@@ -549,7 +549,10 @@ export interface CompletionReport {
 }
 
 export interface PlanningStats {
+  current_period: string
+  mps_planned_qty: number
   mps_count: number
+  demand_count: number
   mrp_run_count: number
   mrp_result_count: number
   make_count: number

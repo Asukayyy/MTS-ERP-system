@@ -297,7 +297,13 @@ class FlowSummaryOut(BaseModel):
 
 
 class InventoryStatsOut(BaseModel):
-    """库存模块统计（供 dashboard 使用）。"""
+    """库存模块统计（供 dashboard 使用）。
+
+    口径：
+    - warehouse_count / balance_count / low_stock_count 取总计（主数据 / 结存 / 预警）；
+    - stock_operation_count / transfer_count / stocktake_count 取本期（基于 op_date）；
+    - replenishment_request_count 取本期（基于 created_at）。
+    """
 
     warehouse_count: int
     balance_count: int

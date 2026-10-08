@@ -5,8 +5,9 @@
 - 每个改状态的动作在 service 内写操作日志，二者同一事务；本层成功后才 `db.commit()`。
 - 出参统一 `ApiResponse[...]`，分页统一 `PageData[...]`。
 
-5 张概念表：仓库（含库位字段）/ 结存（含订货点字段）/ 流水 / 补库需求 / 库存操作单
-（op_type 区分 TRANSFER / STOCKTAKE）。
+5 张物理表：仓库（含库位文本字段）/ 结存（含订货点字段）/ 补库需求 /
+库存操作单 + 操作单明细（op_type 区分 TRANSFER / STOCKTAKE）。
+库存变动一律直接更新结存，不维护独立流水表。
 """
 
 from datetime import date
@@ -335,9 +336,9 @@ def confirm_stock_operation(
     operator_id: Optional[int] = Query(default=None, description="操作人ID"),
     db: Session = Depends(get_db),
 ) -> ApiResponse[schemas.StockOperationOut]:
-    """确认执行：TRANSFER 写 TRANSFER_OUT + TRANSFER_IN；STOCKTAKE 按差异写 ADJUST。
+    """确认执行：TRANSFER 更新调出/调入两边结存；STOCKTAKE 按盘盈/盘亏差异调整结存。
 
-    状态 → COMPLETED；库存不足返回 5001，整单不落流水。
+    状态 → COMPLETED；库存不足返回 5001，整单不改动任何结存。
     """
     operation = service.confirm_stock_operation(db, operation_id, operator_id)
     db.commit()
@@ -511,7 +512,7 @@ def flow_summary_report(
     date_to: date = Query(..., description="业务日期止"),
     db: Session = Depends(get_db),
 ) -> ApiResponse[List[schemas.FlowSummaryOut]]:
-    """按流水类型 + 物料统计出入库数量。"""
+    """按操作类型 + 物料统计出入库数量（数据源为库存操作单）。"""
     return success(service.flow_summary(db, date_from, date_to))
 
 
@@ -551,7 +552,7 @@ def preview_initial_stock_import(
 def confirm_initial_stock_import(
     payload: schemas.InitialStockImportRequest, db: Session = Depends(get_db)
 ) -> ApiResponse[schemas.InitialStockConfirmOut]:
-    """确认期初库存导入：重新校验后逐行走 `increase_stock`，写真实流水与结存，同一事务提交。"""
+    """确认期初库存导入：重新校验后逐行走 `increase_stock` 直接更新结存，同一事务提交。"""
     result = service.confirm_initial_stock_import(
         db,
         source=payload.source,

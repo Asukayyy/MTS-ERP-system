@@ -120,24 +120,6 @@ def _walk(node: Dict[str, Any]) -> List[Dict[str, Any]]:
     return nodes
 
 
-def _ledger(
-    client: TestClient,
-    *,
-    source_type: str,
-    source_reference_id: int,
-    material_id: int | None = None,
-    warehouse_id: int | None = None,
-) -> List[Dict[str, Any]]:
-    """查询某来源单据对应的库存流水行（走真实流水接口）。"""
-    params: Dict[str, Any] = {"source_type": source_type, "page_size": 200}
-    if material_id is not None:
-        params["material_id"] = material_id
-    if warehouse_id is not None:
-        params["warehouse_id"] = warehouse_id
-    rows = _ok(client, "GET", f"{INVENTORY}/transactions", params=params)["items"]
-    return [row for row in rows if row.get("source_reference_id") == source_reference_id]
-
-
 def _depth(node: Dict[str, Any]) -> int:
     """计算 BOM 树节点深度（单节点为 1）。"""
     return 1 + max((_depth(child) for child in node["children"]), default=0)
