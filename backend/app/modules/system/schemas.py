@@ -418,6 +418,7 @@ class UserOut(_IdOut):
     username: str
     display_name: str
     personnel_id: Optional[int] = None
+    employee_no: Optional[str] = Field(default=None, description="关联员工工号（未关联时为空）")
     status: str
     last_login_at: Optional[datetime] = None
     remark: Optional[str] = None
@@ -527,8 +528,9 @@ class RegisterIn(BaseModel):
 
 
 class LoginOut(BaseModel):
-    """登录返回体（简化版：不含 JWT / Token，见模块说明）。"""
+    """登录返回体。"""
 
+    token: str = Field(description="登录凭证，前端放在 Authorization: Bearer <token> 中")
     user: UserOut
     roles: List[RoleOut] = Field(default_factory=list)
     permissions: List[PermissionOut] = Field(default_factory=list)

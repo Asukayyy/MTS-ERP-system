@@ -128,6 +128,12 @@ class SysUser(Base, AuditMixin):
     roles: Mapped[List["SysRole"]] = relationship(
         secondary="sys_user_role", lazy="selectin"
     )
+    personnel: Mapped[Optional["SysPersonnel"]] = relationship(lazy="selectin")
+
+    @property
+    def employee_no(self) -> Optional[str]:
+        """关联员工的工号（未关联时为空），供账号列表直接展示。"""
+        return self.personnel.employee_no if self.personnel else None
 
     __table_args__ = (
         CheckConstraint("status IN ('ACTIVE','INACTIVE')", name="ck_sys_user_status"),

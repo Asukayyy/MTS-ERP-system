@@ -1496,10 +1496,11 @@ def update_permission(
 
 
 def login(db: Session, username: str, password: str) -> Dict[str, object]:
-    """登录校验（简化版：无 JWT / Token）。
+    """登录校验。
 
     校验 `sha256(password)` 是否匹配 `sys_user.password_hash`，
     成功则刷新 `last_login_at` 并返回用户、角色、权限集合。
+    登录凭证（token）由路由层调用 `app/core/security.py` 签发，service 不参与鉴权。
     """
     user = repo.get_user_by_username(db, username)
     if not user or user.status != RecordStatus.ACTIVE.value:

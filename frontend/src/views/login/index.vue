@@ -5,6 +5,7 @@ import { ElMessage } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 
 import { login } from '@/api/system'
+import { saveAuth } from '@/utils/auth'
 
 const router = useRouter()
 const route = useRoute()
@@ -27,7 +28,7 @@ async function submit(): Promise<void> {
   submitting.value = true
   try {
     const result = await login({ username: form.username, password: form.password })
-    localStorage.setItem('bh-erp-user', JSON.stringify(result))
+    saveAuth(result)
     ElMessage.success(`欢迎，${result.user.display_name || result.user.username}`)
     const redirect = (route.query.redirect as string) || '/dashboard'
     router.replace(redirect)

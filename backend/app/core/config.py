@@ -30,6 +30,12 @@ class Settings(BaseSettings):
     """允许跨域的前端地址，多个用英文逗号分隔。"""
     CORS_ORIGINS: str = "http://localhost:5173,http://127.0.0.1:5173"
 
+    # ---------- 认证 ----------
+    AUTH_SECRET_KEY: str = "bh-erp-dev-secret-change-me"
+    """登录凭证的 HMAC 签名密钥。默认值仅供本地开发，共享/生产环境请在 .env 中覆盖。"""
+    AUTH_TOKEN_EXPIRE_MINUTES: int = 720
+    """登录凭证有效期（分钟），默认 12 小时，过期后前端自动跳回登录页。"""
+
     # ---------- MySQL ----------
     # 默认值只用于本地开发占位，真实值请写在 .env 中
     DB_HOST: str = "127.0.0.1"

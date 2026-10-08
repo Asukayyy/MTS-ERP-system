@@ -15,6 +15,8 @@ from sqlalchemy.orm import Session
 
 from app.common.pagination import PageData, PageParams
 from app.common.response import ApiResponse, success
+from app.core import security
+from app.core.config import settings
 from app.core.database import get_db
 from app.modules.system import schemas, service
 from app.modules.system.schemas import (
@@ -76,7 +78,116 @@ from app.modules.system.schemas import (
 from app.shared.enums import ModuleName, ModuleStatus
 from app.shared.types import HealthData
 
-router = APIRouter(tags=["system"])
+# --------------------------------------------------------------------------- #
+# 接口权限策略表
+# --------------------------------------------------------------------------- #
+# 本模块接口的访问控制在这里集中声明，`app/core/security.py` 提供执行逻辑：
+#   - 键为 `METHOD 模块内相对路径`，与 `router.routes` / `scope["route"].path` 一致；
+#   - None 表示"仅需登录"；元组为"需持有其中任意一个权限编码"；
+#   - 公开接口单独列在 PUBLIC_ENDPOINTS，不要求登录；
+#   - 未登记的接口一律拒绝，并由文件末尾的启动期自检阻断启动，避免漏登记。
+_MODULE_ROUTE_PREFIX: str = f"{settings.API_V1_PREFIX}/{ModuleName.SYSTEM.value}"
+
+
+def _perm(*codes: str) -> Optional[tuple]:
+    """策略值构造：不传编码表示该接口仅需登录。"""
+    return tuple(codes) or None
+
+
+# 公开接口：健康检查、登录、注册，以及注册页构建部门下拉所需的组织平铺列表。
+PUBLIC_ENDPOINTS: set = {
+    "GET /health",
+    "POST /auth/login",
+    "POST /auth/register",
+    "GET /auth/register-roles",
+    "GET /organizations/flat",
+}
+
+ENDPOINT_PERMISSIONS: dict = {
+    # 物料
+    "GET /materials": _perm("system:material"),
+    "POST /materials": _perm("system:material:manage"),
+    "GET /materials/{material_id}": _perm("system:material"),
+    "PUT /materials/{material_id}": _perm("system:material:manage"),
+    "PATCH /materials/{material_id}/status": _perm("system:material:manage"),
+    # BOM
+    "GET /boms": _perm("system:bom"),
+    "POST /boms": _perm("system:bom:manage"),
+    "GET /boms/tree": _perm("system:bom"),
+    "GET /boms/{bom_id}": _perm("system:bom"),
+    "PUT /boms/{bom_id}": _perm("system:bom:manage"),
+    "DELETE /boms/{bom_id}": _perm("system:bom:manage"),
+    "POST /boms/{bom_id}/activate": _perm("system:bom:manage"),
+    "PATCH /boms/{bom_id}/status": _perm("system:bom:manage"),
+    "POST /boms/{bom_id}/items": _perm("system:bom:manage"),
+    "PUT /bom-items/{item_id}": _perm("system:bom:manage"),
+    "DELETE /bom-items/{item_id}": _perm("system:bom:manage"),
+    # 工艺路线
+    "GET /routings": _perm("system:routing"),
+    "POST /routings": _perm("system:routing:manage"),
+    "GET /routings/{routing_id}": _perm("system:routing"),
+    "PUT /routings/{routing_id}": _perm("system:routing:manage"),
+    "PATCH /routings/{routing_id}/status": _perm("system:routing:manage"),
+    "POST /routings/{routing_id}/operations": _perm("system:routing:manage"),
+    "PUT /routing-operations/{operation_id}": _perm("system:routing:manage"),
+    "DELETE /routing-operations/{operation_id}": _perm("system:routing:manage"),
+    # 组织（/organizations/flat 见 PUBLIC_ENDPOINTS）
+    "GET /organizations": _perm("system:org"),
+    "GET /organizations/{org_id}": _perm("system:org"),
+    "POST /organizations": _perm("system:org:manage"),
+    "PUT /organizations/{org_id}": _perm("system:org:manage"),
+    "PATCH /organizations/{org_id}/status": _perm("system:org:manage"),
+    # 人员
+    "GET /personnel": _perm("system:personnel"),
+    "GET /personnel/{personnel_id}": _perm("system:personnel"),
+    "POST /personnel": _perm("system:personnel:manage"),
+    "PUT /personnel/{personnel_id}": _perm("system:personnel:manage"),
+    "PATCH /personnel/{personnel_id}/status": _perm("system:personnel:manage"),
+    # 字典
+    "GET /dictionaries": _perm("system:dictionary"),
+    "POST /dictionaries": _perm("system:dictionary:manage"),
+    "PUT /dictionaries/{dict_id}": _perm("system:dictionary:manage"),
+    "POST /dictionaries/{dict_id}/items": _perm("system:dictionary:manage"),
+    "PUT /dictionary-items/{item_id}": _perm("system:dictionary:manage"),
+    "DELETE /dictionary-items/{item_id}": _perm("system:dictionary:manage"),
+    # 账号
+    "GET /users": _perm("system:user"),
+    "POST /users": _perm("system:user:manage"),
+    "PUT /users/{user_id}": _perm("system:user:manage"),
+    "PATCH /users/{user_id}/status": _perm("system:user:manage"),
+    "POST /users/{user_id}/roles": _perm("system:user:assign"),
+    # 角色
+    "GET /roles": _perm("system:role"),
+    "POST /roles": _perm("system:role:manage"),
+    "PUT /roles/{role_id}": _perm("system:role:manage"),
+    "POST /roles/{role_id}/permissions": _perm("system:role:assign"),
+    # 权限
+    "GET /permissions": _perm("system:permission"),
+    "POST /permissions": _perm("system:permission:manage"),
+    "PUT /permissions/{permission_id}": _perm("system:permission:manage"),
+    # 操作日志
+    "GET /operation-logs": _perm("system:log"),
+    # 基础统计：仅需登录（首页仪表盘所有身份都要用到）
+    "GET /stats": _perm(),
+    # 数据导入
+    "POST /import/materials/preview": _perm("system:material:manage"),
+    "POST /import/materials/confirm": _perm("system:material:manage"),
+    "POST /import/bom/preview": _perm("system:bom:manage"),
+    "POST /import/bom/confirm": _perm("system:bom:manage"),
+}
+
+router = APIRouter(
+    tags=["system"],
+    dependencies=[
+        Depends(
+            security.require_route_permission(
+                ENDPOINT_PERMISSIONS,
+                public=PUBLIC_ENDPOINTS,
+                route_prefix=_MODULE_ROUTE_PREFIX,
+            )
+        )
+    ],
+)
 
 
 @router.get("/health", response_model=HealthResponse, summary="system 模块健康检查")
@@ -737,16 +848,15 @@ def update_permission(
     return success(PermissionOut.model_validate(permission))
 
 
-@router.post("/auth/login", response_model=ApiResponse[LoginOut], summary="登录（简化版）")
+@router.post("/auth/login", response_model=ApiResponse[LoginOut], summary="登录")
 def login(payload: LoginIn, db: Session = Depends(get_db)) -> ApiResponse[LoginOut]:
-    """校验用户名密码，刷新最近登录时间并返回用户 / 角色 / 权限。
-
-    简化说明：本接口**不签发 JWT / Token**。
-    """
+    """校验用户名密码，刷新最近登录时间，签发登录凭证并返回用户 / 角色 / 权限。"""
     result = service.login(db, payload.username, payload.password)
+    token = security.create_access_token(result["user"].id)
     db.commit()
     return success(
         LoginOut(
+            token=token,
             user=UserOut.model_validate(result["user"]),
             roles=[RoleOut.model_validate(role) for role in result["roles"]],
             permissions=[
@@ -871,3 +981,29 @@ def confirm_bom_import(
     result = service.confirm_bom_import(db, payload.source)
     db.commit()
     return success(result)
+
+
+# --------------------------------------------------------------------------- #
+# 启动期自检
+# --------------------------------------------------------------------------- #
+def assert_permission_policy_complete() -> None:
+    """校验每个接口都已登记权限策略或显式公开。
+
+    策略表是 fail-closed 的：漏登记会让接口对已登录用户全部 403（而不是悄悄放开），
+    但仍属于配置错误，这里在导入期直接抛错，避免带病启动。
+    """
+    missing: List[str] = []
+    for route in router.routes:
+        for method in sorted(getattr(route, "methods", ()) or ()):
+            if method in {"HEAD", "OPTIONS"}:
+                continue
+            key = f"{method} {route.path}"
+            if key not in ENDPOINT_PERMISSIONS and key not in PUBLIC_ENDPOINTS:
+                missing.append(key)
+    if missing:
+        raise RuntimeError(
+            "system 模块存在未登记权限策略的接口：" + "、".join(sorted(set(missing)))
+        )
+
+
+assert_permission_policy_complete()

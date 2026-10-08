@@ -2,7 +2,7 @@
 """组织/人员/账号演示数据种子脚本（幂等，可重复执行）。
 
 功能：
-1. 清理垃圾角色（仅保留 9 个正式身份 ADMIN/DESIGN/MAKE/PURCHASE/SALES/INVENTORY/PLAN/QC/FINANCE）、
+1. 清理垃圾角色（仅保留 13 个正式身份）、
    全部旧账号、旧员工、旧组织；
 2. 重建组织架构：1 个公司根 + 8 个部门 + 智能加工中心（FACTORY，下辖下料/数控/车工/铣工/钳工/磨工/粉末冶金/总装/包装 9 个车间，覆盖全部工艺路线工序）；
    设计部**不配人**，设计人员由用户自行创建；
@@ -30,7 +30,7 @@ from app.modules.system import models
 
 # ============================ 常量 ============================
 
-SEED_ROLE_CODES = ("ADMIN", "DESIGN", "MAKE", "PURCHASE", "SALES", "INVENTORY", "PLAN", "QC", "FINANCE")
+SEED_ROLE_CODES = ("ADMIN", "DESIGN", "MAKE", "PURCHASE", "SALES", "INVENTORY", "PLAN", "QC", "FINANCE", "DEPT_HEAD", "WORKER", "GROUP_LEADER", "DIRECTOR")
 DEFAULT_PASSWORD = "123456"
 
 # (组织编码, 名称, 上级编码, 类型)
@@ -126,7 +126,7 @@ def clear_rbac() -> None:
 
 def seed() -> None:
     clear_rbac()
-    print("[1/3] 已清空旧组织/员工/账号及垃圾角色（保留 9 个正式身份）")
+    print("[1/3] 已清空旧组织/员工/账号及垃圾角色（保留 13 个正式身份）")
 
     db = SessionLocal()
     try:

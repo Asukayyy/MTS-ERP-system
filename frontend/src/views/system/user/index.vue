@@ -212,7 +212,9 @@ onMounted(() => {
       <el-table v-loading="loading" :data="rows" border size="small">
         <el-table-column label="登录名" prop="username" min-width="130" />
         <el-table-column label="显示名" prop="display_name" min-width="130" />
-        <el-table-column label="关联员工ID" prop="personnel_id" width="110" align="right" />
+        <el-table-column label="工号" prop="employee_no" min-width="120">
+          <template #default="{ row }">{{ row.employee_no ?? '-' }}</template>
+        </el-table-column>
         <el-table-column label="角色" min-width="180">
           <template #default="{ row }">{{ roleNames(row) }}</template>
         </el-table-column>

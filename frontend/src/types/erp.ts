@@ -183,6 +183,7 @@ export interface User {
   username: string
   display_name: string
   personnel_id?: number | null
+  employee_no?: string | null
   status: string
   last_login_at?: string | null
   remark?: string | null
@@ -212,6 +213,7 @@ export interface SystemStats {
 }
 
 export interface LoginResult {
+  token: string
   user: User
   roles: Role[]
   permissions: Permission[]

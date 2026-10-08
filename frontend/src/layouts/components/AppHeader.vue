@@ -4,30 +4,16 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 
 import { useAppStore } from '@/stores/modules/app'
+import { clearAuth, getAuth } from '@/utils/auth'
 
 const route = useRoute()
 const router = useRouter()
 const appStore = useAppStore()
 
-interface LoginUser {
-  user: { display_name?: string; username?: string }
-  roles?: { role_name?: string }[]
-}
-
-function readUser(): LoginUser | null {
-  const raw = localStorage.getItem('bh-erp-user')
-  if (!raw) return null
-  try {
-    return JSON.parse(raw) as LoginUser
-  } catch {
-    return null
-  }
-}
-
-const loginUser = ref<LoginUser | null>(readUser())
+const loginUser = ref(getAuth())
 
 function logout(): void {
-  localStorage.removeItem('bh-erp-user')
+  clearAuth()
   loginUser.value = null
   ElMessage.success('已退出登录')
   router.replace('/login')
