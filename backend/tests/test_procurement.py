@@ -262,8 +262,8 @@ def test_purchase_plan_from_replenishment(
 
 
 def test_order_from_plan_writes_back_ordered_qty(db: Session) -> None:
-    """按计划生成 DRAFT 订单：单价取供货价，预计到货日按物料提前期推算，回写计划行已下单数量。"""
-    material_id = _create_material(db, lead_time_days=3)
+    """按计划生成 DRAFT 订单：单价取供货价，预计到货日未填时取下单日期，回写计划行已下单数量。"""
+    material_id = _create_material(db)
     supplier = _create_supplier(db)
     service.create_supplier_material(
         db,
@@ -296,7 +296,7 @@ def test_order_from_plan_writes_back_ordered_qty(db: Session) -> None:
     assert order["items"][0]["quantity"] == Decimal("20.0000")
     assert order["items"][0]["unit_price"] == Decimal("7.50")
     assert order["total_amount"] == Decimal("150.00")
-    assert order["expected_date"] == order["order_date"] + timedelta(days=3)
+    assert order["expected_date"] == order["order_date"]
 
     refreshed = service.get_plan(db, plan["id"])
     assert refreshed["items"][0]["ordered_qty"] == Decimal("20.0000")
