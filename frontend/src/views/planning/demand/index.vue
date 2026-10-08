@@ -5,6 +5,7 @@ import type { FormInstance, FormRules } from 'element-plus'
 
 import {
   createDemand,
+  importDemandsFromReplenishment,
   importDemandsFromSales,
   listDemands,
   setDemandStatus,
@@ -114,6 +115,20 @@ async function importFromSales(): Promise<void> {
   }
 }
 
+/** 从已确认/已下达的库存补库需求导入计划需求 */
+async function importFromReplenishment(): Promise<void> {
+  importing.value = true
+  try {
+    const result = await importDemandsFromReplenishment()
+    ElMessage.success(`导入完成：新建 ${result.created_count} 条，跳过 ${result.skipped_count} 条`)
+    await load()
+  } catch (error) {
+    ElMessage.error((error as Error).message)
+  } finally {
+    importing.value = false
+  }
+}
+
 onMounted(load)
 </script>
 
@@ -125,6 +140,7 @@ onMounted(load)
           <span class="page-title">需求管理</span>
           <span class="table-toolbar__spacer" />
           <el-button :loading="importing" @click="importFromSales">从销售订单导入</el-button>
+          <el-button :loading="importing" @click="importFromReplenishment">从补库需求导入</el-button>
           <el-button type="primary" @click="openCreate">新增需求</el-button>
         </div>
       </template>

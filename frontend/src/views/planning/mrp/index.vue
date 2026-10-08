@@ -6,6 +6,7 @@ import {
   createProductionPlansFromRun,
   createPurchasePlanFromRun,
   explainMrpResult,
+  listDemands,
   listMps,
   listMrpResults,
   listMrpRuns,
@@ -24,24 +25,41 @@ async function loadMpsOptions(keyword: string): Promise<RemoteOption[]> {
     .map((item) => ({ id: item.id, label: `${item.mps_no} · ${item.mps_name ?? ''}` }))
 }
 
-const runForm = reactive<{ mps_id: number | undefined; include_sales_demand: boolean; remark: string }>({
+const runForm = reactive<{
+  mps_id: number | undefined
+  include_sales_demand: boolean
+  include_stockfill_demand: boolean
+  remark: string
+}>({
   mps_id: undefined,
   include_sales_demand: false,
+  include_stockfill_demand: false,
   remark: '',
 })
 
 const running = ref(false)
 
 async function doRunMrp(): Promise<void> {
-  if (runForm.mps_id === undefined && !runForm.include_sales_demand) {
-    ElMessage.warning('请选择 MPS 或勾选「纳入销售订单需求」后再执行运算')
+  if (
+    runForm.mps_id === undefined &&
+    !runForm.include_sales_demand &&
+    !runForm.include_stockfill_demand
+  ) {
+    ElMessage.warning('请选择 MPS 或勾选「纳入销售订单/补货需求」后再执行运算')
     return
   }
   running.value = true
   try {
+    let demandIds: number[] = []
+    if (runForm.include_stockfill_demand) {
+      demandIds = await fetchConfirmedStockfillDemandIds()
+      if (!demandIds.length) {
+        ElMessage.warning('当前没有已确认/已下达的补货需求，按空需求执行')
+      }
+    }
     const run = await runMrp({
       mps_id: runForm.mps_id ?? null,
-      demand_ids: [],
+      demand_ids: demandIds,
       include_sales_demand: runForm.include_sales_demand,
       remark: runForm.remark || null,
     })
@@ -54,6 +72,22 @@ async function doRunMrp(): Promise<void> {
   } finally {
     running.value = false
   }
+}
+
+/** 拉取全部已确认/已下达的补货（STOCKFILL）需求 ID */
+async function fetchConfirmedStockfillDemandIds(): Promise<number[]> {
+  const ids: number[] = []
+  let page = 1
+  const pageSize = 200
+  for (;;) {
+    const data = await listDemands({ source_type: 'STOCKFILL', status: '', page, page_size: pageSize })
+    for (const item of data.items) {
+      if (item.status === 'CONFIRMED' || item.status === 'RELEASED') ids.push(item.id)
+    }
+    if (data.items.length < pageSize || data.total <= page * pageSize) break
+    page += 1
+  }
+  return ids
 }
 
 // ---------------- 批次历史 ----------------
@@ -171,6 +205,7 @@ onMounted(async () => {
         </el-form-item>
         <el-form-item label="运算基准">
           <el-checkbox v-model="runForm.include_sales_demand">纳入已确认销售订单需求</el-checkbox>
+          <el-checkbox v-model="runForm.include_stockfill_demand">纳入已确认补货需求</el-checkbox>
         </el-form-item>
         <el-form-item label="备注">
           <el-input v-model="runForm.remark" placeholder="可选" style="width: 200px" />

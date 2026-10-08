@@ -365,6 +365,56 @@ def create_demand_from_replenishment(
     )
 
 
+def import_demands_from_replenishment(
+    db: Session, operator_id: Optional[int] = None
+) -> Dict[str, Any]:
+    """把库存补库需求批量拉取为 `source_type=STOCKFILL` 的计划需求（已导入的跳过）。
+
+    补库需求通过 `inventory.contract.list_replenishment_requests`（惰性导入）批量读取，
+    只拉取已确认 / 已下达（CONFIRMED / RELEASED）的需求，避免把未确认的草稿提前纳入计划。
+    """
+    try:
+        from app.modules.inventory import contract as inventory_contract  # type: ignore
+
+        getter = getattr(inventory_contract, "list_replenishment_requests", None)
+    except Exception as exc:  # noqa: BLE001 - 契约尚未就绪
+        raise BusinessException(CODE_CONTRACT_NOT_READY, "库存补库需求接口尚未就绪") from exc
+    if getter is None:
+        raise BusinessException(CODE_CONTRACT_NOT_READY, "库存补库需求接口尚未就绪")
+
+    rows, _total = getter(
+        db,
+        page=1,
+        page_size=200,
+        status=None,
+        source_type=None,
+        material_id=None,
+    )
+    created_ids: List[int] = []
+    skipped = 0
+    for row in rows:
+        if row.get("status") not in ("CONFIRMED", "RELEASED"):
+            skipped += 1
+            continue
+        request_id = int(row["id"])
+        if repository.find_demand_by_source(db, "STOCKFILL", request_id):
+            skipped += 1
+            continue
+        demand = create_demand(
+            db,
+            source_type="STOCKFILL",
+            material_id=int(row["material_id"]),
+            quantity=_as_decimal(row.get("request_qty")),
+            due_date=_to_date(row.get("required_date"), date.today()),
+            source_reference_id=request_id,
+            source_no=row.get("request_no"),
+            remark=row.get("remark"),
+            operator_id=operator_id,
+        )
+        created_ids.append(demand.id)
+    return {"created_count": len(created_ids), "skipped_count": skipped, "demand_ids": created_ids}
+
+
 # ==================== MPS ====================
 
 
