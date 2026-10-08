@@ -129,6 +129,20 @@ def create_demand_from_replenishment(
     return success(demand)
 
 
+@router.post(
+    "/demands/from-replenishment/import",
+    response_model=ApiResponse[schemas.DemandImportResult],
+    summary="从库存补库需求批量导入需求",
+)
+def import_demands_from_replenishment(
+    db: Session = Depends(get_db),
+) -> ApiResponse[schemas.DemandImportResult]:
+    """把已确认/已下达的库存补库需求批量拉取为 `source_type=STOCKFILL` 的计划需求（已导入的跳过）。"""
+    result = service.import_demands_from_replenishment(db)
+    db.commit()
+    return success(result)
+
+
 # ==================== MPS ====================
 
 

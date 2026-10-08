@@ -17,7 +17,7 @@
 
 from datetime import date
 from decimal import Decimal
-from typing import Any, Dict, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from sqlalchemy.orm import Session
 
@@ -144,3 +144,23 @@ def create_replenishment_request(
 def get_replenishment_request(db: Session, request_id: int) -> Optional[Dict[str, Any]]:
     """按 ID 读取补库需求单（只读，不提交事务）。不存在返回 None。"""
     return service.get_replenishment_request_dict(db, request_id)
+
+
+def list_replenishment_requests(
+    db: Session,
+    *,
+    page: int = 1,
+    page_size: int = 100,
+    status: Optional[str] = None,
+    source_type: Optional[str] = None,
+    material_id: Optional[int] = None,
+) -> Tuple[List[Dict[str, Any]], int]:
+    """按条件分页读取补库需求单（只读，不提交事务）。返回 `(items, total)`。"""
+    return service.list_replenishment_requests(
+        db,
+        page=page,
+        page_size=page_size,
+        status=status,
+        source_type=source_type,
+        material_id=material_id,
+    )
