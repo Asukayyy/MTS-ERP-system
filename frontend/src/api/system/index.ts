@@ -2,16 +2,12 @@ import { del, get, patch, post, put } from '@/utils/request'
 import type { HealthData, PageData } from '@/types/api'
 import type {
   Bom,
-  BomImportConfirm,
-  BomImportPreview,
   BomItem,
   BomTreeNode,
   Dictionary,
   DictionaryItem,
   LoginResult,
   Material,
-  MaterialImportConfirm,
-  MaterialImportPreview,
   MaterialPayload,
   OperationLog,
   Organization,
@@ -287,26 +283,4 @@ export function register(payload: {
 
 export function listOperationLogs(params: Record<string, unknown> = {}): Promise<PageData<OperationLog>> {
   return get<PageData<OperationLog>>('/system/operation-logs', params)
-}
-
-// ---------------- 课程数据导入（规格 §37） ----------------
-
-/** 课程物料导入预览：只校验不写库 */
-export function previewMaterialsImport(source = 'course_chair_case'): Promise<MaterialImportPreview> {
-  return post<MaterialImportPreview>('/system/import/materials/preview', { source })
-}
-
-/** 课程物料导入确认：幂等创建缺失物料 */
-export function confirmMaterialsImport(source = 'course_chair_case'): Promise<MaterialImportConfirm> {
-  return post<MaterialImportConfirm>('/system/import/materials/confirm', { source })
-}
-
-/** 课程 BOM 导入预览：递归构建并校验，不写库 */
-export function previewBomImport(source = 'course_chair_case'): Promise<BomImportPreview> {
-  return post<BomImportPreview>('/system/import/bom/preview', { source })
-}
-
-/** 课程 BOM 导入确认：创建 BOM 头与子项（幂等） */
-export function confirmBomImport(source = 'course_chair_case'): Promise<BomImportConfirm> {
-  return post<BomImportConfirm>('/system/import/bom/confirm', { source })
 }
