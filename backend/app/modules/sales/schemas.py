@@ -355,11 +355,14 @@ class SalesVolumeOut(BaseModel):
 
 
 class SalesStatsOut(BaseModel):
-    """销售模块统计（供 dashboard 使用）。"""
+    """销售模块统计（供 dashboard 使用）。
+
+    除 `customer_count` 为客户主数据总量外，其余均为**本月**口径。
+    """
 
     customer_count: int
-    order_count: int
-    order_counts: Dict[str, int] = Field(default_factory=dict, description="按状态分组的订单数")
-    pending_shipment_order_count: int = Field(description="未发完的订单数")
-    shipment_count: int
-    return_count: int
+    order_count: int = Field(description="本月订单数")
+    order_counts: Dict[str, int] = Field(default_factory=dict, description="本月按状态分组的订单数")
+    pending_shipment_order_count: int = Field(description="本月下单且未发完的订单数")
+    shipment_count: int = Field(description="本月发货单数")
+    return_count: int = Field(description="本月退货单数")

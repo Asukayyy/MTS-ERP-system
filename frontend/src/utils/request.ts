@@ -1,6 +1,7 @@
 import axios from 'axios'
 import type { AxiosError, AxiosInstance, AxiosRequestConfig, AxiosResponse } from 'axios'
 
+import { getCurrentOperatorId } from '@/composables/useCurrentOperator'
 import type { ApiResponse } from '@/types/api'
 import { SUCCESS_CODE } from '@/types/api'
 
@@ -37,6 +38,9 @@ function toErrorMessage(error: AxiosError<ApiResponse<unknown>>): string {
   return error.response ? `请求失败（HTTP ${error.response.status}）` : error.message
 }
 
+/** 需要注入当前操作人的写操作方法 */
+const WRITE_METHODS = new Set(['post', 'put', 'patch', 'delete'])
+
 request.interceptors.request.use((config) => {
   // 过滤空串 / null / undefined 查询参数：空值表示“不参与过滤”，
   // 否则后端日期/枚举参数会把空串当作非法值返回 422。
@@ -49,6 +53,34 @@ request.interceptors.request.use((config) => {
     }
     config.params = cleaned
   }
+
+  // 写操作统一注入当前操作人 `operator_id`：后端各模块的写接口都接受可选的
+  // operator_id（用于填充 created_by / updated_by 与操作日志），缺失时审计字段会是 NULL。
+  // params 与 body 两边都注入 —— 有的接口把它声明为 Query 参数
+  // （如 `PATCH /sales/orders/{id}/status?operator_id=xx`），有的声明在请求体里
+  // （如 `OrderCreate.operator_id`），前端无法逐接口区分；Pydantic 默认忽略未声明的
+  // 额外字段，因此合并进 body 是安全的。
+  const method = (config.method ?? 'get').toLowerCase()
+  if (WRITE_METHODS.has(method)) {
+    const operatorId = getCurrentOperatorId()
+    // 未选择操作人时保持请求原样
+    if (operatorId !== null) {
+      config.params = {
+        ...(config.params as Record<string, unknown> | undefined),
+        operator_id: operatorId,
+      }
+      const data = config.data
+      if (
+        data !== null &&
+        typeof data === 'object' &&
+        !Array.isArray(data) &&
+        !(data instanceof FormData)
+      ) {
+        config.data = { ...(data as Record<string, unknown>), operator_id: operatorId }
+      }
+    }
+  }
+
   return config
 })
 

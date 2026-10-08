@@ -339,16 +339,6 @@ export interface SalesReturn {
   items: ReturnItem[]
 }
 
-export interface OrderStatusReport {
-  order_no: string
-  customer_name?: string | null
-  order_date: string
-  status: string
-  total_qty: Num
-  delivered_qty: Num
-  fulfillment_rate: Num
-}
-
 export interface SalesStats {
   customer_count: number
   order_count: number

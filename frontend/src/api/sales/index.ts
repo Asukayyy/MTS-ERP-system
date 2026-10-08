@@ -4,7 +4,6 @@ import type {
   Customer,
   Forecast,
   Order,
-  OrderStatusReport,
   Product,
   SalesReturn,
   SalesStats,
@@ -143,22 +142,4 @@ export function cancelReturn(id: number, operatorId?: number): Promise<SalesRetu
   return post<SalesReturn>(`/sales/returns/${id}/cancel`, undefined, {
     params: operatorId ? { operator_id: operatorId } : undefined,
   })
-}
-
-// ---------------- 报表 ----------------
-
-export function getOrderStatusReport(): Promise<OrderStatusReport[]> {
-  return get<OrderStatusReport[]>('/sales/reports/order-status')
-}
-
-export function getShipmentReport(params: { date_from: string; date_to: string }): Promise<unknown[]> {
-  return get<unknown[]>('/sales/reports/shipments', params)
-}
-
-export function getReturnReport(params: { date_from: string; date_to: string }): Promise<unknown[]> {
-  return get<unknown[]>('/sales/reports/returns', params)
-}
-
-export function getSalesVolumeReport(params: { date_from: string; date_to: string }): Promise<unknown[]> {
-  return get<unknown[]>('/sales/reports/sales-volume', params)
 }

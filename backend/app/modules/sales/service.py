@@ -15,7 +15,7 @@
 """
 
 import re
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -29,6 +29,7 @@ from app.modules.system.contract import (
     get_material,
     get_materials,
     get_personnel_name,
+    get_personnel_names,
     log_operation,
 )
 from app.shared.enums import MaterialType, RecordStatus
@@ -42,6 +43,7 @@ CODE_SHIP_QTY_EXCEED = 2003  # 发货数量超过未发数量
 CODE_RETURN_MISMATCH = 2004  # 退货单与原订单客户不一致
 CODE_NOT_FOUND = 2005  # 资源不存在
 CODE_STATUS_INVALID = 2006  # 单据状态不允许该操作
+CODE_RETURN_QTY_EXCEED = 2007  # 退货数量超过可退数量（已发 - 已退）
 
 MODULE = "sales"
 
@@ -56,7 +58,15 @@ _ORDER_TRANSITIONS: Dict[str, set] = {
     "CANCELLED": set(),
 }
 _FORECAST_STATUSES = {"DRAFT", "CONFIRMED", "COMPLETED", "CANCELLED"}
-_FORECAST_TERMINAL = {"COMPLETED", "CANCELLED"}
+# 销售预测状态机：DRAFT → CONFIRMED → COMPLETED，另可从 DRAFT/CONFIRMED 取消。
+# 特意不设 CONFIRMED → DRAFT 的回退：Planning 是按 CONFIRMED 拉取需求的，
+# 回退会让已导入的需求与预测状态对不上。
+_FORECAST_TRANSITIONS: Dict[str, set] = {
+    "DRAFT": {"CONFIRMED", "CANCELLED"},
+    "CONFIRMED": {"COMPLETED", "CANCELLED"},
+    "COMPLETED": set(),
+    "CANCELLED": set(),
+}
 _CUSTOMER_STATUSES = {RecordStatus.ACTIVE.value, RecordStatus.INACTIVE.value}
 _QUALITY_STATUSES = {"QUALIFIED", "DEFECTIVE", "SCRAP"}
 _SHIPPABLE_ORDER_STATUSES = {"CONFIRMED", "IN_PROGRESS"}
@@ -79,6 +89,15 @@ def _as_decimal(value: Any) -> Decimal:
 def _money(value: Decimal) -> Decimal:
     """金额统一四舍五入到分。"""
     return _as_decimal(value).quantize(_CENT, rounding=ROUND_HALF_UP)
+
+
+def _current_month_range(today: Optional[date] = None) -> Tuple[date, date]:
+    """返回本月的 `[首日, 次月首日)`，右开区间可直接与业务日期比较。
+
+    加 32 天再取当月首日，是为了跨月跨年（如 12 月 → 次年 1 月）都不用特判。
+    """
+    first_day = (today or date.today()).replace(day=1)
+    return first_day, (first_day + timedelta(days=32)).replace(day=1)
 
 
 def _is_finished_active(material: Dict[str, Any]) -> bool:
@@ -213,10 +232,16 @@ def _forecast_dict(
 
 
 def _order_items_dict(
-    db: Session, order_id: int, materials: Dict[int, Dict[str, Any]]
+    order_items: Sequence[models.SalOrderItem],
+    materials: Dict[int, Dict[str, Any]],
 ) -> List[Dict[str, Any]]:
+    """把订单行转成出参（纯内存转换）。
+
+    行数据由调用方传入：列表接口复用 `SalOrder.items`（`lazy="selectin"` 已在分页
+    查询时批量加载），详情接口传本单的一次查询结果，避免逐单重复查行。
+    """
     items = []
-    for item in repository.get_order_items(db, order_id):
+    for item in order_items:
         items.append(
             {
                 "id": item.id,
@@ -235,8 +260,8 @@ def _order_items_dict(
 
 
 def _order_dict(
-    db: Session,
     order: models.SalOrder,
+    order_items: Sequence[models.SalOrderItem],
     materials: Dict[int, Dict[str, Any]],
     customer_name: Optional[str],
     salesperson_name: Optional[str],
@@ -253,19 +278,19 @@ def _order_dict(
         "total_amount": _as_decimal(order.total_amount),
         "status": order.status,
         "remark": order.remark,
-        "items": _order_items_dict(db, order.id, materials),
+        "items": _order_items_dict(order_items, materials),
     }
 
 
 def _shipment_dict(
-    db: Session,
     shipment: models.SalShipment,
+    shipment_items: Sequence[models.SalShipmentItem],
     materials: Dict[int, Dict[str, Any]],
     customer_name: Optional[str],
     order_no: Optional[str],
 ) -> Dict[str, Any]:
     items = []
-    for item in repository.get_shipment_items(db, shipment.id):
+    for item in shipment_items:
         items.append(
             {
                 "id": item.id,
@@ -293,14 +318,14 @@ def _shipment_dict(
 
 
 def _return_dict(
-    db: Session,
     sales_return: models.SalReturn,
+    return_items: Sequence[models.SalReturnItem],
     materials: Dict[int, Dict[str, Any]],
     customer_name: Optional[str],
     order_no: Optional[str],
 ) -> Dict[str, Any]:
     items = []
-    for item in repository.get_return_items(db, sales_return.id):
+    for item in return_items:
         items.append(
             {
                 "id": item.id,
@@ -551,8 +576,11 @@ def update_forecast(
     operator_id: Optional[int] = None,
 ) -> Dict[str, Any]:
     forecast = _require_forecast(db, forecast_id)
-    if forecast.status in _FORECAST_TERMINAL:
-        raise BusinessException(CODE_IMMUTABLE, f"预测单已 {forecast.status}，不可修改")
+    if forecast.status != "DRAFT":
+        raise BusinessException(
+            CODE_STATUS_INVALID,
+            f"预测单当前状态为 {forecast.status}，仅 DRAFT 状态可修改",
+        )
     if material_id is not None:
         _require_material(db, material_id)
         forecast.material_id = material_id
@@ -589,8 +617,12 @@ def set_forecast_status(
     if status not in _FORECAST_STATUSES:
         raise BusinessException(CODE_PARAM_INVALID, f"非法预测状态：{status}")
     forecast = _require_forecast(db, forecast_id)
-    if forecast.status in _FORECAST_TERMINAL:
-        raise BusinessException(CODE_IMMUTABLE, f"预测单已 {forecast.status}，不可再流转")
+    allowed = _FORECAST_TRANSITIONS.get(forecast.status, set())
+    if status not in allowed:
+        raise BusinessException(
+            CODE_STATUS_INVALID,
+            f"预测单状态不允许从 {forecast.status} 流转到 {status}",
+        )
     forecast.status = status
     forecast.updated_by = operator_id
     log_operation(
@@ -660,13 +692,12 @@ def _build_order_items(
 
 
 def _order_view(db: Session, order: models.SalOrder) -> Dict[str, Any]:
-    materials = _material_map(
-        db, [item.material_id for item in repository.get_order_items(db, order.id)]
-    )
+    order_items = repository.get_order_items(db, order.id)
+    materials = _material_map(db, [item.material_id for item in order_items])
     customer = repository.get_customer(db, order.customer_id)
     return _order_dict(
-        db,
         order,
+        order_items,
         materials,
         customer.customer_name if customer else None,
         get_personnel_name(db, order.salesperson_id),
@@ -690,19 +721,19 @@ def list_orders(
         c.id: c.customer_name
         for c in repository.get_customers(db, [r.customer_id for r in rows]).values()
     }
-    material_ids = [
-        item.material_id
-        for row in rows
-        for item in repository.get_order_items(db, row.id)
-    ]
-    materials = _material_map(db, material_ids)
+    # 订单行靠 SalOrder.items 的 selectin 一次性加载，销售员姓名也批量取。
+    # 这些都必须在循环外准备好：逐行单查时 20 行列表会打出 40+ 条 SQL。
+    salespersons = get_personnel_names(db, [r.salesperson_id for r in rows])
+    materials = _material_map(
+        db, [item.material_id for row in rows for item in row.items]
+    )
     items = [
         _order_dict(
-            db,
             row,
+            row.items,
             materials,
             customers.get(row.customer_id),
-            get_personnel_name(db, row.salesperson_id),
+            salespersons.get(row.salesperson_id),
         )
         for row in rows
     ]
@@ -879,34 +910,37 @@ def list_shipments(
     status: Optional[str] = None,
 ) -> Tuple[List[Dict[str, Any]], int]:
     rows, total = repository.list_shipments(db, page, page_size, order_id, status)
-    items = []
-    for row in rows:
-        materials = _material_map(
-            db, [i.material_id for i in repository.get_shipment_items(db, row.id)]
+    # 客户名、订单号、物料都批量预取（一行一次单查时 20 行会打出 120+ 条 SQL）；
+    # 发货明细来自 SalShipment.items 的 selectin 预加载。
+    customers = {
+        c.id: c.customer_name
+        for c in repository.get_customers(db, [r.customer_id for r in rows]).values()
+    }
+    orders = repository.get_orders(db, [r.order_id for r in rows])
+    materials = _material_map(
+        db, [item.material_id for row in rows for item in row.items]
+    )
+    items = [
+        _shipment_dict(
+            row,
+            row.items,
+            materials,
+            customers.get(row.customer_id),
+            orders[row.order_id].order_no if orders.get(row.order_id) else None,
         )
-        customer = repository.get_customer(db, row.customer_id)
-        order = repository.get_order(db, row.order_id)
-        items.append(
-            _shipment_dict(
-                db,
-                row,
-                materials,
-                customer.customer_name if customer else None,
-                order.order_no if order else None,
-            )
-        )
+        for row in rows
+    ]
     return items, total
 
 
 def _shipment_view(db: Session, shipment: models.SalShipment) -> Dict[str, Any]:
-    materials = _material_map(
-        db, [i.material_id for i in repository.get_shipment_items(db, shipment.id)]
-    )
+    shipment_items = repository.get_shipment_items(db, shipment.id)
+    materials = _material_map(db, [i.material_id for i in shipment_items])
     customer = repository.get_customer(db, shipment.customer_id)
     order = repository.get_order(db, shipment.order_id)
     return _shipment_dict(
-        db,
         shipment,
+        shipment_items,
         materials,
         customer.customer_name if customer else None,
         order.order_no if order else None,
@@ -945,6 +979,9 @@ def create_shipment(
         created_by=operator_id,
     )
     repository.add_shipment(db, shipment)
+    # 同一订单行允许在一张发货单里出现多行，未发额度必须**累计**判断：
+    # 否则两行各自都不超未发数量、合计却超了，要到确认时才报错。
+    reserved: Dict[int, Decimal] = {}
     for raw in items:
         order_item = repository.get_order_item(db, raw.get("order_item_id"))
         if not order_item or order_item.order_id != order.id:
@@ -955,11 +992,13 @@ def create_shipment(
         if qty <= 0:
             raise BusinessException(CODE_PARAM_INVALID, "发货数量必须为正数")
         remaining = _as_decimal(order_item.quantity) - _as_decimal(order_item.delivered_qty)
-        if qty > remaining:
+        available = remaining - reserved.get(order_item.id, Decimal("0"))
+        if qty > available:
             raise BusinessException(
                 CODE_SHIP_QTY_EXCEED,
-                f"发货数量超过未发数量：物料 {order_item.material_id} 未发 {remaining}，本次 {qty}",
+                f"发货数量超过未发数量：物料 {order_item.material_id} 可发 {available}，本次 {qty}",
             )
+        reserved[order_item.id] = reserved.get(order_item.id, Decimal("0")) + qty
         repository.add_shipment_item(
             db,
             models.SalShipmentItem(
@@ -1083,36 +1122,38 @@ def list_returns(
     status: Optional[str] = None,
 ) -> Tuple[List[Dict[str, Any]], int]:
     rows, total = repository.list_returns(db, page, page_size, order_id, customer_id, status)
-    items = []
-    for row in rows:
-        materials = _material_map(
-            db, [i.material_id for i in repository.get_return_items(db, row.id)]
+    # 同 list_shipments：客户名 / 订单号 / 物料批量预取，明细用 selectin 预加载。
+    customers = {
+        c.id: c.customer_name
+        for c in repository.get_customers(db, [r.customer_id for r in rows]).values()
+    }
+    orders = repository.get_orders(db, [r.order_id for r in rows if r.order_id])
+    materials = _material_map(
+        db, [item.material_id for row in rows for item in row.items]
+    )
+    items = [
+        _return_dict(
+            row,
+            row.items,
+            materials,
+            customers.get(row.customer_id),
+            orders[row.order_id].order_no if orders.get(row.order_id) else None,
         )
-        customer = repository.get_customer(db, row.customer_id)
-        order = repository.get_order(db, row.order_id) if row.order_id else None
-        items.append(
-            _return_dict(
-                db,
-                row,
-                materials,
-                customer.customer_name if customer else None,
-                order.order_no if order else None,
-            )
-        )
+        for row in rows
+    ]
     return items, total
 
 
 def _return_view(db: Session, sales_return: models.SalReturn) -> Dict[str, Any]:
-    materials = _material_map(
-        db, [i.material_id for i in repository.get_return_items(db, sales_return.id)]
-    )
+    return_items = repository.get_return_items(db, sales_return.id)
+    materials = _material_map(db, [i.material_id for i in return_items])
     customer = repository.get_customer(db, sales_return.customer_id)
     order = (
         repository.get_order(db, sales_return.order_id) if sales_return.order_id else None
     )
     return _return_dict(
-        db,
         sales_return,
+        return_items,
         materials,
         customer.customer_name if customer else None,
         order.order_no if order else None,
@@ -1136,12 +1177,17 @@ def create_return(
     operator_id: Optional[int] = None,
 ) -> Dict[str, Any]:
     _require_customer(db, customer_id)
+    shipped: Dict[int, Decimal] = {}
+    returned: Dict[int, Decimal] = {}
     if order_id is not None:
         order = _require_order(db, order_id)
         if order.customer_id != customer_id:
             raise BusinessException(
                 CODE_RETURN_MISMATCH, "退货单客户与原销售订单客户不一致"
             )
+        # 可退额度 = 该订单该物料的已发数量 - 已占用退货数量（未取消的退货单）
+        shipped = repository.delivered_qty_by_material(db, order_id)
+        returned = repository.returned_qty_by_material(db, order_id)
     if not items:
         raise BusinessException(CODE_PARAM_INVALID, "退货单至少需要一条明细")
     number = _return_no(db, return_no, return_date)
@@ -1157,10 +1203,21 @@ def create_return(
     )
     repository.add_return(db, sales_return)
     for raw in items:
-        _require_material(db, raw.get("material_id"))
+        material_id = raw.get("material_id")
+        _require_material(db, material_id)
         qty = _as_decimal(raw.get("quantity"))
         if qty <= 0:
             raise BusinessException(CODE_PARAM_INVALID, "退货数量必须为正数")
+        if order_id is not None:
+            used = returned.get(material_id, Decimal("0"))
+            available = shipped.get(material_id, Decimal("0")) - used
+            if qty > available:
+                raise BusinessException(
+                    CODE_RETURN_QTY_EXCEED,
+                    f"退货数量超过可退数量：物料 {material_id} 可退 {available}，本次 {qty}",
+                )
+            # 同一张退货单内多行同物料时，后面几行要按已占用额度继续扣
+            returned[material_id] = used + qty
         quality_status = raw.get("quality_status") or "QUALIFIED"
         if quality_status not in _QUALITY_STATUSES:
             raise BusinessException(CODE_PARAM_INVALID, f"非法质量状态：{quality_status}")
@@ -1168,7 +1225,7 @@ def create_return(
             db,
             models.SalReturnItem(
                 return_id=sales_return.id,
-                material_id=raw.get("material_id"),
+                material_id=material_id,
                 warehouse_id=raw.get("warehouse_id"),
                 quantity=qty,
                 quality_status=quality_status,
@@ -1204,6 +1261,23 @@ def confirm_return(
     items = repository.get_return_items(db, sales_return.id)
     if not items:
         raise BusinessException(CODE_PARAM_INVALID, "退货单没有明细，不能确认")
+    # 确认前再核一次可退额度：本单是草稿期间可能有别的退货单先确认了。
+    # 用 exclude_return_id 排除本单，否则会把自己的明细当成已占用。
+    if sales_return.order_id is not None:
+        shipped = repository.delivered_qty_by_material(db, sales_return.order_id)
+        returned = repository.returned_qty_by_material(
+            db, sales_return.order_id, exclude_return_id=sales_return.id
+        )
+        for item in items:
+            qty = _as_decimal(item.quantity)
+            used = returned.get(item.material_id, Decimal("0"))
+            available = shipped.get(item.material_id, Decimal("0")) - used
+            if qty > available:
+                raise BusinessException(
+                    CODE_RETURN_QTY_EXCEED,
+                    f"退货数量超过可退数量：物料 {item.material_id} 可退 {available}，本次 {qty}",
+                )
+            returned[item.material_id] = used + qty
     for item in items:
         increase_stock(
             db,
@@ -1288,10 +1362,10 @@ def order_status_report(db: Session) -> List[Dict[str, Any]]:
 
 
 def shipments_report(
-    db: Session, date_from: date, date_to: date
+    db: Session, date_from: Optional[date] = None, date_to: Optional[date] = None
 ) -> List[Dict[str, Any]]:
-    """发货记录（行级），按发货日期区间。"""
-    if date_from > date_to:
+    """发货记录（行级），按发货日期区间；两个日期都可省，省则不过滤。"""
+    if date_from and date_to and date_from > date_to:
         raise BusinessException(CODE_PARAM_INVALID, "开始日期不能晚于结束日期")
     rows = repository.shipment_report_rows(db, date_from, date_to)
     materials = _material_map(db, [row[7] for row in rows])
@@ -1328,9 +1402,11 @@ def shipments_report(
     return report
 
 
-def returns_report(db: Session, date_from: date, date_to: date) -> List[Dict[str, Any]]:
-    """退货记录（行级），按退货日期区间。"""
-    if date_from > date_to:
+def returns_report(
+    db: Session, date_from: Optional[date] = None, date_to: Optional[date] = None
+) -> List[Dict[str, Any]]:
+    """退货记录（行级），按退货日期区间；两个日期都可省，省则不过滤。"""
+    if date_from and date_to and date_from > date_to:
         raise BusinessException(CODE_PARAM_INVALID, "开始日期不能晚于结束日期")
     rows = repository.return_report_rows(db, date_from, date_to)
     materials = _material_map(db, [row[6] for row in rows])
@@ -1371,10 +1447,10 @@ def returns_report(db: Session, date_from: date, date_to: date) -> List[Dict[str
 
 
 def sales_volume_report(
-    db: Session, date_from: date, date_to: date
+    db: Session, date_from: Optional[date] = None, date_to: Optional[date] = None
 ) -> List[Dict[str, Any]]:
-    """销售量汇总：已确认发货单按物料汇总发货数量。"""
-    if date_from > date_to:
+    """销售量汇总：已确认发货单按物料汇总发货数量，日期区间可选。"""
+    if date_from and date_to and date_from > date_to:
         raise BusinessException(CODE_PARAM_INVALID, "开始日期不能晚于结束日期")
     rows = repository.sales_volume_rows(db, date_from, date_to)
     materials = _material_map(db, [row[0] for row in rows])
@@ -1389,13 +1465,26 @@ def sales_volume_report(
 
 
 def stats(db: Session) -> Dict[str, Any]:
-    """销售模块统计（供 dashboard 使用）。"""
-    order_counts = repository.order_status_counts(db)
+    """销售模块统计（供 dashboard 使用）。
+
+    订单 / 未发完订单 / 发货 / 退货四项都按**本月**统计：它们是期间业务量，
+    直接用 `COUNT(*)` 会随历史数据越积越大，工作台上看到的就不再是本期经营
+    情况了。`customer_count` 是主数据总量，不参与期间过滤。
+    """
+    month_start, next_month_start = _current_month_range()
     return {
         "customer_count": repository.count_all(db, models.SalCustomer),
-        "order_count": repository.count_all(db, models.SalOrder),
-        "order_counts": order_counts,
-        "pending_shipment_order_count": repository.pending_shipment_order_count(db),
-        "shipment_count": repository.count_all(db, models.SalShipment),
-        "return_count": repository.count_all(db, models.SalReturn),
+        "order_count": repository.count_by_date_range(
+            db, models.SalOrder, models.SalOrder.order_date, month_start, next_month_start
+        ),
+        "order_counts": repository.order_status_counts(db, month_start, next_month_start),
+        "pending_shipment_order_count": repository.pending_shipment_order_count(
+            db, month_start, next_month_start
+        ),
+        "shipment_count": repository.count_by_date_range(
+            db, models.SalShipment, models.SalShipment.shipment_date, month_start, next_month_start
+        ),
+        "return_count": repository.count_by_date_range(
+            db, models.SalReturn, models.SalReturn.return_date, month_start, next_month_start
+        ),
     }
