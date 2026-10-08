@@ -104,6 +104,8 @@ export interface Routing {
   id: number
   routing_code: string
   material_id: number
+  material_code?: string | null
+  material_name?: string | null
   routing_version: string
   status: string
   remark?: string | null

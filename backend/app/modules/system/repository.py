@@ -340,6 +340,19 @@ def get_personnel_by_no(db: Session, employee_no: str) -> Optional[models.SysPer
     )
 
 
+def next_employee_no(db: Session) -> str:
+    """自动生成工号：EMP + 表内最大 id+1 补 5 位。
+
+    基于 id 递增（删除工号后 id 不回用），并循环探测唯一键避免与手工工号撞号。
+    """
+    max_id = db.scalar(select(func.max(models.SysPersonnel.id))) or 0
+    for offset in range(1, 101):
+        candidate = f"EMP{int(max_id) + offset:05d}"
+        if not get_personnel_by_no(db, candidate):
+            return candidate
+    raise RuntimeError("无法生成唯一员工工号")
+
+
 def add_personnel(db: Session, personnel: models.SysPersonnel) -> models.SysPersonnel:
     db.add(personnel)
     db.flush()
@@ -470,6 +483,17 @@ def get_role(db: Session, role_id: int) -> Optional[models.SysRole]:
 
 def get_role_by_code(db: Session, role_code: str) -> Optional[models.SysRole]:
     return db.scalar(select(models.SysRole).where(models.SysRole.role_code == role_code))
+
+
+def list_roles_by_codes(db: Session, role_codes: Sequence[str]) -> List[models.SysRole]:
+    """按编码集合取角色（保持传入顺序去重，不存在的不报错）。"""
+    rows = {
+        role.role_code: role
+        for role in db.scalars(
+            select(models.SysRole).where(models.SysRole.role_code.in_(list(role_codes)))
+        )
+    }
+    return [rows[code] for code in role_codes if code in rows]
 
 
 def add_role(db: Session, role: models.SysRole) -> models.SysRole:

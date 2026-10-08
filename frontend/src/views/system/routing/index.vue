@@ -186,8 +186,12 @@ onMounted(load)
             </el-table>
           </template>
         </el-table-column>
-        <el-table-column label="工艺编码" prop="routing_code" min-width="130" />
-        <el-table-column label="物料ID" prop="material_id" width="100" />
+        <el-table-column label="工艺路线编码" prop="routing_code" min-width="150" />
+        <el-table-column label="自制件" min-width="220">
+          <template #default="{ row }">
+            {{ row.material_code ? `${row.material_code} ${row.material_name}` : `#${row.material_id}` }}
+          </template>
+        </el-table-column>
         <el-table-column label="版本" prop="routing_version" width="90" />
         <el-table-column label="工序数" width="90" align="right">
           <template #default="{ row }">{{ row.operations.length }}</template>
