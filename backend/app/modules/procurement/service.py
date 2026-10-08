@@ -15,7 +15,7 @@
 错误码区段：`4000~4999`。
 """
 
-from datetime import date, timedelta
+from datetime import date
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -1052,7 +1052,7 @@ def create_order_from_plan(
     """按采购计划生成 DRAFT 采购订单，并回写计划行已下单数量。
 
     - 单价优先取供应商-物料关系的 `supply_price`，缺失时取 0；
-    - 预计到货日期未指定时 = 下单日期 + 物料主数据（`sys_material.lead_time_days`）的最大提前期；
+    - 预计到货日期未指定时取下单日期（采购不涉及提前期，由采购员自行填写）；
     - 仅取「未下单数量 = required_qty − ordered_qty > 0」的计划行。
     """
     plan = _require_plan(db, plan_id)
@@ -1067,15 +1067,7 @@ def create_order_from_plan(
     )
     order_date = order_date or date.today()
     if expected_date is None:
-        materials = _material_map(db, [item.material_id for item in plan_items])
-        lead_time_days = max(
-            (
-                int((materials.get(item.material_id) or {}).get("lead_time_days") or 0)
-                for item in plan_items
-            ),
-            default=0,
-        )
-        expected_date = order_date + timedelta(days=lead_time_days)
+        expected_date = order_date
 
     pending: List[Tuple[models.PurPurchasePlanItem, Decimal]] = []
     for item in plan_items:
