@@ -5,10 +5,8 @@ import { useRouter } from 'vue-router'
 import { getInventoryStats, getLowStockReport, getStockSummary } from '@/api/inventory'
 import {
   getPlanningStats,
-  listDemands,
   listMrpResults,
   listMrpRuns,
-  listMps,
   listProductionPlans,
 } from '@/api/planning'
 import { getSalesStats, listReturns } from '@/api/sales'
@@ -37,11 +35,9 @@ const sales = ref<SalesStats | null>(null)
 const procurement = ref<ProcurementStats | null>(null)
 const lowStock = ref<LowStock[]>([])
 const recentReturns = ref<SalesReturn[]>([])
-const mpsPlanQty = ref(0)
 const mrpShortageCount = ref(0)
 const mrpRunNo = ref('')
 const finishedStockQty = ref(0)
-const demandCount = ref(0)
 const inProgressPlanCount = ref(0)
 
 /** 单个指标加载，失败时记录后端返回的真实错误 */
@@ -53,14 +49,6 @@ async function guard(label: string, task: () => Promise<void>): Promise<void> {
   }
 }
 
-async function loadMpsQuantity(): Promise<void> {
-  const data = await listMps({ page: 1, page_size: 200 })
-  mpsPlanQty.value = data.items.reduce(
-    (sum, mps) => sum + mps.items.reduce((sub, item) => sub + toNumber(item.planned_qty), 0),
-    0,
-  )
-}
-
 async function loadMrpShortage(): Promise<void> {
   const runs = await listMrpRuns({ page: 1, page_size: 1 })
   const run = runs.items[0]
@@ -69,8 +57,17 @@ async function loadMrpShortage(): Promise<void> {
     mrpShortageCount.value = 0
     return
   }
-  const results = await listMrpResults({ run_id: run.id, page: 1, page_size: 500 })
-  mrpShortageCount.value = results.items.filter((row) => toNumber(row.net_requirement) > 0).length
+  // 后端 page_size 上限为 200，需翻页累计，避免超出后整条请求 422
+  const pageSize = 200
+  let page = 1
+  let shortage = 0
+  for (;;) {
+    const results = await listMrpResults({ run_id: run.id, page, page_size: pageSize })
+    shortage += results.items.filter((row) => toNumber(row.net_requirement) > 0).length
+    if (page * pageSize >= results.total || results.items.length === 0) break
+    page += 1
+  }
+  mrpShortageCount.value = shortage
 }
 
 async function loadFinishedStock(): Promise<void> {
@@ -107,13 +104,8 @@ async function loadAll(): Promise<void> {
       const data = await listReturns({ page: 1, page_size: 5 })
       recentReturns.value = data.items
     }),
-    guard('本期 MPS 计划量', loadMpsQuantity),
     guard('MRP 缺料项', loadMrpShortage),
     guard('成品库存', loadFinishedStock),
-    guard('需求总量', async () => {
-      const data = await listDemands({ page: 1, page_size: 1 })
-      demandCount.value = data.total
-    }),
     guard('执行中生产任务', async () => {
       const data = await listProductionPlans({ status: 'IN_PROGRESS', page: 1, page_size: 1 })
       inProgressPlanCount.value = data.total
@@ -124,7 +116,13 @@ async function loadAll(): Promise<void> {
 
 /** 九项核心指标（规格 §28，不含任何访问量类虚荣指标） */
 const metrics = computed(() => [
-  { label: '本期 MPS 计划量', value: mpsPlanQty.value, unit: '件', path: '/planning/mps', type: 'primary' },
+  {
+    label: '本期 MPS 计划量',
+    value: toNumber(planning.value?.mps_planned_qty ?? 0),
+    unit: planning.value?.current_period ? `件（${planning.value.current_period}）` : '件',
+    path: '/planning/mps',
+    type: 'primary',
+  },
   {
     label: 'MRP 缺料项',
     value: mrpShortageCount.value,
@@ -186,7 +184,7 @@ const metrics = computed(() => [
 
 /** 业务流状态：需求 → MPS → MRP → BUY/MAKE → 采购/生产 → 库存 → 发货/退货 */
 const flow = computed(() => [
-  { title: '需求', value: demandCount.value, hint: '计划需求单', path: '/planning/demand' },
+  { title: '需求', value: planning.value?.demand_count ?? 0, hint: '计划需求单', path: '/planning/demand' },
   { title: 'MPS', value: planning.value?.mps_count ?? 0, hint: '主生产计划', path: '/planning/mps' },
   { title: 'MRP', value: planning.value?.mrp_run_count ?? 0, hint: '运算批次', path: '/planning/mrp' },
   { title: 'BUY', value: planning.value?.buy_count ?? 0, hint: '采购件需求', path: '/procurement/plan' },

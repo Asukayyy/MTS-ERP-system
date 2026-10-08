@@ -54,6 +54,17 @@ export function createDemandFromReplenishment(requestId: number): Promise<Demand
   return post<Demand>('/planning/demands/from-replenishment', { request_id: requestId })
 }
 
+/** 从库存补库需求批量导入计划需求 */
+export function importDemandsFromReplenishment(): Promise<{
+  created_count: number
+  skipped_count: number
+  demand_ids: number[]
+}> {
+  return post<{ created_count: number; skipped_count: number; demand_ids: number[] }>(
+    '/planning/demands/from-replenishment/import',
+  )
+}
+
 // ---------------- MPS ----------------
 
 export function listMps(params: Record<string, unknown> = {}): Promise<PageData<Mps>> {

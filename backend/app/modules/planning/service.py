@@ -80,6 +80,12 @@ _DEMAND_TRANSITIONS: Dict[str, set] = {
 
 _TERMINAL_STATUSES = ("COMPLETED", "CANCELLED")
 
+#: 计入「本期计划量」的有效状态：排除 DRAFT 草稿与 CANCELLED 已取消
+_ACTIVE_PLAN_STATUSES = ("CONFIRMED", "RELEASED", "IN_PROGRESS", "COMPLETED")
+
+#: 计入「需求总量」的有效状态：排除 DRAFT 草稿与 CANCELLED 已取消
+_ACTIVE_DEMAND_STATUSES = ("CONFIRMED", "RELEASED", "COMPLETED")
+
 
 # ==================== 小工具 ====================
 
@@ -363,6 +369,56 @@ def create_demand_from_replenishment(
         remark=_field("remark"),
         operator_id=operator_id,
     )
+
+
+def import_demands_from_replenishment(
+    db: Session, operator_id: Optional[int] = None
+) -> Dict[str, Any]:
+    """把库存补库需求批量拉取为 `source_type=STOCKFILL` 的计划需求（已导入的跳过）。
+
+    补库需求通过 `inventory.contract.list_replenishment_requests`（惰性导入）批量读取，
+    只拉取已确认 / 已下达（CONFIRMED / RELEASED）的需求，避免把未确认的草稿提前纳入计划。
+    """
+    try:
+        from app.modules.inventory import contract as inventory_contract  # type: ignore
+
+        getter = getattr(inventory_contract, "list_replenishment_requests", None)
+    except Exception as exc:  # noqa: BLE001 - 契约尚未就绪
+        raise BusinessException(CODE_CONTRACT_NOT_READY, "库存补库需求接口尚未就绪") from exc
+    if getter is None:
+        raise BusinessException(CODE_CONTRACT_NOT_READY, "库存补库需求接口尚未就绪")
+
+    rows, _total = getter(
+        db,
+        page=1,
+        page_size=200,
+        status=None,
+        source_type=None,
+        material_id=None,
+    )
+    created_ids: List[int] = []
+    skipped = 0
+    for row in rows:
+        if row.get("status") not in ("CONFIRMED", "RELEASED"):
+            skipped += 1
+            continue
+        request_id = int(row["id"])
+        if repository.find_demand_by_source(db, "STOCKFILL", request_id):
+            skipped += 1
+            continue
+        demand = create_demand(
+            db,
+            source_type="STOCKFILL",
+            material_id=int(row["material_id"]),
+            quantity=_as_decimal(row.get("request_qty")),
+            due_date=_to_date(row.get("required_date"), date.today()),
+            source_reference_id=request_id,
+            source_no=row.get("request_no"),
+            remark=row.get("remark"),
+            operator_id=operator_id,
+        )
+        created_ids.append(demand.id)
+    return {"created_count": len(created_ids), "skipped_count": skipped, "demand_ids": created_ids}
 
 
 # ==================== MPS ====================
@@ -1657,14 +1713,28 @@ def cancel_completion_report(
 # ==================== 统计 ====================
 
 
-def stats(db: Session) -> Dict[str, int]:
-    """计划模块统计（供首页 / 综合查询使用）。"""
+def stats(db: Session) -> Dict[str, Any]:
+    """计划模块统计（供首页 / 综合查询使用）。
+
+    「本期」= 当前年月（如 `2026-10`），按 MPS **行明细**的 `period_label` 月度时段统计，
+    且仅计入已确认及以上状态（`_ACTIVE_PLAN_STATUSES`），排除 DRAFT 草稿与 CANCELLED。
+    `buy_count` / `make_count` 只统计**最新一次 MRP 批次**的供需分流结果，
+    避免随每次运算无限累加。`demand_count`（需求总量）同样排除 DRAFT 草稿与
+    CANCELLED，与 `mps_planned_qty` 口径保持一致。
+    """
+    current_period = date.today().strftime("%Y-%m")
+    latest_run_id = repository.latest_mrp_run_id(db)
     return {
+        "current_period": current_period,
+        "mps_planned_qty": repository.sum_mps_planned_qty(
+            db, current_period, _ACTIVE_PLAN_STATUSES
+        ),
         "mps_count": repository.count_all(db, models.PlnMps),
+        "demand_count": repository.count_demands_by_statuses(db, _ACTIVE_DEMAND_STATUSES),
         "mrp_run_count": repository.count_all(db, models.PlnMrpRun),
         "mrp_result_count": repository.count_all(db, models.PlnMrpResult),
-        "make_count": repository.count_mrp_results_by_supply(db, "MAKE"),
-        "buy_count": repository.count_mrp_results_by_supply(db, "BUY"),
+        "make_count": repository.count_mrp_results_by_supply(db, "MAKE", latest_run_id),
+        "buy_count": repository.count_mrp_results_by_supply(db, "BUY", latest_run_id),
         "open_plan_count": repository.count_open(db, models.PlnProductionPlan, _TERMINAL_STATUSES),
         "open_dispatch_count": repository.count_open(db, models.PlnDispatchOrder, _TERMINAL_STATUSES),
         "open_requisition_count": repository.count_open(
