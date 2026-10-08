@@ -52,9 +52,16 @@ request.interceptors.request.use((config) => {
   return config
 })
 
-request.interceptors.response.use(undefined, (error: AxiosError<ApiResponse<unknown>>) =>
-  Promise.reject(new Error(toErrorMessage(error))),
-)
+request.interceptors.response.use(undefined, (error: AxiosError<ApiResponse<unknown>>) => {
+  // 登录态失效：清除本地登录信息并跳回登录页，避免旧登录态卡在错误页面
+  if (error.response?.status === 401) {
+    localStorage.removeItem('bh-erp-user')
+    if (!window.location.pathname.startsWith('/login')) {
+      window.location.replace('/login')
+    }
+  }
+  return Promise.reject(new Error(toErrorMessage(error)))
+})
 
 /** 拆包统一响应结构，返回业务数据 */
 async function unwrap<T>(promise: Promise<AxiosResponse<ApiResponse<T>>>): Promise<T> {
