@@ -391,9 +391,6 @@ class PlnMaterialRequisitionItem(Base, AuditMixin):
     issued_qty: Mapped[Decimal] = mapped_column(
         Numeric(18, 4), nullable=False, default=0, comment="已领数量"
     )
-    location_id: Mapped[Optional[BigIntFk]] = mapped_column(
-        ForeignKey("inv_location.id", ondelete="RESTRICT"), nullable=True, comment="领料库位ID"
-    )
     remark: Mapped[Optional[str]] = mapped_column(String(200), nullable=True, comment="备注")
 
     requisition: Mapped[PlnMaterialRequisition] = relationship(back_populates="items")
@@ -431,9 +428,6 @@ class PlnCompletionReport(Base, AuditMixin):
     )
     warehouse_id: Mapped[BigIntFk] = mapped_column(
         ForeignKey("inv_warehouse.id", ondelete="RESTRICT"), nullable=False, comment="入库仓库ID"
-    )
-    location_id: Mapped[Optional[BigIntFk]] = mapped_column(
-        ForeignKey("inv_location.id", ondelete="RESTRICT"), nullable=True, comment="入库库位ID"
     )
     report_date: Mapped[date] = mapped_column(Date, nullable=False, comment="报工日期")
     status: Mapped[str] = mapped_column(

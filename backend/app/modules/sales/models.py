@@ -222,9 +222,6 @@ class SalShipmentItem(Base, AuditMixin):
     warehouse_id: Mapped[BigIntFk] = mapped_column(
         ForeignKey("inv_warehouse.id", ondelete="RESTRICT"), nullable=False, comment="发货仓库ID"
     )
-    location_id: Mapped[Optional[BigIntFk]] = mapped_column(
-        ForeignKey("inv_location.id", ondelete="RESTRICT"), nullable=True, comment="发货库位ID"
-    )
     quantity: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, comment="发货数量")
     remark: Mapped[Optional[str]] = mapped_column(String(200), nullable=True, comment="备注")
 
@@ -283,9 +280,6 @@ class SalReturnItem(Base, AuditMixin):
     )
     warehouse_id: Mapped[BigIntFk] = mapped_column(
         ForeignKey("inv_warehouse.id", ondelete="RESTRICT"), nullable=False, comment="退回仓库ID"
-    )
-    location_id: Mapped[Optional[BigIntFk]] = mapped_column(
-        ForeignKey("inv_location.id", ondelete="RESTRICT"), nullable=True, comment="退回库位ID"
     )
     quantity: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, comment="退货数量")
     quality_status: Mapped[str] = mapped_column(

@@ -209,7 +209,6 @@ class ShipmentItemCreate(BaseModel):
 
     order_item_id: int = Field(description="销售订单行ID")
     warehouse_id: int = Field(description="发货仓库ID")
-    location_id: Optional[int] = Field(default=None, description="发货库位ID")
     quantity: Decimal = Field(gt=0, description="发货数量")
     remark: Optional[str] = Field(default=None, max_length=200)
 
@@ -232,7 +231,6 @@ class ShipmentItemOut(_IdOut):
     material_code: Optional[str] = None
     material_name: Optional[str] = None
     warehouse_id: int
-    location_id: Optional[int] = None
     quantity: Decimal
     remark: Optional[str] = None
 
@@ -257,7 +255,6 @@ class ReturnItemCreate(BaseModel):
 
     material_id: int = Field(description="物料ID")
     warehouse_id: int = Field(description="退回仓库ID")
-    location_id: Optional[int] = Field(default=None, description="退回库位ID")
     quantity: Decimal = Field(gt=0, description="退货数量")
     quality_status: str = Field(default="QUALIFIED", description="质量状态 QUALIFIED/DEFECTIVE/SCRAP")
     reason: Optional[str] = Field(default=None, max_length=200)
@@ -283,7 +280,6 @@ class ReturnItemOut(_IdOut):
     material_code: Optional[str] = None
     material_name: Optional[str] = None
     warehouse_id: int
-    location_id: Optional[int] = None
     quantity: Decimal
     quality_status: str
     reason: Optional[str] = None
