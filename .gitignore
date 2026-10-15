@@ -67,9 +67,10 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
-# ---------- 编辑器与 IDE ----------
+# ---------- 编辑器与 IDE / 代理工具 ----------
 .idea/
 .vscode/
+.trae/
 *.swp
 *.swo
 *~

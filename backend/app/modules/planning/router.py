@@ -502,6 +502,32 @@ def set_production_plan_status(
     return success(plan)
 
 
+@router.delete(
+    "/production-plans/{plan_id}",
+    response_model=ApiResponse[dict],
+    summary="删除生产作业计划",
+)
+def delete_production_plan(plan_id: int, db: Session = Depends(get_db)) -> ApiResponse[dict]:
+    """删除作业计划：仅草稿 / 已取消可删，须先删除其派工单 / 领料单 / 完工报告。"""
+    service.delete_production_plan(db, plan_id)
+    db.commit()
+    return success({"deleted": True})
+
+
+@router.post(
+    "/production-plans/batch-delete",
+    response_model=ApiResponse[schemas.BatchDeleteResultOut],
+    summary="批量删除生产作业计划",
+)
+def batch_delete_production_plans(
+    payload: schemas.BatchDeleteRequest, db: Session = Depends(get_db)
+) -> ApiResponse[schemas.BatchDeleteResultOut]:
+    """批量删除作业计划：逐条校验，失败条目不中断并返回原因。"""
+    result = service.batch_delete(db, payload.ids, service.delete_production_plan)
+    db.commit()
+    return success(result)
+
+
 # ==================== 派工单 ====================
 
 
@@ -549,6 +575,24 @@ def create_dispatch_order(
     return success(dispatch)
 
 
+@router.post(
+    "/dispatch-orders/from-plans",
+    response_model=ApiResponse[schemas.GenerationResultOut],
+    summary="按生产作业计划生成派工单",
+)
+def create_dispatch_orders_from_plans(
+    payload: schemas.DispatchOrderFromPlansRequest, db: Session = Depends(get_db)
+) -> ApiResponse[schemas.GenerationResultOut]:
+    """按选中计划的工艺路线逐工序生成 DRAFT 派工单；无工艺路线的计划计入 errors。"""
+    try:
+        result = service.create_dispatch_orders_from_plans(db, payload.plan_ids)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    return success(result)
+
+
 @router.get(
     "/dispatch-orders/{dispatch_id}",
     response_model=ApiResponse[schemas.DispatchOrderOut],
@@ -559,6 +603,20 @@ def get_dispatch_order(
 ) -> ApiResponse[schemas.DispatchOrderOut]:
     """按 ID 查询派工单。"""
     return success(service.get_dispatch_order(db, dispatch_id))
+
+
+@router.patch(
+    "/dispatch-orders/{dispatch_id}",
+    response_model=ApiResponse[schemas.DispatchOrderOut],
+    summary="修改派工单",
+)
+def update_dispatch_order(
+    dispatch_id: int, payload: schemas.DispatchOrderUpdate, db: Session = Depends(get_db)
+) -> ApiResponse[schemas.DispatchOrderOut]:
+    """人工审核调整派工单：仅 DRAFT 可改。"""
+    dispatch = service.update_dispatch_order(db, dispatch_id, payload)
+    db.commit()
+    return success(dispatch)
 
 
 @router.patch(
@@ -573,6 +631,32 @@ def set_dispatch_order_status(
     dispatch = service.set_dispatch_order_status(db, dispatch_id, payload.status)
     db.commit()
     return success(dispatch)
+
+
+@router.delete(
+    "/dispatch-orders/{dispatch_id}",
+    response_model=ApiResponse[dict],
+    summary="删除派工单",
+)
+def delete_dispatch_order(dispatch_id: int, db: Session = Depends(get_db)) -> ApiResponse[dict]:
+    """删除派工单：仅草稿 / 已取消可删，须先删除引用它的完工报告。"""
+    service.delete_dispatch_order(db, dispatch_id)
+    db.commit()
+    return success({"deleted": True})
+
+
+@router.post(
+    "/dispatch-orders/batch-delete",
+    response_model=ApiResponse[schemas.BatchDeleteResultOut],
+    summary="批量删除派工单",
+)
+def batch_delete_dispatch_orders(
+    payload: schemas.BatchDeleteRequest, db: Session = Depends(get_db)
+) -> ApiResponse[schemas.BatchDeleteResultOut]:
+    """批量删除派工单：逐条校验，失败条目不中断并返回原因。"""
+    result = service.batch_delete(db, payload.ids, service.delete_dispatch_order)
+    db.commit()
+    return success(result)
 
 
 # ==================== 领料单 ====================
@@ -620,6 +704,26 @@ def create_requisition(
     return success(req)
 
 
+@router.post(
+    "/requisitions/from-plans",
+    response_model=ApiResponse[schemas.GenerationResultOut],
+    summary="按生产作业计划生成领料单",
+)
+def create_requisitions_from_plans(
+    payload: schemas.RequisitionFromPlansRequest, db: Session = Depends(get_db)
+) -> ApiResponse[schemas.GenerationResultOut]:
+    """按选中计划的 BOM 直接子件生成 DRAFT 领料单；无 BOM 的计划计入 errors。"""
+    try:
+        result = service.create_requisitions_from_plans(
+            db, payload.plan_ids, warehouse_id=payload.warehouse_id
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    return success(result)
+
+
 @router.get(
     "/requisitions/{req_id}",
     response_model=ApiResponse[schemas.RequisitionOut],
@@ -630,6 +734,20 @@ def get_requisition(
 ) -> ApiResponse[schemas.RequisitionOut]:
     """按 ID 查询领料单（含行明细）。"""
     return success(service.get_requisition(db, req_id))
+
+
+@router.patch(
+    "/requisitions/{req_id}",
+    response_model=ApiResponse[schemas.RequisitionOut],
+    summary="修改领料单",
+)
+def update_requisition(
+    req_id: int, payload: schemas.RequisitionUpdate, db: Session = Depends(get_db)
+) -> ApiResponse[schemas.RequisitionOut]:
+    """人工审核调整领料单：仅 DRAFT 可改，`items` 传入则整表替换。"""
+    req = service.update_requisition(db, req_id, payload)
+    db.commit()
+    return success(req)
 
 
 @router.post(
@@ -662,6 +780,32 @@ def cancel_requisition(
     req = service.cancel_requisition(db, req_id)
     db.commit()
     return success(req)
+
+
+@router.delete(
+    "/requisitions/{req_id}",
+    response_model=ApiResponse[dict],
+    summary="删除领料单",
+)
+def delete_requisition(req_id: int, db: Session = Depends(get_db)) -> ApiResponse[dict]:
+    """删除领料单：仅草稿 / 已取消可删，明细行一并删除；已确认出库的不可删。"""
+    service.delete_requisition(db, req_id)
+    db.commit()
+    return success({"deleted": True})
+
+
+@router.post(
+    "/requisitions/batch-delete",
+    response_model=ApiResponse[schemas.BatchDeleteResultOut],
+    summary="批量删除领料单",
+)
+def batch_delete_requisitions(
+    payload: schemas.BatchDeleteRequest, db: Session = Depends(get_db)
+) -> ApiResponse[schemas.BatchDeleteResultOut]:
+    """批量删除领料单：逐条校验，失败条目不中断并返回原因。"""
+    result = service.batch_delete(db, payload.ids, service.delete_requisition)
+    db.commit()
+    return success(result)
 
 
 # ==================== 完工报告 ====================
@@ -713,6 +857,24 @@ def create_completion_report(
     return success(report)
 
 
+@router.post(
+    "/completion-reports/from-plans",
+    response_model=ApiResponse[schemas.GenerationResultOut],
+    summary="按生产作业计划生成完工报告",
+)
+def create_completion_reports_from_plans(
+    payload: schemas.CompletionReportFromPlansRequest, db: Session = Depends(get_db)
+) -> ApiResponse[schemas.GenerationResultOut]:
+    """按选中计划生成 DRAFT 完工报告：产出物料与剩余数量预填，报工日期与入库仓库留空。"""
+    try:
+        result = service.create_completion_reports_from_plans(db, payload.plan_ids)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    return success(result)
+
+
 @router.get(
     "/completion-reports/{report_id}",
     response_model=ApiResponse[schemas.CompletionReportOut],
@@ -723,6 +885,20 @@ def get_completion_report(
 ) -> ApiResponse[schemas.CompletionReportOut]:
     """按 ID 查询完工报告。"""
     return success(service.get_completion_report(db, report_id))
+
+
+@router.patch(
+    "/completion-reports/{report_id}",
+    response_model=ApiResponse[schemas.CompletionReportOut],
+    summary="修改完工报告",
+)
+def update_completion_report(
+    report_id: int, payload: schemas.CompletionReportUpdate, db: Session = Depends(get_db)
+) -> ApiResponse[schemas.CompletionReportOut]:
+    """人工补填完工报告：仅 DRAFT 可改（报工日期、入库仓库、数量等）。"""
+    report = service.update_completion_report(db, report_id, payload)
+    db.commit()
+    return success(report)
 
 
 @router.post(
@@ -755,6 +931,32 @@ def cancel_completion_report(
     report = service.cancel_completion_report(db, report_id)
     db.commit()
     return success(report)
+
+
+@router.delete(
+    "/completion-reports/{report_id}",
+    response_model=ApiResponse[dict],
+    summary="删除完工报告",
+)
+def delete_completion_report(report_id: int, db: Session = Depends(get_db)) -> ApiResponse[dict]:
+    """删除完工报告：仅草稿 / 已取消可删；已确认入库并回写数量的不可删。"""
+    service.delete_completion_report(db, report_id)
+    db.commit()
+    return success({"deleted": True})
+
+
+@router.post(
+    "/completion-reports/batch-delete",
+    response_model=ApiResponse[schemas.BatchDeleteResultOut],
+    summary="批量删除完工报告",
+)
+def batch_delete_completion_reports(
+    payload: schemas.BatchDeleteRequest, db: Session = Depends(get_db)
+) -> ApiResponse[schemas.BatchDeleteResultOut]:
+    """批量删除完工报告：逐条校验，失败条目不中断并返回原因。"""
+    result = service.batch_delete(db, payload.ids, service.delete_completion_report)
+    db.commit()
+    return success(result)
 
 
 # ==================== 统计 ====================

@@ -51,6 +51,8 @@ BOM、工艺路线的**唯一 Owner**，其它模块只能通过本模块的 `co
 - 人员读取：`get_personnel` / `get_personnel_name` / `get_personnel_names`
 - BOM 读取（供 MRP 逐层展开）：`get_active_bom` / `get_bom` /
   `get_active_bom_children` / `has_bom`
+- 工艺路线读取（供 planning 生成派工单）：`get_active_routing_operations`
+  （返回生效路线的工序集合，无路线返回 `[]`）
 - 操作日志：`log_operation`（**不 commit**，由调用方事务一并提交）
 
 契约函数只返回 `dict` / 标量，不返回 ORM 对象，且永不调用 `db.commit()`。

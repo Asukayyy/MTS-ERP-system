@@ -42,6 +42,7 @@ const LABELS: Record<string, string> = {
   REORDER: '采购补库',
   PRODUCTION: '生产补库',
   MANUAL: '手工',
+  PLAN: '按计划',
   PURCHASE_RECEIPT: '采购到货',
   PRODUCTION_COMPLETION: '生产完工',
   MATERIAL_REQUISITION: '生产领料',
@@ -77,6 +78,7 @@ const TYPES: Record<string, 'success' | 'info' | 'warning' | 'danger' | 'primary
   SCRAP: 'danger',
   REORDER: 'primary',
   PRODUCTION: 'warning',
+  PLAN: 'primary',
 }
 
 const label = computed(() => (props.status ? LABELS[props.status] ?? props.status : '-'))
