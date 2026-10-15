@@ -101,6 +101,19 @@ def _warehouse_name_map(db: Session, warehouse_ids: Sequence[int]) -> Dict[int, 
     return result
 
 
+def _warehouse_map(db: Session, warehouse_ids: Sequence[int]) -> Dict[int, Dict[str, Any]]:
+    """仓库 ID → {warehouse_code, warehouse_name}，用于出参展示编码与名称。"""
+    result: Dict[int, Dict[str, Any]] = {}
+    for wid in {int(i) for i in warehouse_ids if i}:
+        warehouse = repository.get_warehouse(db, wid)
+        if warehouse:
+            result[wid] = {
+                "warehouse_code": warehouse.warehouse_code,
+                "warehouse_name": warehouse.warehouse_name,
+            }
+    return result
+
+
 def _balance_dict(balance: models.InvBalance) -> Dict[str, Any]:
     return {
         "on_hand": _as_decimal(balance.quantity),
@@ -500,10 +513,11 @@ def list_balances(
         has_reorder_point=has_reorder_point,
     )
     materials = _material_map(db, [r.material_id for r in rows])
-    warehouses = _warehouse_name_map(db, [r.warehouse_id for r in rows])
+    warehouses = _warehouse_map(db, [r.warehouse_id for r in rows])
     items = []
     for row in rows:
         material = materials.get(row.material_id, {})
+        warehouse = warehouses.get(row.warehouse_id, {})
         items.append(
             {
                 "id": row.id,
@@ -511,7 +525,8 @@ def list_balances(
                 "material_code": material.get("material_code"),
                 "material_name": material.get("material_name"),
                 "warehouse_id": row.warehouse_id,
-                "warehouse_name": warehouses.get(row.warehouse_id),
+                "warehouse_code": warehouse.get("warehouse_code"),
+                "warehouse_name": warehouse.get("warehouse_name"),
                 "reorder_point": row.reorder_point,
                 "reorder_quantity": row.reorder_quantity,
                 **_balance_dict(row),
@@ -827,6 +842,8 @@ def list_reorder_suggestions(db: Session) -> List[Dict[str, Any]]:
     """
     suggestions: List[Dict[str, Any]] = []
     balances = list(db.scalars(select(models.InvBalance).order_by(models.InvBalance.id)))
+    materials = _material_map(db, [b.material_id for b in balances])
+    warehouses = _warehouse_map(db, [b.warehouse_id for b in balances])
     for balance in balances:
         if balance.reorder_point is None:
             continue
@@ -837,11 +854,17 @@ def list_reorder_suggestions(db: Session) -> List[Dict[str, Any]]:
         if current >= point:
             continue
         suggested = _as_decimal(balance.reorder_quantity) if balance.reorder_quantity is not None else Decimal("0")
+        material = materials.get(balance.material_id, {})
+        warehouse = warehouses.get(balance.warehouse_id, {})
         suggestions.append(
             {
                 "balance_id": balance.id,
                 "material_id": balance.material_id,
+                "material_code": material.get("material_code"),
+                "material_name": material.get("material_name"),
                 "warehouse_id": balance.warehouse_id,
+                "warehouse_code": warehouse.get("warehouse_code"),
+                "warehouse_name": warehouse.get("warehouse_name"),
                 "reorder_point": point,
                 "current_qty": current,
                 "suggested_qty": suggested,

@@ -91,6 +91,7 @@ class BalanceOut(_IdOut):
     material_code: Optional[str] = None
     material_name: Optional[str] = None
     warehouse_id: int
+    warehouse_code: Optional[str] = None
     warehouse_name: Optional[str] = None
     on_hand: Decimal
     locked_quantity: Decimal
@@ -211,7 +212,11 @@ class ReorderSuggestionOut(BaseModel):
 
     balance_id: int
     material_id: int
+    material_code: Optional[str] = None
+    material_name: Optional[str] = None
     warehouse_id: int
+    warehouse_code: Optional[str] = None
+    warehouse_name: Optional[str] = None
     reorder_point: Decimal
     current_qty: Decimal
     suggested_qty: Decimal

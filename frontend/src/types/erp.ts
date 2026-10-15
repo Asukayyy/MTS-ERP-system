@@ -586,6 +586,7 @@ export interface Balance {
   material_code?: string | null
   material_name?: string | null
   warehouse_id: number
+  warehouse_code?: string | null
   warehouse_name?: string | null
   on_hand: Num
   locked_quantity: Num
@@ -626,7 +627,11 @@ export interface StockOperation {
 export interface ReorderSuggestion {
   balance_id: number
   material_id: number
+  material_code?: string | null
+  material_name?: string | null
   warehouse_id: number
+  warehouse_code?: string | null
+  warehouse_name?: string | null
   reorder_point: Num
   current_qty: Num
   suggested_qty: Num
