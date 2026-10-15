@@ -1,9 +1,11 @@
 import { del, get, patch, post, put } from '@/utils/request'
-import type { HealthData, PageData } from '@/types/api'
+import type { PageData } from '@/types/api'
 import type {
+  BatchDeleteResult,
   CompletionReport,
   Demand,
   DispatchOrder,
+  GenerationResult,
   Mps,
   MpsImportPreview,
   MrpExplain,
@@ -15,10 +17,6 @@ import type {
 } from '@/types/erp'
 
 /** planning 模块接口（计划管理），统一前缀 /api/v1/planning */
-
-export function getPlanningHealth(): Promise<HealthData> {
-  return get<HealthData>('/planning/health')
-}
 
 export function getPlanningStats(): Promise<PlanningStats> {
   return get<PlanningStats>('/planning/stats')
@@ -159,6 +157,16 @@ export function setProductionPlanStatus(id: number, status: string): Promise<Pro
   return patch<ProductionPlan>(`/planning/production-plans/${id}/status`, { status })
 }
 
+/** 删除生产作业计划（仅草稿 / 已取消，且须先删除其下游单据） */
+export function deleteProductionPlan(id: number): Promise<unknown> {
+  return del(`/planning/production-plans/${id}`)
+}
+
+/** 批量删除生产作业计划 */
+export function batchDeleteProductionPlans(ids: number[]): Promise<BatchDeleteResult> {
+  return post<BatchDeleteResult>('/planning/production-plans/batch-delete', { ids })
+}
+
 // ---------------- 派工单 ----------------
 
 export function listDispatchOrders(params: Record<string, unknown> = {}): Promise<PageData<DispatchOrder>> {
@@ -171,6 +179,28 @@ export function createDispatchOrder(payload: Record<string, unknown>): Promise<D
 
 export function setDispatchOrderStatus(id: number, status: string): Promise<DispatchOrder> {
   return patch<DispatchOrder>(`/planning/dispatch-orders/${id}/status`, { status })
+}
+
+/** 人工审核调整派工单（仅 DRAFT 可改） */
+export function updateDispatchOrder(id: number, payload: Record<string, unknown>): Promise<DispatchOrder> {
+  return patch<DispatchOrder>(`/planning/dispatch-orders/${id}`, payload)
+}
+
+/** 按选中的生产作业计划逐工序生成派工单 */
+export function generateDispatchOrdersFromPlans(
+  planIds: number[],
+): Promise<GenerationResult> {
+  return post<GenerationResult>('/planning/dispatch-orders/from-plans', { plan_ids: planIds })
+}
+
+/** 删除派工单（仅草稿 / 已取消，且须先删除引用它的完工报告） */
+export function deleteDispatchOrder(id: number): Promise<unknown> {
+  return del(`/planning/dispatch-orders/${id}`)
+}
+
+/** 批量删除派工单 */
+export function batchDeleteDispatchOrders(ids: number[]): Promise<BatchDeleteResult> {
+  return post<BatchDeleteResult>('/planning/dispatch-orders/batch-delete', { ids })
 }
 
 // ---------------- 领料单 ----------------
@@ -191,6 +221,32 @@ export function cancelRequisition(id: number): Promise<Requisition> {
   return post<Requisition>(`/planning/requisitions/${id}/cancel`)
 }
 
+/** 人工审核调整领料单（仅 DRAFT 可改，items 传入则整表替换） */
+export function updateRequisition(id: number, payload: Record<string, unknown>): Promise<Requisition> {
+  return patch<Requisition>(`/planning/requisitions/${id}`, payload)
+}
+
+/** 按选中的生产作业计划的 BOM 子件生成领料单 */
+export function generateRequisitionsFromPlans(
+  planIds: number[],
+  warehouseId?: number | null,
+): Promise<GenerationResult> {
+  return post<GenerationResult>('/planning/requisitions/from-plans', {
+    plan_ids: planIds,
+    warehouse_id: warehouseId ?? null,
+  })
+}
+
+/** 删除领料单（仅草稿 / 已取消，明细一并删除） */
+export function deleteRequisition(id: number): Promise<unknown> {
+  return del(`/planning/requisitions/${id}`)
+}
+
+/** 批量删除领料单 */
+export function batchDeleteRequisitions(ids: number[]): Promise<BatchDeleteResult> {
+  return post<BatchDeleteResult>('/planning/requisitions/batch-delete', { ids })
+}
+
 // ---------------- 完工报告 ----------------
 
 export function listCompletionReports(params: Record<string, unknown> = {}): Promise<PageData<CompletionReport>> {
@@ -207,4 +263,26 @@ export function confirmCompletionReport(id: number): Promise<CompletionReport> {
 
 export function cancelCompletionReport(id: number): Promise<CompletionReport> {
   return post<CompletionReport>(`/planning/completion-reports/${id}/cancel`)
+}
+
+/** 人工补填完工报告（仅 DRAFT 可改） */
+export function updateCompletionReport(id: number, payload: Record<string, unknown>): Promise<CompletionReport> {
+  return patch<CompletionReport>(`/planning/completion-reports/${id}`, payload)
+}
+
+/** 按选中的生产作业计划生成完工报告 */
+export function generateCompletionReportsFromPlans(
+  planIds: number[],
+): Promise<GenerationResult> {
+  return post<GenerationResult>('/planning/completion-reports/from-plans', { plan_ids: planIds })
+}
+
+/** 删除完工报告（仅草稿 / 已取消） */
+export function deleteCompletionReport(id: number): Promise<unknown> {
+  return del(`/planning/completion-reports/${id}`)
+}
+
+/** 批量删除完工报告 */
+export function batchDeleteCompletionReports(ids: number[]): Promise<BatchDeleteResult> {
+  return post<BatchDeleteResult>('/planning/completion-reports/batch-delete', { ids })
 }

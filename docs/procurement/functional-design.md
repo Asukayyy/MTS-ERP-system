@@ -1,7 +1,7 @@
 # 采购模块功能设计（Procurement Functional Design）
 
-> 范围：采购模块的功能设计。表结构见 [physical-data-model.md](physical-data-model.md)，
-> 实体关系见 [er-diagram.md](er-diagram.md)，页面见 [ui-design.md](ui-design.md)。
+> 范围：采购模块的功能设计。表结构与实体关系见 [conceptual-model.md](conceptual-model.md)，
+> 数据流见 [data-flow-diagrams.md](data-flow-diagrams.md)，页面见 [ui-design.md](ui-design.md)。
 
 ## 一、模块定位
 

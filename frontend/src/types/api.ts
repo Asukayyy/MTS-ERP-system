@@ -24,11 +24,5 @@ export interface PageQuery {
   page_size?: number
 }
 
-/** 模块占位健康检查数据 */
-export interface HealthData {
-  module: string
-  status: string
-}
-
 /** 成功状态码，与后端一致 */
 export const SUCCESS_CODE = 0

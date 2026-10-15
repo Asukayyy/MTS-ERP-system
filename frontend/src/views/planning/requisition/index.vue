@@ -1,14 +1,24 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 
 import { listWarehouses } from '@/api/inventory'
-import { cancelRequisition, confirmRequisition, createRequisition, listRequisitions, listProductionPlans } from '@/api/planning'
+import {
+  batchDeleteRequisitions,
+  cancelRequisition,
+  confirmRequisition,
+  createRequisition,
+  deleteRequisition,
+  listRequisitions,
+  listProductionPlans,
+  updateRequisition,
+} from '@/api/planning'
 import { listMaterials } from '@/api/system'
 import RemoteSelect from '@/components/common/RemoteSelect.vue'
 import StatusTag from '@/components/common/StatusTag.vue'
-import { usePagedTable } from '@/composables/usePagedTable'
+import GenerateFromPlansDialog from '@/components/planning/GenerateFromPlansDialog.vue'
+import { usePagedTable, toNumber } from '@/composables/usePagedTable'
 import type { RemoteOption, Requisition } from '@/types/erp'
 
 const { loading, rows, total, page, pageSize, query, load, search, reset, changePage, changeSize } =
@@ -40,26 +50,27 @@ interface ReqLineForm {
 
 const dialogVisible = ref(false)
 const submitting = ref(false)
+const editingId = ref<number | null>(null)
 const formRef = ref<FormInstance>()
+const generateRef = ref<InstanceType<typeof GenerateFromPlansDialog>>()
 const form = reactive<{
   req_no: string
   plan_id: number | undefined
   warehouse_id: number | undefined
-  req_date: string
+  req_date: string | null
   remark: string
   items: ReqLineForm[]
 }>({
   req_no: '',
   plan_id: undefined,
   warehouse_id: undefined,
-  req_date: '',
+  req_date: null,
   remark: '',
   items: [],
 })
 
-const rules: FormRules = {
-  req_date: [{ required: true, message: '请选择领料日期', trigger: 'change' }],
-}
+// 领料日期与仓库为草稿阶段可留空的字段，由人工指定；确认领料前服务端会校验
+const rules: FormRules = {}
 
 function addLine(): void {
   form.items.push({ material_id: undefined, required_qty: 1, remark: '' })
@@ -70,15 +81,34 @@ function removeLine(index: number): void {
 }
 
 function openCreate(): void {
+  editingId.value = null
   Object.assign(form, {
     req_no: '',
     plan_id: undefined,
     warehouse_id: undefined,
-    req_date: '',
+    req_date: null,
     remark: '',
     items: [],
   })
   addLine()
+  dialogVisible.value = true
+}
+
+function openEdit(row: Requisition): void {
+  editingId.value = row.id
+  Object.assign(form, {
+    req_no: row.req_no,
+    plan_id: row.plan_id ?? undefined,
+    warehouse_id: row.warehouse_id ?? undefined,
+    req_date: row.req_date ?? null,
+    remark: row.remark ?? '',
+    items: row.items.map((item) => ({
+      material_id: item.material_id,
+      required_qty: toNumber(item.required_qty),
+      remark: item.remark ?? '',
+    })),
+  })
+  if (form.items.length === 0) addLine()
   dialogVisible.value = true
 }
 
@@ -95,19 +125,30 @@ async function submit(): Promise<void> {
   }
   submitting.value = true
   try {
-    await createRequisition({
-      req_no: form.req_no || null,
-      plan_id: form.plan_id ?? null,
-      warehouse_id: form.warehouse_id ?? null,
-      req_date: form.req_date,
-      remark: form.remark || null,
-      items: form.items.map((item) => ({
-        material_id: item.material_id,
-        required_qty: item.required_qty,
-        remark: item.remark || null,
-      })),
-    })
-    ElMessage.success('领料单已新增')
+    const items = form.items.map((item) => ({
+      material_id: item.material_id,
+      required_qty: item.required_qty,
+      remark: item.remark || null,
+    }))
+    if (editingId.value === null) {
+      await createRequisition({
+        req_no: form.req_no || null,
+        plan_id: form.plan_id ?? null,
+        warehouse_id: form.warehouse_id ?? null,
+        req_date: form.req_date || null,
+        remark: form.remark || null,
+        items,
+      })
+      ElMessage.success('领料单已新增')
+    } else {
+      await updateRequisition(editingId.value, {
+        warehouse_id: form.warehouse_id ?? null,
+        req_date: form.req_date || null,
+        remark: form.remark || null,
+        items,
+      })
+      ElMessage.success('领料单已修改')
+    }
     dialogVisible.value = false
     await load()
   } catch (error) {
@@ -137,6 +178,61 @@ async function doCancel(row: Requisition): Promise<void> {
   }
 }
 
+// ---------------- 删除（仅草稿 / 已取消可删） ----------------
+const selection = ref<Requisition[]>([])
+
+function onSelectionChange(rows: Requisition[]): void {
+  selection.value = rows
+}
+
+function isDeletable(row: Requisition): boolean {
+  return ['DRAFT', 'CANCELLED'].includes(row.status)
+}
+
+async function remove(row: Requisition): Promise<void> {
+  try {
+    await ElMessageBox.confirm(`确认删除领料单「${row.req_no}」？`, '删除确认', {
+      type: 'warning',
+    })
+  } catch {
+    return
+  }
+  try {
+    await deleteRequisition(row.id)
+    ElMessage.success('领料单已删除')
+    await load()
+  } catch (error) {
+    ElMessage.error((error as Error).message)
+  }
+}
+
+async function removeSelected(): Promise<void> {
+  const ids = selection.value.map((item) => item.id)
+  if (!ids.length) return
+  try {
+    await ElMessageBox.confirm(`确认删除选中的 ${ids.length} 张领料单？`, '批量删除确认', {
+      type: 'warning',
+    })
+  } catch {
+    return
+  }
+  try {
+    const result = await batchDeleteRequisitions(ids)
+    if (result.skipped.length) {
+      ElMessage.warning(
+        `已删除 ${result.deleted_count} 条，${result.skipped.length} 条未删除：${result.skipped
+          .map((item) => item.reason)
+          .join('；')}`,
+      )
+    } else {
+      ElMessage.success(`已删除 ${result.deleted_count} 张领料单`)
+    }
+    await load()
+  } catch (error) {
+    ElMessage.error((error as Error).message)
+  }
+}
+
 onMounted(load)
 </script>
 
@@ -147,6 +243,10 @@ onMounted(load)
         <div class="table-toolbar">
           <span class="page-title">领料单</span>
           <span class="table-toolbar__spacer" />
+          <el-button :disabled="!selection.length" type="danger" plain @click="removeSelected">
+            删除选中
+          </el-button>
+          <el-button @click="generateRef?.open()">按计划生成</el-button>
           <el-button type="primary" @click="openCreate">新增领料单</el-button>
         </div>
       </template>
@@ -171,7 +271,14 @@ onMounted(load)
         </el-form-item>
       </el-form>
 
-      <el-table v-loading="loading" :data="rows" border size="small">
+      <el-table
+        v-loading="loading"
+        :data="rows"
+        border
+        size="small"
+        @selection-change="onSelectionChange"
+      >
+        <el-table-column type="selection" width="44" :selectable="isDeletable" />
         <el-table-column type="expand">
           <template #default="{ row }">
             <el-table class="nested-table" :data="row.items" border size="small">
@@ -184,14 +291,24 @@ onMounted(load)
           </template>
         </el-table-column>
         <el-table-column label="领料单号" prop="req_no" min-width="150" />
+        <el-table-column label="来源" width="90">
+          <template #default="{ row }"><StatusTag :status="row.source_type" /></template>
+        </el-table-column>
         <el-table-column label="作业计划ID" prop="plan_id" width="110" align="right" />
-        <el-table-column label="领料仓库ID" prop="warehouse_id" width="110" align="right" />
-        <el-table-column label="领料日期" prop="req_date" width="110" />
+        <el-table-column label="领料仓库ID" prop="warehouse_id" width="110" align="right">
+          <template #default="{ row }">{{ row.warehouse_id ?? '待指定' }}</template>
+        </el-table-column>
+        <el-table-column label="领料日期" prop="req_date" width="110">
+          <template #default="{ row }">{{ row.req_date || '待填写' }}</template>
+        </el-table-column>
         <el-table-column label="状态" width="90">
           <template #default="{ row }"><StatusTag :status="row.status" /></template>
         </el-table-column>
-        <el-table-column label="操作" width="170" fixed="right">
+        <el-table-column label="操作" width="300" fixed="right">
           <template #default="{ row }">
+            <el-button v-if="row.status === 'DRAFT'" link type="primary" @click="openEdit(row)">
+              编辑
+            </el-button>
             <el-button v-if="row.status === 'DRAFT'" link type="primary" @click="doConfirm(row)">
               确认领料
             </el-button>
@@ -203,7 +320,8 @@ onMounted(load)
             >
               取消
             </el-button>
-            <span v-if="!['DRAFT', 'CONFIRMED'].includes(row.status)">-</span>
+            <el-button v-if="isDeletable(row)" link type="danger" @click="remove(row)">删除</el-button>
+            <span v-if="!['DRAFT', 'CONFIRMED', 'CANCELLED'].includes(row.status)">-</span>
           </template>
         </el-table-column>
         <template #empty>暂无领料单数据</template>
@@ -222,22 +340,34 @@ onMounted(load)
       </div>
     </el-card>
 
-    <el-dialog v-model="dialogVisible" title="新增领料单" width="900px">
+    <el-dialog v-model="dialogVisible" :title="editingId === null ? '新增领料单' : '编辑领料单'" width="900px">
       <el-form ref="formRef" :model="form" :rules="rules" label-width="110px">
         <el-row :gutter="12">
           <el-col :span="12">
             <el-form-item label="领料单号">
-              <el-input v-model="form.req_no" placeholder="留空自动生成" />
+              <el-input v-model="form.req_no" :disabled="editingId !== null" placeholder="留空自动生成" />
             </el-form-item>
           </el-col>
           <el-col :span="12">
             <el-form-item label="领料日期" prop="req_date">
-              <el-date-picker v-model="form.req_date" type="date" value-format="YYYY-MM-DD" style="width: 100%" />
+              <el-date-picker
+                v-model="form.req_date"
+                type="date"
+                value-format="YYYY-MM-DD"
+                placeholder="确认领料前必填"
+                style="width: 100%"
+              />
             </el-form-item>
           </el-col>
           <el-col :span="12">
             <el-form-item label="作业计划">
-              <RemoteSelect v-model="form.plan_id" :loader="loadPlanOptions" placeholder="可选" style="width: 100%" />
+              <RemoteSelect
+                v-model="form.plan_id"
+                :loader="loadPlanOptions"
+                :disabled="editingId !== null"
+                placeholder="可选"
+                style="width: 100%"
+              />
             </el-form-item>
           </el-col>
           <el-col :span="12">
@@ -245,7 +375,7 @@ onMounted(load)
               <RemoteSelect
                 v-model="form.warehouse_id"
                 :loader="loadWarehouseOptions"
-                placeholder="可选"
+                placeholder="可留空后补填"
                 style="width: 100%"
               />
             </el-form-item>
@@ -291,6 +421,8 @@ onMounted(load)
         <el-button type="primary" :loading="submitting" @click="submit">保存</el-button>
       </template>
     </el-dialog>
+
+    <GenerateFromPlansDialog ref="generateRef" mode="requisition" @generated="load" />
   </div>
 </template>
 
