@@ -35,7 +35,7 @@ DEFAULT_PASSWORD = "123456"
 
 # (组织编码, 名称, 上级编码, 类型)
 ORGS = [
-    ("CO-001", "大众自动钳制造有限公司", None, "COMPANY"),
+    ("CO-001", "大牛技术有限公司", None, "COMPANY"),
     ("DEP-ADMIN", "总经办", "CO-001", "DEPARTMENT"),
     ("DEP-DESIGN", "设计部", "CO-001", "DEPARTMENT"),
     ("DEP-PLAN", "计划部", "CO-001", "DEPARTMENT"),
