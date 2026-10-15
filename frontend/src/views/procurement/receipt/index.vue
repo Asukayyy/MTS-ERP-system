@@ -21,7 +21,7 @@ const { loading, rows, total, page, pageSize, query, load, search, reset, change
 
 async function loadOrderOptions(keyword: string): Promise<RemoteOption[]> {
   const data = await listPurchaseOrders({ keyword, page: 1, page_size: 50 })
-  return data.items.map((item) => ({ id: item.id, label: `${item.order_no} · 供应商${item.supplier_id}` }))
+  return data.items.map((item) => ({ id: item.id, label: `${item.order_no} · 供应商${item.supplier_name || item.supplier_id}` }))
 }
 
 async function loadWarehouseOptions(keyword: string): Promise<RemoteOption[]> {

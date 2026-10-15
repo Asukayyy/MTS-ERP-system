@@ -187,19 +187,28 @@ def test_purchase_plan_from_mrp_results(db: Session) -> None:
     assert first["plan_no"].startswith("PP")
 
     plan = service.get_plan(db, first["plan_id"])
-    assert len(plan["items"]) == 1
-    item = plan["items"][0]
+    # 按 source_reference_id 精确定位本次生成的明细，不依赖计划总条数
+    items = [
+        it
+        for it in plan["items"]
+        if it["source_type"] == "MRP" and it["source_reference_id"] == result_id
+    ]
+    assert len(items) == 1
+    item = items[0]
     assert item["material_id"] == material_id
     assert item["required_qty"] == Decimal("30.0000")
     assert item["required_date"] == required_date
-    assert item["source_type"] == "MRP"
-    assert item["source_reference_id"] == result_id
 
     # 幂等：再次受理同一结果，复用同一计划且不新增行
     second = procurement_contract.create_purchase_plan_from_mrp(db, [result_id])
     db.commit()
     assert second["plan_id"] == first["plan_id"]
-    assert len(service.get_plan(db, first["plan_id"])["items"]) == 1
+    items2 = [
+        it
+        for it in service.get_plan(db, first["plan_id"])["items"]
+        if it["source_type"] == "MRP" and it["source_reference_id"] == result_id
+    ]
+    assert len(items2) == 1
 
 
 # ==================== 4. 从库存补库需求生成采购计划 ====================
@@ -245,25 +254,36 @@ def test_purchase_plan_from_replenishment(
     first = procurement_contract.create_purchase_plan_from_replenishment(db, request_id)
     db.commit()
     plan = service.get_plan(db, first["plan_id"])
-    assert len(plan["items"]) == 1
-    item = plan["items"][0]
-    assert item["source_type"] == "REORDER"
-    assert item["source_reference_id"] == request_id
+    # 按 source_reference_id 精确定位本次生成的明细，不依赖计划总条数
+    # （共享库基线可能存在其他 DRAFT 计划明细，按来源精筛使断言不受基线影响）
+    items = [
+        it
+        for it in plan["items"]
+        if it["source_type"] == "REORDER" and it["source_reference_id"] == request_id
+    ]
+    assert len(items) == 1
+    item = items[0]
     assert item["required_qty"] == Decimal("25.0000")
     assert item["material_id"] == material_id
 
     second = procurement_contract.create_purchase_plan_from_replenishment(db, request_id)
     db.commit()
     assert second["plan_id"] == first["plan_id"]
-    assert len(service.get_plan(db, first["plan_id"])["items"]) == 1
+    # 幂等：重复受理同一来源不新增明细
+    items2 = [
+        it
+        for it in service.get_plan(db, first["plan_id"])["items"]
+        if it["source_type"] == "REORDER" and it["source_reference_id"] == request_id
+    ]
+    assert len(items2) == 1
 
 
 # ==================== 5. 由计划生成订单 + 回写 ordered_qty ====================
 
 
 def test_order_from_plan_writes_back_ordered_qty(db: Session) -> None:
-    """按计划生成 DRAFT 订单：单价取供货价，预计到货日未填时取下单日期，回写计划行已下单数量。"""
-    material_id = _create_material(db)
+    """按计划生成 DRAFT 订单：单价取供货价，预计到货日=下单日期+物料提前期，回写计划行已下单数量。"""
+    material_id = _create_material(db, lead_time_days=7)
     supplier = _create_supplier(db)
     service.create_supplier_material(
         db,
@@ -296,10 +316,70 @@ def test_order_from_plan_writes_back_ordered_qty(db: Session) -> None:
     assert order["items"][0]["quantity"] == Decimal("20.0000")
     assert order["items"][0]["unit_price"] == Decimal("7.50")
     assert order["total_amount"] == Decimal("150.00")
-    assert order["expected_date"] == order["order_date"]
+    assert order["expected_date"] == order["order_date"] + timedelta(days=7)
 
     refreshed = service.get_plan(db, plan["id"])
     assert refreshed["items"][0]["ordered_qty"] == Decimal("20.0000")
+
+
+def test_order_from_plan_uses_max_material_lead_time(db: Session) -> None:
+    """多物料计划：预计到货日取各行物料提前期的最大值（来自 sys_material，非供货关系）。"""
+    m_short = _create_material(db, lead_time_days=3)
+    m_long = _create_material(db, lead_time_days=10)
+    supplier = _create_supplier(db)
+    plan = service.create_plan(
+        db,
+        items=[
+            {
+                "material_id": m_short,
+                "required_qty": Decimal("5"),
+                "required_date": date.today() + timedelta(days=20),
+                "source_type": "MANUAL",
+            },
+            {
+                "material_id": m_long,
+                "required_qty": Decimal("8"),
+                "required_date": date.today() + timedelta(days=20),
+                "source_type": "MANUAL",
+            },
+        ],
+    )
+    db.commit()
+    service.set_plan_status(db, plan["id"], "CONFIRMED")
+    db.commit()
+
+    order = service.create_order_from_plan(db, plan_id=plan["id"], supplier_id=supplier["id"])
+    db.commit()
+
+    assert order["expected_date"] == order["order_date"] + timedelta(days=10)
+
+
+def test_order_from_plan_explicit_expected_date_wins(db: Session) -> None:
+    """显式传入预计到货日时优先使用，不用提前期推算。"""
+    material_id = _create_material(db, lead_time_days=10)
+    supplier = _create_supplier(db)
+    plan = service.create_plan(
+        db,
+        items=[
+            {
+                "material_id": material_id,
+                "required_qty": Decimal("5"),
+                "required_date": date.today() + timedelta(days=20),
+                "source_type": "MANUAL",
+            }
+        ],
+    )
+    db.commit()
+    service.set_plan_status(db, plan["id"], "CONFIRMED")
+    db.commit()
+
+    explicit = date.today() + timedelta(days=2)
+    order = service.create_order_from_plan(
+        db, plan_id=plan["id"], supplier_id=supplier["id"], expected_date=explicit
+    )
+    db.commit()
+
+    assert order["expected_date"] == explicit
 
 
 # ==================== 6. 到货确认（调用库存入库） ====================
