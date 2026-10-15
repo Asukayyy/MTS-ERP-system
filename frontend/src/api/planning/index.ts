@@ -4,6 +4,7 @@ import type {
   CompletionReport,
   Demand,
   DispatchOrder,
+  GenerationResult,
   Mps,
   MpsImportPreview,
   MrpExplain,
@@ -173,6 +174,18 @@ export function setDispatchOrderStatus(id: number, status: string): Promise<Disp
   return patch<DispatchOrder>(`/planning/dispatch-orders/${id}/status`, { status })
 }
 
+/** 人工审核调整派工单（仅 DRAFT 可改） */
+export function updateDispatchOrder(id: number, payload: Record<string, unknown>): Promise<DispatchOrder> {
+  return patch<DispatchOrder>(`/planning/dispatch-orders/${id}`, payload)
+}
+
+/** 按选中的生产作业计划逐工序生成派工单 */
+export function generateDispatchOrdersFromPlans(
+  planIds: number[],
+): Promise<GenerationResult> {
+  return post<GenerationResult>('/planning/dispatch-orders/from-plans', { plan_ids: planIds })
+}
+
 // ---------------- 领料单 ----------------
 
 export function listRequisitions(params: Record<string, unknown> = {}): Promise<PageData<Requisition>> {
@@ -191,6 +204,22 @@ export function cancelRequisition(id: number): Promise<Requisition> {
   return post<Requisition>(`/planning/requisitions/${id}/cancel`)
 }
 
+/** 人工审核调整领料单（仅 DRAFT 可改，items 传入则整表替换） */
+export function updateRequisition(id: number, payload: Record<string, unknown>): Promise<Requisition> {
+  return patch<Requisition>(`/planning/requisitions/${id}`, payload)
+}
+
+/** 按选中的生产作业计划的 BOM 子件生成领料单 */
+export function generateRequisitionsFromPlans(
+  planIds: number[],
+  warehouseId?: number | null,
+): Promise<GenerationResult> {
+  return post<GenerationResult>('/planning/requisitions/from-plans', {
+    plan_ids: planIds,
+    warehouse_id: warehouseId ?? null,
+  })
+}
+
 // ---------------- 完工报告 ----------------
 
 export function listCompletionReports(params: Record<string, unknown> = {}): Promise<PageData<CompletionReport>> {
@@ -207,4 +236,16 @@ export function confirmCompletionReport(id: number): Promise<CompletionReport> {
 
 export function cancelCompletionReport(id: number): Promise<CompletionReport> {
   return post<CompletionReport>(`/planning/completion-reports/${id}/cancel`)
+}
+
+/** 人工补填完工报告（仅 DRAFT 可改） */
+export function updateCompletionReport(id: number, payload: Record<string, unknown>): Promise<CompletionReport> {
+  return patch<CompletionReport>(`/planning/completion-reports/${id}`, payload)
+}
+
+/** 按选中的生产作业计划生成完工报告 */
+export function generateCompletionReportsFromPlans(
+  planIds: number[],
+): Promise<GenerationResult> {
+  return post<GenerationResult>('/planning/completion-reports/from-plans', { plan_ids: planIds })
 }

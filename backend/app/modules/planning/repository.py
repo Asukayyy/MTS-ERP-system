@@ -133,9 +133,19 @@ def delete_mps_items(db: Session, mps_id: int) -> None:
 
 
 def next_no(db: Session, model, field_name: str, prefix: str) -> str:
-    """生成业务单号：`<prefix><6位序号>`。仅用于演示级单号，真实场景应走独立序列。"""
+    """生成业务单号：`<prefix><6位序号>`。仅用于演示级单号，真实场景应走独立序列。
+
+    以表内行数为基准递增，并向后探测直到单号未被占用：
+    历史单据被删除会留下编号空洞（如 {DEM000001, DEM000003}），
+    若只用 `行数+1` 会取出已存在的单号而撞唯一键。
+    """
+    column = getattr(model, field_name)
     total = count_all(db, model)
-    return f"{prefix}{total + 1:06d}"
+    for offset in range(1, 1001):
+        candidate = f"{prefix}{total + offset:06d}"
+        if not exists_by_field(db, model, field_name, candidate):
+            return candidate
+    raise RuntimeError(f"无法为 {model.__tablename__}.{column} 生成唯一单号")
 
 
 def exists_by_field(db: Session, model, field_name: str, value) -> bool:
@@ -322,6 +332,22 @@ def find_plan_by_source(
     )
 
 
+def get_production_plans_by_ids(
+    db: Session, plan_ids: Sequence[int]
+) -> List[models.PlnProductionPlan]:
+    """批量取生产作业计划（按 id 升序，缺失的 ID 不出现在结果中）。"""
+    ids = [int(i) for i in plan_ids]
+    if not ids:
+        return []
+    return list(
+        db.scalars(
+            select(models.PlnProductionPlan)
+            .where(models.PlnProductionPlan.id.in_(ids))
+            .order_by(models.PlnProductionPlan.id)
+        )
+    )
+
+
 def sum_open_production_qty(db: Session, material_id: int) -> Decimal:
     """某物料未完工的生产数量合计 = Σ(计划数量 - 已完工数量)，终态单据不计。"""
     total = db.scalar(
@@ -371,6 +397,22 @@ def add_dispatch_order(
     return dispatch
 
 
+def list_dispatch_orders_by_source(
+    db: Session, source_type: str, source_reference_id: int
+) -> List[models.PlnDispatchOrder]:
+    """按来源类型 + 来源单据ID 取派工单（按来源幂等判重用）。"""
+    return list(
+        db.scalars(
+            select(models.PlnDispatchOrder)
+            .where(
+                models.PlnDispatchOrder.source_type == source_type,
+                models.PlnDispatchOrder.source_reference_id == source_reference_id,
+            )
+            .order_by(models.PlnDispatchOrder.id)
+        )
+    )
+
+
 # ==================== 领料单 ====================
 
 
@@ -415,6 +457,18 @@ def add_requisition(
     return req
 
 
+def find_requisition_by_source(
+    db: Session, source_type: str, source_reference_id: int
+) -> Optional[models.PlnMaterialRequisition]:
+    """按来源类型 + 来源单据ID 取领料单（一张计划一张领料单，幂等判重用）。"""
+    return db.scalar(
+        select(models.PlnMaterialRequisition).where(
+            models.PlnMaterialRequisition.source_type == source_type,
+            models.PlnMaterialRequisition.source_reference_id == source_reference_id,
+        )
+    )
+
+
 def add_requisition_item(
     db: Session, item: models.PlnMaterialRequisitionItem
 ) -> models.PlnMaterialRequisitionItem:
@@ -450,6 +504,18 @@ def add_completion_report(
     db.add(report)
     db.flush()
     return report
+
+
+def find_completion_report_by_plan(
+    db: Session, plan_id: int
+) -> Optional[models.PlnCompletionReport]:
+    """按作业计划取未取消的完工报告（一张计划一张完工报告，幂等判重用）。"""
+    return db.scalar(
+        select(models.PlnCompletionReport).where(
+            models.PlnCompletionReport.plan_id == plan_id,
+            models.PlnCompletionReport.status != "CANCELLED",
+        )
+    )
 
 
 # ==================== 事务 ====================

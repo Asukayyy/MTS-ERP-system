@@ -21,6 +21,7 @@ from sqlalchemy import (
     Date,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     Numeric,
     String,
@@ -309,10 +310,18 @@ class PlnDispatchOrder(Base, AuditMixin):
 
     id: Mapped[BigIntPk]
     dispatch_no: Mapped[CodeStr] = mapped_column(unique=True, comment="派工单号")
+    source_type: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="MANUAL", comment="来源 MANUAL/PLAN"
+    )
+    source_reference_id: Mapped[Optional[int]] = mapped_column(
+        Integer, nullable=True, comment="来源单据ID（PLAN 来源时为 pln_production_plan.id）"
+    )
     plan_id: Mapped[Optional[BigIntFk]] = mapped_column(
         ForeignKey("pln_production_plan.id", ondelete="RESTRICT"), nullable=True, index=True, comment="生产作业计划ID"
     )
-    operation: Mapped[Optional[str]] = mapped_column(String(60), nullable=True, comment="工序")
+    operation: Mapped[Optional[str]] = mapped_column(
+        String(100), nullable=True, comment="工序（工艺路线工序名称，最长 100）"
+    )
     planned_qty: Mapped[Decimal] = mapped_column(
         Numeric(18, 4), nullable=False, comment="派工数量"
     )
@@ -322,8 +331,12 @@ class PlnDispatchOrder(Base, AuditMixin):
     worker_id: Mapped[Optional[BigIntFk]] = mapped_column(
         ForeignKey("sys_personnel.id", ondelete="RESTRICT"), nullable=True, index=True, comment="作业人员（sys_personnel.id）"
     )
-    planned_start: Mapped[date] = mapped_column(Date, nullable=False, comment="计划开始日期")
-    planned_end: Mapped[date] = mapped_column(Date, nullable=False, comment="计划结束日期")
+    planned_start: Mapped[Optional[date]] = mapped_column(
+        Date, nullable=True, comment="计划开始日期（草稿可留空，确认前必填）"
+    )
+    planned_end: Mapped[Optional[date]] = mapped_column(
+        Date, nullable=True, comment="计划结束日期（草稿可留空，确认前必填）"
+    )
     status: Mapped[str] = mapped_column(
         String(20), nullable=False, default="DRAFT", index=True, comment="状态"
     )
@@ -336,6 +349,8 @@ class PlnDispatchOrder(Base, AuditMixin):
             "status IN ('DRAFT','CONFIRMED','RELEASED','IN_PROGRESS','COMPLETED','CANCELLED')",
             name="ck_pln_dispatch_status",
         ),
+        CheckConstraint("source_type IN ('MANUAL','PLAN')", name="ck_pln_dispatch_source"),
+        Index("ix_pln_dispatch_order_source", "source_type", "source_reference_id"),
     )
 
 
@@ -346,13 +361,21 @@ class PlnMaterialRequisition(Base, AuditMixin):
 
     id: Mapped[BigIntPk]
     req_no: Mapped[CodeStr] = mapped_column(unique=True, comment="领料单号")
+    source_type: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="MANUAL", comment="来源 MANUAL/PLAN"
+    )
+    source_reference_id: Mapped[Optional[int]] = mapped_column(
+        Integer, nullable=True, comment="来源单据ID（PLAN 来源时为 pln_production_plan.id）"
+    )
     plan_id: Mapped[Optional[BigIntFk]] = mapped_column(
         ForeignKey("pln_production_plan.id", ondelete="RESTRICT"), nullable=True, index=True, comment="生产作业计划ID"
     )
     warehouse_id: Mapped[Optional[BigIntFk]] = mapped_column(
         ForeignKey("inv_warehouse.id", ondelete="RESTRICT"), nullable=True, comment="领料仓库ID"
     )
-    req_date: Mapped[date] = mapped_column(Date, nullable=False, comment="领料日期")
+    req_date: Mapped[Optional[date]] = mapped_column(
+        Date, nullable=True, comment="领料日期（草稿可留空，确认前必填）"
+    )
     status: Mapped[str] = mapped_column(
         String(20), nullable=False, default="DRAFT", index=True, comment="状态"
     )
@@ -367,6 +390,8 @@ class PlnMaterialRequisition(Base, AuditMixin):
             "status IN ('DRAFT','CONFIRMED','RELEASED','IN_PROGRESS','COMPLETED','CANCELLED')",
             name="ck_pln_requisition_status",
         ),
+        CheckConstraint("source_type IN ('MANUAL','PLAN')", name="ck_pln_requisition_source"),
+        Index("ix_pln_material_requisition_source", "source_type", "source_reference_id"),
     )
 
 
@@ -426,10 +451,14 @@ class PlnCompletionReport(Base, AuditMixin):
     scrap_qty: Mapped[Decimal] = mapped_column(
         Numeric(18, 4), nullable=False, default=0, comment="报废数量"
     )
-    warehouse_id: Mapped[BigIntFk] = mapped_column(
-        ForeignKey("inv_warehouse.id", ondelete="RESTRICT"), nullable=False, comment="入库仓库ID"
+    warehouse_id: Mapped[Optional[BigIntFk]] = mapped_column(
+        ForeignKey("inv_warehouse.id", ondelete="RESTRICT"),
+        nullable=True,
+        comment="入库仓库ID（草稿可留空，确认前必填）",
     )
-    report_date: Mapped[date] = mapped_column(Date, nullable=False, comment="报工日期")
+    report_date: Mapped[Optional[date]] = mapped_column(
+        Date, nullable=True, comment="报工日期（草稿可留空，确认前必填）"
+    )
     status: Mapped[str] = mapped_column(
         String(20), nullable=False, default="DRAFT", index=True, comment="状态"
     )

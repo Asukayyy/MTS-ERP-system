@@ -484,3 +484,536 @@ def test_mps_import_preview_reports_unknown_material(db: Session) -> None:
     assert preview["summary"]["valid_count"] == 0
     assert preview["summary"]["error_count"] == 1
     assert "不存在" in preview["errors"][0]["message"]
+
+
+# ==================== 附加：补库需求导入只受理转计划 ====================
+
+
+def _create_replenishment_request(
+    db: Session, material_id: int, warehouse_id: int, source_type: str
+) -> tuple[int, str]:
+    """直接写入已下达的补库需求单，返回 (ID, 单号)。"""
+    request_no = f"RPL{_tag()}"
+    db.execute(
+        text(
+            "INSERT INTO inv_replenishment_request (request_no, material_id, warehouse_id, "
+            "request_qty, current_qty, target_qty, required_date, source_type, status, "
+            "created_at, updated_at) "
+            "VALUES (:no, :m, :w, 8, 0, 8, :rd, :st, 'RELEASED', NOW(), NOW())"
+        ),
+        {
+            "no": request_no,
+            "m": material_id,
+            "w": warehouse_id,
+            "rd": date.today(),
+            "st": source_type,
+        },
+    )
+    db.commit()
+    request_id = int(
+        db.execute(
+            text("SELECT id FROM inv_replenishment_request WHERE request_no = :c"),
+            {"c": request_no},
+        ).scalar()
+    )
+    return request_id, request_no
+
+
+def test_import_demands_from_replenishment_only_takes_production(db: Session) -> None:
+    """批量导入补库需求：只受理转计划（PRODUCTION），转采购（REORDER）不得进入计划模块。"""
+    material_id, _ = _create_material(db)
+    warehouse_id = _create_warehouse(db)
+    production_id, production_no = _create_replenishment_request(
+        db, material_id, warehouse_id, "PRODUCTION"
+    )
+    reorder_id, _ = _create_replenishment_request(db, material_id, warehouse_id, "REORDER")
+
+    result = service.import_demands_from_replenishment(db)
+    db.commit()
+
+    imported = {
+        int(demand.source_reference_id): demand
+        for demand in (service.get_demand(db, demand_id) for demand_id in result["demand_ids"])
+    }
+    assert production_id in imported, "转计划的补库需求应生成计划需求"
+    assert reorder_id not in imported, "转采购的补库需求不应生成计划需求"
+
+    production_demand = imported[production_id]
+    assert production_demand.source_type == "STOCKFILL"
+    assert production_demand.source_no == production_no
+
+    # 单条导入同样拒绝转采购的补库需求
+    with pytest.raises(BusinessException) as exc:
+        service.create_demand_from_replenishment(db, reorder_id)
+    assert exc.value.code == 3000
+    db.rollback()
+
+
+# ==================== 附加：按生产作业计划生成派工单 / 领料单 ====================
+
+
+def _create_routing(db: Session, material_id: int, operations) -> int:
+    """写入生效工艺路线头 + 工序行。`operations` = [(seq, code, name, work_center)]。"""
+    routing_code = f"RT{_tag()}"
+    db.execute(
+        text(
+            "INSERT INTO sys_routing (routing_code, material_id, routing_version, status, "
+            "created_at, updated_at) VALUES (:c, :m, 'V1.0', 'ACTIVE', NOW(), NOW())"
+        ),
+        {"c": routing_code, "m": material_id},
+    )
+    db.commit()
+    routing_id = int(
+        db.execute(
+            text("SELECT id FROM sys_routing WHERE routing_code = :c"),
+            {"c": routing_code},
+        ).scalar()
+    )
+    for seq, code, name, work_center in operations:
+        _add_routing_operation(db, routing_id, seq, code, name, work_center)
+    return routing_id
+
+
+def _add_routing_operation(
+    db: Session,
+    routing_id: int,
+    sequence_no: int,
+    operation_code: str,
+    operation_name: str,
+    work_center: str = "WC1",
+) -> None:
+    db.execute(
+        text(
+            "INSERT INTO sys_routing_operation (routing_id, sequence_no, operation_code, "
+            "operation_name, work_center, setup_time, run_time, created_at, updated_at) "
+            "VALUES (:r, :seq, :oc, :on, :wc, 0, 0, NOW(), NOW())"
+        ),
+        {
+            "r": routing_id,
+            "seq": sequence_no,
+            "oc": operation_code,
+            "on": operation_name,
+            "wc": work_center,
+        },
+    )
+    db.commit()
+
+
+def _make_make_plan(db: Session, material_id: int, qty=10, days: int = 2):
+    """建一张 DRAFT 生产作业计划（自制件），返回 plan。"""
+    today = date.today()
+    plan = service.create_production_plan(
+        db,
+        material_id=material_id,
+        planned_qty=Decimal(str(qty)),
+        plan_date=today,
+        start_date=today,
+        end_date=today + timedelta(days=days),
+    )
+    db.commit()
+    return plan
+
+
+def test_generate_dispatch_orders_one_per_operation(db: Session) -> None:
+    """按工艺路线逐工序生成：工序数 = 派工单数，日期与人员留空待人工填写。"""
+    material_id, _ = _create_material(db, supply_type="MAKE", material_type="FINISHED")
+    _create_routing(
+        db,
+        material_id,
+        [
+            (10, "OP10", "下料", "WC1"),
+            (20, "OP20", "焊接", "WC2"),
+            (30, "OP30", "喷涂", "WC3"),
+        ],
+    )
+    plan = _make_make_plan(db, material_id, qty=10, days=2)
+
+    result = service.create_dispatch_orders_from_plans(db, [plan.id])
+    db.commit()
+
+    assert result["created_count"] == 3
+    assert result["skipped_count"] == 0
+    assert result["errors"] == []
+    assert len(result["ids"]) == 3
+
+    rows, _total = service.list_dispatch_orders(db, plan_id=plan.id)
+    assert len(rows) == 3
+    assert {row.operation for row in rows} == {"下料", "焊接", "喷涂"}
+    for row in rows:
+        assert row.status == "DRAFT"
+        assert row.source_type == "PLAN"
+        assert row.source_reference_id == plan.id
+        assert row.planned_qty == Decimal("10.0000")
+        assert row.completed_qty == Decimal("0.0000")
+        # 需人工指定的字段留空：日期与作业人员
+        assert row.worker_id is None
+        assert row.planned_start is None
+        assert row.planned_end is None
+
+
+def test_generate_dispatch_orders_blank_dates_block_confirm(db: Session) -> None:
+    """留空日期的预填草稿不能直接确认；补齐日期后即可流转。"""
+    material_id, _ = _create_material(db, supply_type="MAKE", material_type="FINISHED")
+    _create_routing(db, material_id, [(10, "OP10", "下料", "WC1")])
+    plan = _make_make_plan(db, material_id, qty=5, days=1)
+    service.create_dispatch_orders_from_plans(db, [plan.id])
+    db.commit()
+    rows, _total = service.list_dispatch_orders(db, plan_id=plan.id)
+    dispatch = rows[0]
+
+    with pytest.raises(BusinessException) as exc:
+        service.set_dispatch_order_status(db, dispatch.id, "CONFIRMED")
+    assert exc.value.code == 3006
+    db.rollback()
+
+    service.update_dispatch_order(
+        db,
+        dispatch.id,
+        schemas.DispatchOrderUpdate(
+            planned_start=plan.start_date, planned_end=plan.end_date
+        ),
+    )
+    db.commit()
+    confirmed = service.set_dispatch_order_status(db, dispatch.id, "CONFIRMED")
+    db.commit()
+    assert confirmed.status == "CONFIRMED"
+    assert confirmed.planned_start == plan.start_date
+    assert confirmed.planned_end == plan.end_date
+
+
+def test_generate_dispatch_orders_is_idempotent(db: Session) -> None:
+    """重放同一请求：不新增派工单，计入 skipped。"""
+    material_id, _ = _create_material(db, supply_type="MAKE", material_type="FINISHED")
+    _create_routing(
+        db,
+        material_id,
+        [(10, "OP10", "下料", "WC1"), (20, "OP20", "焊接", "WC2")],
+    )
+    plan = _make_make_plan(db, material_id)
+
+    first = service.create_dispatch_orders_from_plans(db, [plan.id])
+    db.commit()
+    replay = service.create_dispatch_orders_from_plans(db, [plan.id])
+    db.commit()
+
+    assert first["created_count"] == 2
+    assert replay["created_count"] == 0
+    assert replay["ids"] == []
+    assert replay["skipped_count"] == 1
+    assert replay["skipped"][0]["plan_id"] == plan.id
+    rows, _total = service.list_dispatch_orders(db, plan_id=plan.id)
+    assert len(rows) == 2
+
+
+def test_generate_dispatch_orders_only_adds_new_operation(db: Session) -> None:
+    """工艺路线新增工序后再生成：只补新增那一道，已存在的工序精准跳过。"""
+    material_id, _ = _create_material(db, supply_type="MAKE", material_type="FINISHED")
+    routing_id = _create_routing(
+        db,
+        material_id,
+        [(10, "OP10", "下料", "WC1"), (20, "OP20", "焊接", "WC2")],
+    )
+    plan = _make_make_plan(db, material_id)
+    service.create_dispatch_orders_from_plans(db, [plan.id])
+    db.commit()
+
+    _add_routing_operation(db, routing_id, 30, "OP30", "喷涂", "WC3")
+    result = service.create_dispatch_orders_from_plans(db, [plan.id])
+    db.commit()
+
+    assert result["created_count"] == 1
+    assert result["skipped_count"] == 0
+    rows, _total = service.list_dispatch_orders(db, plan_id=plan.id)
+    assert len(rows) == 3
+    assert {row.operation for row in rows} == {"下料", "焊接", "喷涂"}
+
+
+def test_generate_dispatch_orders_without_routing_reports_error(db: Session) -> None:
+    """无生效工艺路线：该计划不建单，errors 带计划号与物料编码。"""
+    material_id, code = _create_material(db, supply_type="MAKE", material_type="FINISHED")
+    plan = _make_make_plan(db, material_id)
+
+    result = service.create_dispatch_orders_from_plans(db, [plan.id, 999999999])
+    db.commit()
+
+    assert result["created_count"] == 0
+    assert len(result["errors"]) == 2
+    reasons = {error["plan_id"]: error for error in result["errors"]}
+    assert reasons[plan.id]["plan_no"] == plan.plan_no
+    assert reasons[plan.id]["material_code"] == code
+    assert "工艺路线" in reasons[plan.id]["reason"]
+    assert "不存在" in reasons[999999999]["reason"]
+    rows, _total = service.list_dispatch_orders(db, plan_id=plan.id)
+    assert rows == []
+
+
+def test_generate_requisitions_quantity_and_aggregation(db: Session) -> None:
+    """领料数量 = 子件用量 × 计划量 × (1+损耗)。
+
+    注：`sys_bom_item` 唯一键为 (bom_id, material_id)，同一子件在同一层 BOM 只会出现一行，
+    故此处按两个子件断言；service 侧的按物料聚合是为多行场景预留的兜底。
+    """
+    parent_id, _ = _create_material(db, supply_type="MAKE", material_type="FINISHED")
+    child_a, _ = _create_material(db)
+    child_b, _ = _create_material(db)
+    _create_bom(
+        db,
+        parent_id,
+        [
+            (child_a, Decimal("2"), 0, Decimal("0.1")),
+            (child_b, Decimal("5"), 0, Decimal("0")),
+        ],
+    )
+    warehouse_id = _create_warehouse(db)
+    plan = _make_make_plan(db, parent_id, qty=10, days=2)
+
+    result = service.create_requisitions_from_plans(
+        db, [plan.id], warehouse_id=warehouse_id
+    )
+    db.commit()
+
+    assert result["created_count"] == 1
+    req = service.get_requisition(db, result["ids"][0])
+    assert req.source_type == "PLAN"
+    assert req.source_reference_id == plan.id
+    assert req.warehouse_id == warehouse_id
+    assert req.status == "DRAFT"
+    # 领料日期留空，交由人工指定
+    assert req.req_date is None
+
+    by_material = {item.material_id: item.required_qty for item in req.items}
+    assert len(by_material) == 2
+    # 2×10×1.1 = 22
+    assert by_material[child_a] == Decimal("22.0000")
+    # 5×10×1 = 50
+    assert by_material[child_b] == Decimal("50.0000")
+
+
+def test_generate_requisitions_skips_without_bom_and_existing(db: Session) -> None:
+    """领料生成：无 BOM 计 errors，已生成过计 skipped。"""
+    no_bom_id, no_bom_code = _create_material(
+        db, supply_type="MAKE", material_type="FINISHED"
+    )
+    plan_no_bom = _make_make_plan(db, no_bom_id)
+    result = service.create_requisitions_from_plans(db, [plan_no_bom.id])
+    db.commit()
+    assert result["created_count"] == 0
+    assert result["skipped_count"] == 0
+    assert result["errors"][0]["material_code"] == no_bom_code
+    assert "BOM" in result["errors"][0]["reason"]
+
+    parent_id, _ = _create_material(db, supply_type="MAKE", material_type="FINISHED")
+    child_id, _ = _create_material(db)
+    _create_bom(db, parent_id, [(child_id, Decimal("1"), 0, Decimal("0"))])
+    plan = _make_make_plan(db, parent_id, qty=3)
+
+    first = service.create_requisitions_from_plans(db, [plan.id])
+    db.commit()
+    replay = service.create_requisitions_from_plans(db, [plan.id])
+    db.commit()
+
+    assert first["created_count"] == 1
+    assert replay["created_count"] == 0
+    assert replay["skipped_count"] == 1
+    assert replay["skipped"][0]["plan_id"] == plan.id
+
+
+def test_update_dispatch_order_and_requisition_draft_only(db: Session) -> None:
+    """人工审核调整：DRAFT 可改，非 DRAFT 报 3006；领料明细整表替换。"""
+    material_id, _ = _create_material(db, supply_type="MAKE", material_type="FINISHED")
+    today = date.today()
+    dispatch = service.create_dispatch_order(
+        db,
+        planned_qty=Decimal("5"),
+        planned_start=today,
+        planned_end=today + timedelta(days=1),
+        operation="下料",
+    )
+    db.commit()
+
+    updated = service.update_dispatch_order(
+        db,
+        dispatch.id,
+        schemas.DispatchOrderUpdate(
+            operation="精加工",
+            planned_qty=Decimal("8"),
+            planned_end=today + timedelta(days=3),
+        ),
+    )
+    db.commit()
+    assert updated.operation == "精加工"
+    assert updated.planned_qty == Decimal("8.0000")
+    assert updated.planned_end == today + timedelta(days=3)
+
+    # 作业人员不存在 → 3003
+    with pytest.raises(BusinessException) as exc:
+        service.update_dispatch_order(
+            db, dispatch.id, schemas.DispatchOrderUpdate(worker_id=999999999)
+        )
+    assert exc.value.code == 3003
+    db.rollback()
+
+    # 非 DRAFT 不可改 → 3006
+    service.set_dispatch_order_status(db, dispatch.id, "CONFIRMED")
+    db.commit()
+    with pytest.raises(BusinessException) as exc:
+        service.update_dispatch_order(
+            db, dispatch.id, schemas.DispatchOrderUpdate(planned_qty=Decimal("9"))
+        )
+    assert exc.value.code == 3006
+    db.rollback()
+
+    # 领料单：明细整表替换
+    child_a, _ = _create_material(db)
+    child_b, _ = _create_material(db)
+    warehouse_id = _create_warehouse(db)
+    req = service.create_requisition(
+        db,
+        req_date=today,
+        items=[{"material_id": child_a, "required_qty": Decimal("4")}],
+    )
+    db.commit()
+    assert len(req.items) == 1
+
+    replaced = service.update_requisition(
+        db,
+        req.id,
+        schemas.RequisitionUpdate(
+            warehouse_id=warehouse_id,
+            req_date=today + timedelta(days=1),
+            items=[
+                schemas.RequisitionItemUpdate(material_id=child_a, required_qty=Decimal("7")),
+                schemas.RequisitionItemUpdate(material_id=child_b, required_qty=Decimal("2")),
+            ],
+        ),
+    )
+    db.commit()
+    assert replaced.warehouse_id == warehouse_id
+    assert replaced.req_date == today + timedelta(days=1)
+    assert len(replaced.items) == 2
+    assert {item.material_id: item.required_qty for item in replaced.items}[child_a] == Decimal(
+        "7.0000"
+    )
+
+    # 非 DRAFT 领料单不可改 → 3006
+    _add_stock(db, child_a, warehouse_id, 20)
+    _add_stock(db, child_b, warehouse_id, 20)
+    service.confirm_requisition(db, req.id)
+    db.commit()
+    with pytest.raises(BusinessException) as exc:
+        service.update_requisition(
+            db, req.id, schemas.RequisitionUpdate(remark="禁止修改")
+        )
+    assert exc.value.code == 3006
+    db.rollback()
+
+
+def test_generate_requisition_blank_warehouse_blocks_confirm(db: Session) -> None:
+    """预填草稿未指定仓库/日期不能确认；人工补填后可确认出库。"""
+    parent_id, _ = _create_material(db, supply_type="MAKE", material_type="FINISHED")
+    child_id, _ = _create_material(db)
+    _create_bom(db, parent_id, [(child_id, Decimal("2"), 0, Decimal("0"))])
+    warehouse_id = _create_warehouse(db)
+    plan = _make_make_plan(db, parent_id, qty=4)
+
+    # 生成时不传仓库：仓库与日期均留空
+    result = service.create_requisitions_from_plans(db, [plan.id])
+    db.commit()
+    req = service.get_requisition(db, result["ids"][0])
+    assert req.warehouse_id is None
+    assert req.req_date is None
+
+    with pytest.raises(BusinessException) as exc:
+        service.confirm_requisition(db, req.id)
+    assert exc.value.code == 3000
+    db.rollback()
+
+    # 人工补填仓库（日期仍缺）→ 仍不能确认
+    service.update_requisition(
+        db, req.id, schemas.RequisitionUpdate(warehouse_id=warehouse_id)
+    )
+    db.commit()
+    with pytest.raises(BusinessException) as exc:
+        service.confirm_requisition(db, req.id)
+    assert exc.value.code == 3000
+    db.rollback()
+
+    # 补齐日期后确认成功
+    _add_stock(db, child_id, warehouse_id, 20)
+    service.update_requisition(db, req.id, schemas.RequisitionUpdate(req_date=date.today()))
+    db.commit()
+    confirmed = service.confirm_requisition(db, req.id)
+    db.commit()
+    assert confirmed.status == "COMPLETED"
+    assert confirmed.req_date == date.today()
+
+
+def test_generate_completion_reports_prefilled_blank_manual_fields(db: Session) -> None:
+    """按计划生成完工报告：产出物料与剩余数量预填，报工日期/入库仓库留空，且幂等。"""
+    material_id, _ = _create_material(db, supply_type="MAKE", material_type="FINISHED")
+    plan = _make_make_plan(db, material_id, qty=6)
+
+    result = service.create_completion_reports_from_plans(db, [plan.id])
+    db.commit()
+
+    assert result["created_count"] == 1
+    assert result["skipped_count"] == 0
+    assert result["errors"] == []
+
+    report = service.get_completion_report(db, result["ids"][0])
+    assert report.plan_id == plan.id
+    assert report.dispatch_id is None
+    assert report.material_id == material_id
+    assert report.completed_qty == Decimal("6.0000")
+    assert report.qualified_qty == Decimal("6.0000")
+    assert report.scrap_qty == Decimal("0.0000")
+    assert report.warehouse_id is None
+    assert report.report_date is None
+    assert report.status == "DRAFT"
+
+    # 幂等：同一计划再次生成只跳过，不新增报告
+    again = service.create_completion_reports_from_plans(db, [plan.id])
+    db.commit()
+    assert again["created_count"] == 0
+    assert again["skipped"][0]["reason"] == "该计划已生成完工报告"
+
+
+def test_generate_completion_report_blank_fields_block_confirm(db: Session) -> None:
+    """预填草稿未指定报工日期/入库仓库不能确认；人工补填后确认入库并回写计划。"""
+    material_id, _ = _create_material(db, supply_type="MAKE", material_type="FINISHED")
+    warehouse_id = _create_warehouse(db)
+    plan = _make_make_plan(db, material_id, qty=3)
+
+    result = service.create_completion_reports_from_plans(db, [plan.id])
+    db.commit()
+    report = service.get_completion_report(db, result["ids"][0])
+    assert report.warehouse_id is None
+    assert report.report_date is None
+
+    with pytest.raises(BusinessException) as exc:
+        service.confirm_completion_report(db, report.id)
+    assert exc.value.code == 3000
+    db.rollback()
+
+    # 人工只补仓库（日期仍缺）→ 仍不能确认
+    service.update_completion_report(
+        db, report.id, schemas.CompletionReportUpdate(warehouse_id=warehouse_id)
+    )
+    db.commit()
+    with pytest.raises(BusinessException) as exc:
+        service.confirm_completion_report(db, report.id)
+    assert exc.value.code == 3000
+    db.rollback()
+
+    # 补齐报工日期后确认成功：合格数量入库，并回写作业计划已完工数量
+    service.update_completion_report(
+        db, report.id, schemas.CompletionReportUpdate(report_date=date.today())
+    )
+    db.commit()
+    confirmed = service.confirm_completion_report(db, report.id)
+    db.commit()
+    assert confirmed.status == "COMPLETED"
+    assert confirmed.report_date == date.today()
+
+    db.refresh(plan)
+    assert plan.completed_qty == Decimal("3.0000")

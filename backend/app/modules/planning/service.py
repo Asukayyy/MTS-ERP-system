@@ -12,8 +12,9 @@
 
 import calendar
 import json
+from collections import Counter
 from datetime import date, datetime, timedelta
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
@@ -29,6 +30,7 @@ from app.modules.planning import models, repository
 from app.modules.system.contract import (
     find_material_by_code,
     get_active_bom_children,
+    get_active_routing_operations,
     get_material,
     get_materials,
     get_personnel,
@@ -340,7 +342,8 @@ def create_demand_from_replenishment(
 ) -> models.PlnDemand:
     """由库存补库需求生成 `source_type=STOCKFILL` 的计划需求。
 
-    补库需求通过 `inventory.contract` 读取（惰性导入）。
+    仅受理**转计划**（`source_type=PRODUCTION`）的补库需求；`REORDER` 属于转采购，
+    归 Procurement 受理。补库需求通过 `inventory.contract` 读取（惰性导入）。
     """
     try:
         from app.modules.inventory import contract as inventory_contract  # type: ignore
@@ -357,6 +360,12 @@ def create_demand_from_replenishment(
         if isinstance(request, Mapping):
             return request.get(name, default)
         return getattr(request, name, default)
+
+    if _field("source_type") != "PRODUCTION":
+        raise BusinessException(
+            CODE_PARAM_INVALID,
+            "该补库需求来源为转采购（REORDER），应由采购模块受理，计划模块只受理转计划需求",
+        )
 
     return create_demand(
         db,
@@ -377,7 +386,9 @@ def import_demands_from_replenishment(
     """把库存补库需求批量拉取为 `source_type=STOCKFILL` 的计划需求（已导入的跳过）。
 
     补库需求通过 `inventory.contract.list_replenishment_requests`（惰性导入）批量读取，
-    只拉取已确认 / 已下达（CONFIRMED / RELEASED）的需求，避免把未确认的草稿提前纳入计划。
+    只拉取**转计划**（`source_type=PRODUCTION`）且已确认 / 已下达（CONFIRMED / RELEASED）
+    的需求：`REORDER` 属于转采购，归 Procurement 受理，不由计划模块导入；
+    同时跳过未确认的草稿，避免把未定稿的需求提前纳入计划。
     """
     try:
         from app.modules.inventory import contract as inventory_contract  # type: ignore
@@ -393,7 +404,7 @@ def import_demands_from_replenishment(
         page=1,
         page_size=200,
         status=None,
-        source_type=None,
+        source_type="PRODUCTION",
         material_id=None,
     )
     created_ids: List[int] = []
@@ -1362,8 +1373,8 @@ def create_dispatch_order(
     db: Session,
     *,
     planned_qty: Decimal,
-    planned_start: date,
-    planned_end: date,
+    planned_start: Optional[date] = None,
+    planned_end: Optional[date] = None,
     plan_id: Optional[int] = None,
     operation: Optional[str] = None,
     worker_id: Optional[int] = None,
@@ -1371,11 +1382,15 @@ def create_dispatch_order(
     remark: Optional[str] = None,
     operator_id: Optional[int] = None,
 ) -> models.PlnDispatchOrder:
-    """新增派工单；`worker_id` 指向 `sys_personnel.id` 并通过 system 契约校验。"""
+    """新增派工单；`worker_id` 指向 `sys_personnel.id` 并通过 system 契约校验。
+
+    日期允许留空：派工单以 DRAFT 预填草稿形态存在，日期与作业人员由人工指定，
+    确认（进入非 DRAFT 状态）前必须补齐。
+    """
     qty = _as_decimal(planned_qty)
     if qty <= 0:
         raise BusinessException(CODE_PARAM_INVALID, "派工数量必须为正数")
-    if planned_start > planned_end:
+    if planned_start is not None and planned_end is not None and planned_start > planned_end:
         raise BusinessException(CODE_PARAM_INVALID, "计划开始日期不能晚于结束日期")
     if plan_id is not None:
         _require_plan(db, plan_id)
@@ -1407,13 +1422,187 @@ def create_dispatch_order(
     return dispatch
 
 
+def update_dispatch_order(
+    db: Session, dispatch_id: int, payload: Any, operator_id: Optional[int] = None
+) -> models.PlnDispatchOrder:
+    """修改派工单（人工审核调整）：仅 DRAFT 可改。"""
+    dispatch = _require_dispatch(db, dispatch_id)
+    if dispatch.status != "DRAFT":
+        raise BusinessException(
+            CODE_STATUS_INVALID, f"派工单已处于 {dispatch.status}，不允许修改"
+        )
+    data = payload.model_dump(exclude_unset=True)
+    if "planned_qty" in data:
+        qty = _as_decimal(data["planned_qty"])
+        if qty <= 0:
+            raise BusinessException(CODE_PARAM_INVALID, "派工数量必须为正数")
+        dispatch.planned_qty = qty
+    if "operation" in data:
+        dispatch.operation = data["operation"]
+    if "worker_id" in data:
+        worker_id = data["worker_id"]
+        if worker_id is not None and not get_personnel(db, worker_id):
+            raise BusinessException(CODE_NOT_FOUND, f"作业人员不存在：{worker_id}")
+        dispatch.worker_id = worker_id
+    if "planned_start" in data:
+        dispatch.planned_start = data["planned_start"]
+    if "planned_end" in data:
+        dispatch.planned_end = data["planned_end"]
+    if "remark" in data:
+        dispatch.remark = data["remark"]
+    if (
+        dispatch.planned_start is not None
+        and dispatch.planned_end is not None
+        and dispatch.planned_start > dispatch.planned_end
+    ):
+        raise BusinessException(CODE_PARAM_INVALID, "计划开始日期不能晚于结束日期")
+    dispatch.updated_by = operator_id
+    log_operation(
+        db,
+        module=MODULE,
+        action="UPDATE",
+        target_type="pln_dispatch_order",
+        target_id=dispatch.id,
+        operator_id=operator_id,
+        detail=f"修改派工单 {dispatch.dispatch_no}",
+    )
+    return dispatch
+
+
+def create_dispatch_orders_from_plans(
+    db: Session,
+    plan_ids: Sequence[int],
+    operator_id: Optional[int] = None,
+) -> Dict[str, Any]:
+    """按选定的生产作业计划，取物料工艺路线逐工序生成 DRAFT 派工单。
+
+    生成口径：一道工序一张派工单，`operation` 为工序名称、`planned_qty` 为计划数量；
+    **计划开始/结束日期与作业人员留空**，作为预填草稿交由人工指定后再确认。
+    幂等口径：以 `(source_type='PLAN', source_reference_id=plan.id)` 为来源键，
+    对已有单据的工序名称做计数差，**逐工序精准跳过**；全部已存在则整张计划跳过。
+    单条失败不中断批量：缺失计划 / 终态计划 / 无工艺路线均计入 `errors`。
+    """
+    ids = list(dict.fromkeys(int(i) for i in plan_ids))
+    if not ids:
+        raise BusinessException(CODE_PARAM_INVALID, "plan_ids 不能为空")
+    plan_map = {p.id: p for p in repository.get_production_plans_by_ids(db, ids)}
+
+    errors: List[Dict[str, Any]] = []
+    skipped: List[Dict[str, Any]] = []
+    created_ids: List[int] = []
+
+    for plan_id in ids:
+        plan = plan_map.get(plan_id)
+        if plan is None:
+            errors.append(
+                {
+                    "plan_id": plan_id,
+                    "plan_no": None,
+                    "material_code": None,
+                    "reason": "作业计划不存在",
+                }
+            )
+            continue
+        material = get_material(db, plan.material_id)
+        material_code = material["material_code"] if material else None
+        if plan.status in {"COMPLETED", "CANCELLED"}:
+            errors.append(
+                {
+                    "plan_id": plan.id,
+                    "plan_no": plan.plan_no,
+                    "material_code": material_code,
+                    "reason": f"作业计划状态为 {plan.status}，不能生成派工单",
+                }
+            )
+            continue
+
+        operations = get_active_routing_operations(db, plan.material_id)
+        if not operations:
+            errors.append(
+                {
+                    "plan_id": plan.id,
+                    "plan_no": plan.plan_no,
+                    "material_code": material_code,
+                    "reason": "物料未维护生效工艺路线",
+                }
+            )
+            continue
+
+        remaining = Counter(
+            row.operation
+            for row in repository.list_dispatch_orders_by_source(db, "PLAN", plan.id)
+            if row.operation
+        )
+        new_operations = []
+        for operation in operations:
+            name = operation["operation_name"]
+            if remaining[name] > 0:
+                remaining[name] -= 1
+                continue
+            new_operations.append(operation)
+        if not new_operations:
+            skipped.append(
+                {
+                    "plan_id": plan.id,
+                    "plan_no": plan.plan_no,
+                    "reason": "该计划工序均已生成派工单",
+                }
+            )
+            continue
+
+        for operation in new_operations:
+            dispatch = models.PlnDispatchOrder(
+                dispatch_no=_unique_no(
+                    db, models.PlnDispatchOrder, "dispatch_no", None, "DSP"
+                ),
+                source_type="PLAN",
+                source_reference_id=plan.id,
+                plan_id=plan.id,
+                operation=str(operation["operation_name"])[:100],
+                planned_qty=_as_decimal(plan.planned_qty),
+                completed_qty=Decimal("0"),
+                worker_id=None,
+                planned_start=None,
+                planned_end=None,
+                status="DRAFT",
+                remark=f"按计划 {plan.plan_no} 生成，工序顺序 {operation['sequence_no']}",
+                created_by=operator_id,
+            )
+            repository.add_dispatch_order(db, dispatch)
+            created_ids.append(dispatch.id)
+
+    if created_ids:
+        log_operation(
+            db,
+            module=MODULE,
+            action="GENERATE",
+            target_type="pln_dispatch_order",
+            target_id=created_ids[0],
+            operator_id=operator_id,
+            detail=f"按生产作业计划生成派工单 {len(created_ids)} 张",
+        )
+    return {
+        "created_count": len(created_ids),
+        "skipped_count": len(skipped),
+        "errors": errors,
+        "skipped": skipped,
+        "ids": created_ids,
+    }
+
+
 def set_dispatch_order_status(
     db: Session, dispatch_id: int, status: str, operator_id: Optional[int] = None
 ) -> models.PlnDispatchOrder:
-    """派工单状态机。"""
+    """派工单状态机：进入非 DRAFT 状态前必须补齐计划开始/结束日期。"""
     _validate_status(status, _DISPATCH_STATUSES)
     dispatch = _require_dispatch(db, dispatch_id)
     _validate_transition(dispatch.status, status, _MAIN_TRANSITIONS, "派工单")
+    if status != "DRAFT" and (
+        dispatch.planned_start is None or dispatch.planned_end is None
+    ):
+        raise BusinessException(
+            CODE_STATUS_INVALID, "派工单尚未填写计划开始/结束日期，不能确认"
+        )
     dispatch.status = status
     dispatch.updated_by = operator_id
     log_operation(
@@ -1448,15 +1637,15 @@ def get_requisition(db: Session, req_id: int) -> models.PlnMaterialRequisition:
 def create_requisition(
     db: Session,
     *,
-    req_date: date,
     items: Sequence[Mapping[str, Any]],
+    req_date: Optional[date] = None,
     plan_id: Optional[int] = None,
     warehouse_id: Optional[int] = None,
     req_no: Optional[str] = None,
     remark: Optional[str] = None,
     operator_id: Optional[int] = None,
 ) -> models.PlnMaterialRequisition:
-    """新增领料单（头 + 行），默认 DRAFT。"""
+    """新增领料单（头 + 行），默认 DRAFT：领料日期与仓库可留空，确认前必须补齐。"""
     if not items:
         raise BusinessException(CODE_PARAM_INVALID, "领料单至少需要一条明细")
     if plan_id is not None:
@@ -1499,6 +1688,190 @@ def create_requisition(
     return req
 
 
+def update_requisition(
+    db: Session, req_id: int, payload: Any, operator_id: Optional[int] = None
+) -> models.PlnMaterialRequisition:
+    """修改领料单（人工审核调整）：仅 DRAFT 可改；`items` 给定时整表替换。"""
+    req = _require_requisition(db, req_id)
+    if req.status != "DRAFT":
+        raise BusinessException(
+            CODE_STATUS_INVALID, f"领料单已处于 {req.status}，不允许修改"
+        )
+    data = payload.model_dump(exclude_unset=True)
+    if "warehouse_id" in data:
+        req.warehouse_id = data["warehouse_id"]
+    if "req_date" in data:
+        req.req_date = data["req_date"]
+    if "remark" in data:
+        req.remark = data["remark"]
+    if "items" in data:
+        rows = data["items"] or []
+        if not rows:
+            raise BusinessException(CODE_PARAM_INVALID, "领料单至少需要一条明细")
+        for item in repository.get_requisition_items(db, req_id):
+            db.delete(item)
+        db.flush()
+        for raw in rows:
+            material_id = int(raw["material_id"])
+            _require_material(db, material_id)
+            qty = _as_decimal(raw.get("required_qty"))
+            if qty <= 0:
+                raise BusinessException(CODE_PARAM_INVALID, "领料需求数量必须为正数")
+            repository.add_requisition_item(
+                db,
+                models.PlnMaterialRequisitionItem(
+                    requisition_id=req.id,
+                    material_id=material_id,
+                    required_qty=qty,
+                    issued_qty=Decimal("0"),
+                    remark=raw.get("remark"),
+                ),
+            )
+        db.flush()
+        repository.refresh(db, req)
+    req.updated_by = operator_id
+    log_operation(
+        db,
+        module=MODULE,
+        action="UPDATE",
+        target_type="pln_material_requisition",
+        target_id=req.id,
+        operator_id=operator_id,
+        detail=f"修改领料单 {req.req_no}",
+    )
+    return req
+
+
+def create_requisitions_from_plans(
+    db: Session,
+    plan_ids: Sequence[int],
+    operator_id: Optional[int] = None,
+    warehouse_id: Optional[int] = None,
+) -> Dict[str, Any]:
+    """按选定的生产作业计划，取物料生效 BOM 直接子件生成 DRAFT 领料单。
+
+    数量口径：`需求量 = Σ(子件单位用量 × 计划量 × (1 + 损耗率))`，按物料聚合后
+    4 位小数 HALF_UP 舍入。**领料日期留空**（由人工指定）、仓库取调用方传入值（可空），
+    明细按 BOM 预填，均可再修改。
+    幂等口径：一张计划只生成一张领料单（按 `(source_type='PLAN', source_reference_id)`
+    判重）；无生效 BOM / 终态计划 / 计划缺失计入 `errors`，不中断批量。
+    """
+    ids = list(dict.fromkeys(int(i) for i in plan_ids))
+    if not ids:
+        raise BusinessException(CODE_PARAM_INVALID, "plan_ids 不能为空")
+    plan_map = {p.id: p for p in repository.get_production_plans_by_ids(db, ids)}
+
+    errors: List[Dict[str, Any]] = []
+    skipped: List[Dict[str, Any]] = []
+    created_ids: List[int] = []
+
+    for plan_id in ids:
+        plan = plan_map.get(plan_id)
+        if plan is None:
+            errors.append(
+                {
+                    "plan_id": plan_id,
+                    "plan_no": None,
+                    "material_code": None,
+                    "reason": "作业计划不存在",
+                }
+            )
+            continue
+        material = get_material(db, plan.material_id)
+        material_code = material["material_code"] if material else None
+        if plan.status in {"COMPLETED", "CANCELLED"}:
+            errors.append(
+                {
+                    "plan_id": plan.id,
+                    "plan_no": plan.plan_no,
+                    "material_code": material_code,
+                    "reason": f"作业计划状态为 {plan.status}，不能生成领料单",
+                }
+            )
+            continue
+        if repository.find_requisition_by_source(db, "PLAN", plan.id):
+            skipped.append(
+                {
+                    "plan_id": plan.id,
+                    "plan_no": plan.plan_no,
+                    "reason": "该计划已生成领料单",
+                }
+            )
+            continue
+
+        children = get_active_bom_children(
+            db, plan.material_id, on_date=plan.start_date
+        )
+        if not children:
+            errors.append(
+                {
+                    "plan_id": plan.id,
+                    "plan_no": plan.plan_no,
+                    "material_code": material_code,
+                    "reason": "物料未维护生效 BOM",
+                }
+            )
+            continue
+
+        planned_qty = _as_decimal(plan.planned_qty)
+        totals: Dict[int, Decimal] = {}
+        for child in children:
+            child_id = int(child["child_material_id"])
+            amount = (
+                _as_decimal(child["quantity"])
+                * planned_qty
+                * (Decimal("1") + _as_decimal(child["scrap_rate"]))
+            )
+            totals[child_id] = totals.get(child_id, Decimal("0")) + amount
+
+        req = models.PlnMaterialRequisition(
+            req_no=_unique_no(
+                db, models.PlnMaterialRequisition, "req_no", None, "REQ"
+            ),
+            source_type="PLAN",
+            source_reference_id=plan.id,
+            plan_id=plan.id,
+            warehouse_id=warehouse_id,
+            req_date=None,
+            status="DRAFT",
+            remark=f"按计划 {plan.plan_no} 生成",
+            created_by=operator_id,
+        )
+        repository.add_requisition(db, req)
+        for child_id, amount in totals.items():
+            qty = amount.quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+            if qty <= 0:
+                qty = Decimal("0.0001")
+            repository.add_requisition_item(
+                db,
+                models.PlnMaterialRequisitionItem(
+                    requisition_id=req.id,
+                    material_id=child_id,
+                    required_qty=qty,
+                    issued_qty=Decimal("0"),
+                ),
+            )
+        created_ids.append(req.id)
+
+    if created_ids:
+        log_operation(
+            db,
+            module=MODULE,
+            action="GENERATE",
+            target_type="pln_material_requisition",
+            target_id=created_ids[0],
+            operator_id=operator_id,
+            detail=f"按生产作业计划生成领料单 {len(created_ids)} 张",
+        )
+    return {
+        "created_count": len(created_ids),
+        "skipped_count": len(skipped),
+        "errors": errors,
+        "skipped": skipped,
+        "ids": created_ids,
+    }
+
+
 def confirm_requisition(
     db: Session, req_id: int, operator_id: Optional[int] = None
 ) -> models.PlnMaterialRequisition:
@@ -1511,6 +1884,8 @@ def confirm_requisition(
         raise BusinessException(CODE_STATUS_INVALID, f"领料单当前状态为 {req.status}，不能确认")
     if req.warehouse_id is None:
         raise BusinessException(CODE_PARAM_INVALID, "领料单未指定领料仓库，不能确认")
+    if req.req_date is None:
+        raise BusinessException(CODE_PARAM_INVALID, "领料单未指定领料日期，不能确认")
     items = repository.get_requisition_items(db, req_id)
     if not items:
         raise BusinessException(CODE_PARAM_INVALID, "领料单没有明细，不能确认")
@@ -1590,8 +1965,8 @@ def create_completion_report(
     material_id: int,
     completed_qty: Decimal,
     qualified_qty: Decimal,
-    warehouse_id: int,
-    report_date: date,
+    warehouse_id: Optional[int] = None,
+    report_date: Optional[date] = None,
     plan_id: Optional[int] = None,
     dispatch_id: Optional[int] = None,
     scrap_qty: Decimal = Decimal("0"),
@@ -1599,7 +1974,11 @@ def create_completion_report(
     remark: Optional[str] = None,
     operator_id: Optional[int] = None,
 ) -> models.PlnCompletionReport:
-    """新增完工报告（默认 DRAFT），确认后才入库。"""
+    """新增完工报告（默认 DRAFT），确认后才入库。
+
+    报工日期与入库仓库可留空：按计划生成的完工报告以 DRAFT 预填草稿形态存在，
+    确认（入库）前必须补齐，由 `confirm_completion_report` 校验。
+    """
     _require_material(db, material_id)
     if plan_id is not None:
         _require_plan(db, plan_id)
@@ -1641,6 +2020,160 @@ def create_completion_report(
     return report
 
 
+def update_completion_report(
+    db: Session, report_id: int, payload: Any, operator_id: Optional[int] = None
+) -> models.PlnCompletionReport:
+    """修改完工报告（人工补填）：仅 DRAFT 可改，未传字段不改。"""
+    report = _require_completion(db, report_id)
+    if report.status != "DRAFT":
+        raise BusinessException(
+            CODE_STATUS_INVALID, f"完工报告已处于 {report.status}，不允许修改"
+        )
+    data = payload.model_dump(exclude_unset=True)
+    if "dispatch_id" in data:
+        dispatch_id = data["dispatch_id"]
+        if dispatch_id is not None:
+            _require_dispatch(db, dispatch_id)
+        report.dispatch_id = dispatch_id
+    if "completed_qty" in data:
+        report.completed_qty = _as_decimal(data["completed_qty"])
+    if "qualified_qty" in data:
+        report.qualified_qty = _as_decimal(data["qualified_qty"])
+    if "scrap_qty" in data:
+        report.scrap_qty = _as_decimal(data["scrap_qty"])
+    if "warehouse_id" in data:
+        report.warehouse_id = data["warehouse_id"]
+    if "report_date" in data:
+        report.report_date = data["report_date"]
+    if "remark" in data:
+        report.remark = data["remark"]
+    completed = _as_decimal(report.completed_qty)
+    qualified = _as_decimal(report.qualified_qty)
+    scrap = _as_decimal(report.scrap_qty)
+    if completed <= 0:
+        raise BusinessException(CODE_PARAM_INVALID, "完工数量必须为正数")
+    if qualified < 0 or scrap < 0:
+        raise BusinessException(CODE_PARAM_INVALID, "合格数量与报废数量不能为负")
+    if qualified > completed:
+        raise BusinessException(CODE_PARAM_INVALID, "合格数量不能大于完工数量")
+    report.updated_by = operator_id
+    log_operation(
+        db,
+        module=MODULE,
+        action="UPDATE",
+        target_type="pln_completion_report",
+        target_id=report.id,
+        operator_id=operator_id,
+        detail=f"修改完工报告 {report.report_no}",
+    )
+    return report
+
+
+def create_completion_reports_from_plans(
+    db: Session,
+    plan_ids: Sequence[int],
+    operator_id: Optional[int] = None,
+) -> Dict[str, Any]:
+    """按选定的生产作业计划生成 DRAFT 完工报告（预填草稿）。
+
+    预填口径：产出物料取计划的产出物料、`completed_qty` 取「计划数量 − 已完工数量」
+    （剩余数量），`qualified_qty` 预填同值、`scrap_qty` 预填 0（均为假设值，可再修改）；
+    **报工日期与入库仓库留空**由人工指定，派工单关联一并留空（一张计划对应多道工序，
+    无法推导）。一张计划只生成一张完工报告（按 `plan_id` 取未取消报告判重）；
+    计划缺失 / 已取消计入 `errors`，已生成过 / 无剩余数量计入 `skipped`，不中断批量。
+    """
+    ids = list(dict.fromkeys(int(i) for i in plan_ids))
+    if not ids:
+        raise BusinessException(CODE_PARAM_INVALID, "plan_ids 不能为空")
+    plan_map = {p.id: p for p in repository.get_production_plans_by_ids(db, ids)}
+
+    errors: List[Dict[str, Any]] = []
+    skipped: List[Dict[str, Any]] = []
+    created_ids: List[int] = []
+
+    for plan_id in ids:
+        plan = plan_map.get(plan_id)
+        if plan is None:
+            errors.append(
+                {
+                    "plan_id": plan_id,
+                    "plan_no": None,
+                    "material_code": None,
+                    "reason": "作业计划不存在",
+                }
+            )
+            continue
+        material = get_material(db, plan.material_id)
+        material_code = material["material_code"] if material else None
+        if plan.status == "CANCELLED":
+            errors.append(
+                {
+                    "plan_id": plan.id,
+                    "plan_no": plan.plan_no,
+                    "material_code": material_code,
+                    "reason": "作业计划已取消，不能生成完工报告",
+                }
+            )
+            continue
+        if repository.find_completion_report_by_plan(db, plan.id):
+            skipped.append(
+                {
+                    "plan_id": plan.id,
+                    "plan_no": plan.plan_no,
+                    "reason": "该计划已生成完工报告",
+                }
+            )
+            continue
+
+        remaining = _as_decimal(plan.planned_qty) - _as_decimal(plan.completed_qty)
+        if remaining <= 0:
+            skipped.append(
+                {
+                    "plan_id": plan.id,
+                    "plan_no": plan.plan_no,
+                    "reason": "该计划已完工，无剩余数量",
+                }
+            )
+            continue
+
+        report = models.PlnCompletionReport(
+            report_no=_unique_no(
+                db, models.PlnCompletionReport, "report_no", None, "CRP"
+            ),
+            plan_id=plan.id,
+            dispatch_id=None,
+            material_id=plan.material_id,
+            completed_qty=remaining,
+            qualified_qty=remaining,
+            scrap_qty=Decimal("0"),
+            warehouse_id=None,
+            report_date=None,
+            status="DRAFT",
+            remark=f"按计划 {plan.plan_no} 生成",
+            created_by=operator_id,
+        )
+        repository.add_completion_report(db, report)
+        created_ids.append(report.id)
+
+    if created_ids:
+        log_operation(
+            db,
+            module=MODULE,
+            action="GENERATE",
+            target_type="pln_completion_report",
+            target_id=created_ids[0],
+            operator_id=operator_id,
+            detail=f"按生产作业计划生成完工报告 {len(created_ids)} 张",
+        )
+    return {
+        "created_count": len(created_ids),
+        "skipped_count": len(skipped),
+        "errors": errors,
+        "skipped": skipped,
+        "ids": created_ids,
+    }
+
+
 def confirm_completion_report(
     db: Session, report_id: int, operator_id: Optional[int] = None
 ) -> models.PlnCompletionReport:
@@ -1649,6 +2182,10 @@ def confirm_completion_report(
     report = _require_completion(db, report_id)
     if report.status != "DRAFT":
         raise BusinessException(CODE_STATUS_INVALID, f"完工报告当前状态为 {report.status}，不能确认")
+    if report.warehouse_id is None:
+        raise BusinessException(CODE_PARAM_INVALID, "完工报告未指定入库仓库，不能确认")
+    if report.report_date is None:
+        raise BusinessException(CODE_PARAM_INVALID, "完工报告未指定报工日期，不能确认")
     qualified = _as_decimal(report.qualified_qty)
     if qualified <= 0:
         raise BusinessException(CODE_PARAM_INVALID, "合格数量为 0，无需入库")
