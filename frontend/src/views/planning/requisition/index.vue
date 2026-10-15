@@ -1,13 +1,15 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 
 import { listWarehouses } from '@/api/inventory'
 import {
+  batchDeleteRequisitions,
   cancelRequisition,
   confirmRequisition,
   createRequisition,
+  deleteRequisition,
   listRequisitions,
   listProductionPlans,
   updateRequisition,
@@ -176,6 +178,61 @@ async function doCancel(row: Requisition): Promise<void> {
   }
 }
 
+// ---------------- 删除（仅草稿 / 已取消可删） ----------------
+const selection = ref<Requisition[]>([])
+
+function onSelectionChange(rows: Requisition[]): void {
+  selection.value = rows
+}
+
+function isDeletable(row: Requisition): boolean {
+  return ['DRAFT', 'CANCELLED'].includes(row.status)
+}
+
+async function remove(row: Requisition): Promise<void> {
+  try {
+    await ElMessageBox.confirm(`确认删除领料单「${row.req_no}」？`, '删除确认', {
+      type: 'warning',
+    })
+  } catch {
+    return
+  }
+  try {
+    await deleteRequisition(row.id)
+    ElMessage.success('领料单已删除')
+    await load()
+  } catch (error) {
+    ElMessage.error((error as Error).message)
+  }
+}
+
+async function removeSelected(): Promise<void> {
+  const ids = selection.value.map((item) => item.id)
+  if (!ids.length) return
+  try {
+    await ElMessageBox.confirm(`确认删除选中的 ${ids.length} 张领料单？`, '批量删除确认', {
+      type: 'warning',
+    })
+  } catch {
+    return
+  }
+  try {
+    const result = await batchDeleteRequisitions(ids)
+    if (result.skipped.length) {
+      ElMessage.warning(
+        `已删除 ${result.deleted_count} 条，${result.skipped.length} 条未删除：${result.skipped
+          .map((item) => item.reason)
+          .join('；')}`,
+      )
+    } else {
+      ElMessage.success(`已删除 ${result.deleted_count} 张领料单`)
+    }
+    await load()
+  } catch (error) {
+    ElMessage.error((error as Error).message)
+  }
+}
+
 onMounted(load)
 </script>
 
@@ -186,6 +243,9 @@ onMounted(load)
         <div class="table-toolbar">
           <span class="page-title">领料单</span>
           <span class="table-toolbar__spacer" />
+          <el-button :disabled="!selection.length" type="danger" plain @click="removeSelected">
+            删除选中
+          </el-button>
           <el-button @click="generateRef?.open()">按计划生成</el-button>
           <el-button type="primary" @click="openCreate">新增领料单</el-button>
         </div>
@@ -211,7 +271,14 @@ onMounted(load)
         </el-form-item>
       </el-form>
 
-      <el-table v-loading="loading" :data="rows" border size="small">
+      <el-table
+        v-loading="loading"
+        :data="rows"
+        border
+        size="small"
+        @selection-change="onSelectionChange"
+      >
+        <el-table-column type="selection" width="44" :selectable="isDeletable" />
         <el-table-column type="expand">
           <template #default="{ row }">
             <el-table class="nested-table" :data="row.items" border size="small">
@@ -237,7 +304,7 @@ onMounted(load)
         <el-table-column label="状态" width="90">
           <template #default="{ row }"><StatusTag :status="row.status" /></template>
         </el-table-column>
-        <el-table-column label="操作" width="230" fixed="right">
+        <el-table-column label="操作" width="300" fixed="right">
           <template #default="{ row }">
             <el-button v-if="row.status === 'DRAFT'" link type="primary" @click="openEdit(row)">
               编辑
@@ -253,7 +320,8 @@ onMounted(load)
             >
               取消
             </el-button>
-            <span v-if="!['DRAFT', 'CONFIRMED'].includes(row.status)">-</span>
+            <el-button v-if="isDeletable(row)" link type="danger" @click="remove(row)">删除</el-button>
+            <span v-if="!['DRAFT', 'CONFIRMED', 'CANCELLED'].includes(row.status)">-</span>
           </template>
         </el-table-column>
         <template #empty>暂无领料单数据</template>

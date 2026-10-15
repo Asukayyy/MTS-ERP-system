@@ -61,6 +61,10 @@ _DISPATCH_STATUSES = {"DRAFT", "CONFIRMED", "RELEASED", "IN_PROGRESS", "COMPLETE
 _REQUISITION_STATUSES = {"DRAFT", "CONFIRMED", "RELEASED", "IN_PROGRESS", "COMPLETED", "CANCELLED"}
 _COMPLETION_STATUSES = {"DRAFT", "CONFIRMED", "COMPLETED", "CANCELLED"}
 
+#: 可物理删除的状态：仅草稿与已取消。
+#: 已确认/已发布/进行中/已完成不可删（只能取消）；已写库存流水的单据更不可删。
+_DELETABLE_STATUSES = {"DRAFT", "CANCELLED"}
+
 #: 主单据状态机 DRAFT → CONFIRMED → RELEASED → IN_PROGRESS → COMPLETED（+ CANCELLED）
 _MAIN_TRANSITIONS: Dict[str, set] = {
     "DRAFT": {"CONFIRMED", "CANCELLED"},
@@ -198,6 +202,15 @@ def _require_completion(db: Session, report_id: int) -> models.PlnCompletionRepo
     if not report:
         raise BusinessException(CODE_NOT_FOUND, f"完工报告不存在：{report_id}")
     return report
+
+
+def _ensure_deletable(status: str, label: str) -> None:
+    """删除前置校验：仅 DRAFT / CANCELLED 可物理删除，其余状态报状态机错误。"""
+    if status not in _DELETABLE_STATUSES:
+        raise BusinessException(
+            CODE_STATUS_INVALID,
+            f"{label}当前状态为 {status}，只有草稿或已取消的记录可以删除",
+        )
 
 
 def _unique_no(
@@ -1317,6 +1330,36 @@ def set_production_plan_status(
     return plan
 
 
+def delete_production_plan(
+    db: Session, plan_id: int, operator_id: Optional[int] = None
+) -> None:
+    """删除生产作业计划：仅 DRAFT / CANCELLED 可删，且须先清空下游引用。
+
+    `pln_dispatch_order` / `pln_material_requisition` / `pln_completion_report`
+    均以 `plan_id` 外键（RESTRICT）引用本计划，存在下游单据时拒绝删除并提示
+    按「完工报告 → 派工单/领料单 → 作业计划」的顺序先行清理。
+    """
+    plan = _require_plan(db, plan_id)
+    _ensure_deletable(plan.status, "生产作业计划")
+    if repository.count_dispatch_orders_by_plan(db, plan_id):
+        raise BusinessException(CODE_PARAM_INVALID, "该作业计划已生成派工单，请先删除相关派工单")
+    if repository.count_requisitions_by_plan(db, plan_id):
+        raise BusinessException(CODE_PARAM_INVALID, "该作业计划已生成领料单，请先删除相关领料单")
+    if repository.count_completion_reports_by_plan(db, plan_id):
+        raise BusinessException(CODE_PARAM_INVALID, "该作业计划已生成完工报告，请先删除相关完工报告")
+    number = plan.plan_no
+    db.delete(plan)
+    log_operation(
+        db,
+        module=MODULE,
+        action="DELETE",
+        target_type="pln_production_plan",
+        target_id=plan_id,
+        operator_id=operator_id,
+        detail=f"删除生产作业计划 {number}",
+    )
+
+
 def create_production_plans_from_mrp(
     db: Session, mrp_result_ids: Sequence[int], operator_id: Optional[int] = None
 ) -> List[models.PlnProductionPlan]:
@@ -1615,6 +1658,30 @@ def set_dispatch_order_status(
         detail=f"派工单 {dispatch.dispatch_no} 状态改为 {status}",
     )
     return dispatch
+
+
+def delete_dispatch_order(
+    db: Session, dispatch_id: int, operator_id: Optional[int] = None
+) -> None:
+    """删除派工单：仅 DRAFT / CANCELLED 可删，且须先清空被完工报告引用。
+
+    完工报告以 `dispatch_id` 外键（RESTRICT）引用本派工单，存在引用时拒绝删除。
+    """
+    dispatch = _require_dispatch(db, dispatch_id)
+    _ensure_deletable(dispatch.status, "派工单")
+    if repository.count_completion_reports_by_dispatch(db, dispatch_id):
+        raise BusinessException(CODE_PARAM_INVALID, "该派工单已被完工报告引用，请先删除相关完工报告")
+    number = dispatch.dispatch_no
+    db.delete(dispatch)
+    log_operation(
+        db,
+        module=MODULE,
+        action="DELETE",
+        target_type="pln_dispatch_order",
+        target_id=dispatch_id,
+        operator_id=operator_id,
+        detail=f"删除派工单 {number}",
+    )
 
 
 # ==================== 领料单 ====================
@@ -1942,6 +2009,27 @@ def cancel_requisition(
     return req
 
 
+def delete_requisition(db: Session, req_id: int, operator_id: Optional[int] = None) -> None:
+    """删除领料单：仅 DRAFT / CANCELLED 可删，明细行一并显式清理。
+
+    已确认（COMPLETED）的领料单已写库存出库流水，不可删除。
+    """
+    req = _require_requisition(db, req_id)
+    _ensure_deletable(req.status, "领料单")
+    number = req.req_no
+    repository.delete_requisition_items(db, req_id)
+    db.delete(req)
+    log_operation(
+        db,
+        module=MODULE,
+        action="DELETE",
+        target_type="pln_material_requisition",
+        target_id=req_id,
+        operator_id=operator_id,
+        detail=f"删除领料单 {number}",
+    )
+
+
 # ==================== 完工报告 ====================
 
 
@@ -2245,6 +2333,58 @@ def cancel_completion_report(
         detail=f"取消完工报告 {report.report_no}",
     )
     return report
+
+
+def delete_completion_report(
+    db: Session, report_id: int, operator_id: Optional[int] = None
+) -> None:
+    """删除完工报告：仅 DRAFT / CANCELLED 可删。
+
+    已确认（COMPLETED）的完工报告已写库存入库流水并回写计划/派工已完工数量，不可删除。
+    """
+    report = _require_completion(db, report_id)
+    _ensure_deletable(report.status, "完工报告")
+    number = report.report_no
+    db.delete(report)
+    log_operation(
+        db,
+        module=MODULE,
+        action="DELETE",
+        target_type="pln_completion_report",
+        target_id=report_id,
+        operator_id=operator_id,
+        detail=f"删除完工报告 {number}",
+    )
+
+
+# ---------------- 批量删除 ----------------
+
+
+def batch_delete(
+    db: Session,
+    ids: Sequence[int],
+    deleter,
+    operator_id: Optional[int] = None,
+) -> Dict[str, Any]:
+    """通用批量删除：对每个 ID 调用单删函数，单条失败不中断并收集原因。
+
+    `deleter` 为对应资源的单删函数（签名 `(db, id, operator_id)`）。
+    失败原因来自 `BusinessException`（状态不允许 / 存在下游引用 / 不存在），
+    返回 `{deleted_count, skipped:[{id, reason}]}`；批内重复 ID 已去重。
+    """
+    unique_ids = list(dict.fromkeys(int(i) for i in ids))
+    if not unique_ids:
+        raise BusinessException(CODE_PARAM_INVALID, "ids 不能为空")
+    skipped: List[Dict[str, Any]] = []
+    deleted_count = 0
+    for record_id in unique_ids:
+        try:
+            deleter(db, record_id, operator_id)
+        except BusinessException as exc:
+            skipped.append({"id": record_id, "reason": exc.message})
+            continue
+        deleted_count += 1
+    return {"deleted_count": deleted_count, "skipped": skipped}
 
 
 # ==================== 统计 ====================

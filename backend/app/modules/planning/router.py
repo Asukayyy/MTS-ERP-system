@@ -483,6 +483,32 @@ def set_production_plan_status(
     return success(plan)
 
 
+@router.delete(
+    "/production-plans/{plan_id}",
+    response_model=ApiResponse[dict],
+    summary="删除生产作业计划",
+)
+def delete_production_plan(plan_id: int, db: Session = Depends(get_db)) -> ApiResponse[dict]:
+    """删除作业计划：仅草稿 / 已取消可删，须先删除其派工单 / 领料单 / 完工报告。"""
+    service.delete_production_plan(db, plan_id)
+    db.commit()
+    return success({"deleted": True})
+
+
+@router.post(
+    "/production-plans/batch-delete",
+    response_model=ApiResponse[schemas.BatchDeleteResultOut],
+    summary="批量删除生产作业计划",
+)
+def batch_delete_production_plans(
+    payload: schemas.BatchDeleteRequest, db: Session = Depends(get_db)
+) -> ApiResponse[schemas.BatchDeleteResultOut]:
+    """批量删除作业计划：逐条校验，失败条目不中断并返回原因。"""
+    result = service.batch_delete(db, payload.ids, service.delete_production_plan)
+    db.commit()
+    return success(result)
+
+
 # ==================== 派工单 ====================
 
 
@@ -586,6 +612,32 @@ def set_dispatch_order_status(
     dispatch = service.set_dispatch_order_status(db, dispatch_id, payload.status)
     db.commit()
     return success(dispatch)
+
+
+@router.delete(
+    "/dispatch-orders/{dispatch_id}",
+    response_model=ApiResponse[dict],
+    summary="删除派工单",
+)
+def delete_dispatch_order(dispatch_id: int, db: Session = Depends(get_db)) -> ApiResponse[dict]:
+    """删除派工单：仅草稿 / 已取消可删，须先删除引用它的完工报告。"""
+    service.delete_dispatch_order(db, dispatch_id)
+    db.commit()
+    return success({"deleted": True})
+
+
+@router.post(
+    "/dispatch-orders/batch-delete",
+    response_model=ApiResponse[schemas.BatchDeleteResultOut],
+    summary="批量删除派工单",
+)
+def batch_delete_dispatch_orders(
+    payload: schemas.BatchDeleteRequest, db: Session = Depends(get_db)
+) -> ApiResponse[schemas.BatchDeleteResultOut]:
+    """批量删除派工单：逐条校验，失败条目不中断并返回原因。"""
+    result = service.batch_delete(db, payload.ids, service.delete_dispatch_order)
+    db.commit()
+    return success(result)
 
 
 # ==================== 领料单 ====================
@@ -711,6 +763,32 @@ def cancel_requisition(
     return success(req)
 
 
+@router.delete(
+    "/requisitions/{req_id}",
+    response_model=ApiResponse[dict],
+    summary="删除领料单",
+)
+def delete_requisition(req_id: int, db: Session = Depends(get_db)) -> ApiResponse[dict]:
+    """删除领料单：仅草稿 / 已取消可删，明细行一并删除；已确认出库的不可删。"""
+    service.delete_requisition(db, req_id)
+    db.commit()
+    return success({"deleted": True})
+
+
+@router.post(
+    "/requisitions/batch-delete",
+    response_model=ApiResponse[schemas.BatchDeleteResultOut],
+    summary="批量删除领料单",
+)
+def batch_delete_requisitions(
+    payload: schemas.BatchDeleteRequest, db: Session = Depends(get_db)
+) -> ApiResponse[schemas.BatchDeleteResultOut]:
+    """批量删除领料单：逐条校验，失败条目不中断并返回原因。"""
+    result = service.batch_delete(db, payload.ids, service.delete_requisition)
+    db.commit()
+    return success(result)
+
+
 # ==================== 完工报告 ====================
 
 
@@ -834,6 +912,32 @@ def cancel_completion_report(
     report = service.cancel_completion_report(db, report_id)
     db.commit()
     return success(report)
+
+
+@router.delete(
+    "/completion-reports/{report_id}",
+    response_model=ApiResponse[dict],
+    summary="删除完工报告",
+)
+def delete_completion_report(report_id: int, db: Session = Depends(get_db)) -> ApiResponse[dict]:
+    """删除完工报告：仅草稿 / 已取消可删；已确认入库并回写数量的不可删。"""
+    service.delete_completion_report(db, report_id)
+    db.commit()
+    return success({"deleted": True})
+
+
+@router.post(
+    "/completion-reports/batch-delete",
+    response_model=ApiResponse[schemas.BatchDeleteResultOut],
+    summary="批量删除完工报告",
+)
+def batch_delete_completion_reports(
+    payload: schemas.BatchDeleteRequest, db: Session = Depends(get_db)
+) -> ApiResponse[schemas.BatchDeleteResultOut]:
+    """批量删除完工报告：逐条校验，失败条目不中断并返回原因。"""
+    result = service.batch_delete(db, payload.ids, service.delete_completion_report)
+    db.commit()
+    return success(result)
 
 
 # ==================== 统计 ====================

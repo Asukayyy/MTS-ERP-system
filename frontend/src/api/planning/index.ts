@@ -1,6 +1,7 @@
 import { del, get, patch, post, put } from '@/utils/request'
 import type { HealthData, PageData } from '@/types/api'
 import type {
+  BatchDeleteResult,
   CompletionReport,
   Demand,
   DispatchOrder,
@@ -160,6 +161,16 @@ export function setProductionPlanStatus(id: number, status: string): Promise<Pro
   return patch<ProductionPlan>(`/planning/production-plans/${id}/status`, { status })
 }
 
+/** 删除生产作业计划（仅草稿 / 已取消，且须先删除其下游单据） */
+export function deleteProductionPlan(id: number): Promise<unknown> {
+  return del(`/planning/production-plans/${id}`)
+}
+
+/** 批量删除生产作业计划 */
+export function batchDeleteProductionPlans(ids: number[]): Promise<BatchDeleteResult> {
+  return post<BatchDeleteResult>('/planning/production-plans/batch-delete', { ids })
+}
+
 // ---------------- 派工单 ----------------
 
 export function listDispatchOrders(params: Record<string, unknown> = {}): Promise<PageData<DispatchOrder>> {
@@ -184,6 +195,16 @@ export function generateDispatchOrdersFromPlans(
   planIds: number[],
 ): Promise<GenerationResult> {
   return post<GenerationResult>('/planning/dispatch-orders/from-plans', { plan_ids: planIds })
+}
+
+/** 删除派工单（仅草稿 / 已取消，且须先删除引用它的完工报告） */
+export function deleteDispatchOrder(id: number): Promise<unknown> {
+  return del(`/planning/dispatch-orders/${id}`)
+}
+
+/** 批量删除派工单 */
+export function batchDeleteDispatchOrders(ids: number[]): Promise<BatchDeleteResult> {
+  return post<BatchDeleteResult>('/planning/dispatch-orders/batch-delete', { ids })
 }
 
 // ---------------- 领料单 ----------------
@@ -220,6 +241,16 @@ export function generateRequisitionsFromPlans(
   })
 }
 
+/** 删除领料单（仅草稿 / 已取消，明细一并删除） */
+export function deleteRequisition(id: number): Promise<unknown> {
+  return del(`/planning/requisitions/${id}`)
+}
+
+/** 批量删除领料单 */
+export function batchDeleteRequisitions(ids: number[]): Promise<BatchDeleteResult> {
+  return post<BatchDeleteResult>('/planning/requisitions/batch-delete', { ids })
+}
+
 // ---------------- 完工报告 ----------------
 
 export function listCompletionReports(params: Record<string, unknown> = {}): Promise<PageData<CompletionReport>> {
@@ -248,4 +279,14 @@ export function generateCompletionReportsFromPlans(
   planIds: number[],
 ): Promise<GenerationResult> {
   return post<GenerationResult>('/planning/completion-reports/from-plans', { plan_ids: planIds })
+}
+
+/** 删除完工报告（仅草稿 / 已取消） */
+export function deleteCompletionReport(id: number): Promise<unknown> {
+  return del(`/planning/completion-reports/${id}`)
+}
+
+/** 批量删除完工报告 */
+export function batchDeleteCompletionReports(ids: number[]): Promise<BatchDeleteResult> {
+  return post<BatchDeleteResult>('/planning/completion-reports/batch-delete', { ids })
 }

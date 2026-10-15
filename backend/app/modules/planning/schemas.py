@@ -316,6 +316,27 @@ class GenerationResultOut(BaseModel):
     ids: List[int] = Field(default_factory=list)
 
 
+# ---------------- 批量删除 ----------------
+class BatchDeleteRequest(BaseModel):
+    """批量删除入参：待删除单据 ID 集合。"""
+
+    ids: List[int] = Field(min_length=1, description="待删除单据ID集合")
+
+
+class BatchDeleteSkipOut(BaseModel):
+    """单条被跳过删除的原因。"""
+
+    id: int = Field(description="单据ID")
+    reason: str = Field(description="跳过原因")
+
+
+class BatchDeleteResultOut(BaseModel):
+    """批量删除汇总：成功条数 / 逐条跳过原因。"""
+
+    deleted_count: int = Field(description="成功删除条数")
+    skipped: List[BatchDeleteSkipOut] = Field(default_factory=list, description="逐条跳过原因")
+
+
 # ---------------- 完工报告 ----------------
 class CompletionReportCreate(BaseModel):
     report_no: Optional[str] = Field(default=None, description="完工报告单号，留空自动生成")

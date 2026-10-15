@@ -400,17 +400,26 @@ def add_dispatch_order(
 def list_dispatch_orders_by_source(
     db: Session, source_type: str, source_reference_id: int
 ) -> List[models.PlnDispatchOrder]:
-    """按来源类型 + 来源单据ID 取派工单（按来源幂等判重用）。"""
+    """按来源类型 + 来源单据ID 取派工单（按来源幂等判重用）。
+
+    已取消（CANCELLED）的派工单不计入判重，保证取消后可按计划重新生成。
+    """
     return list(
         db.scalars(
             select(models.PlnDispatchOrder)
             .where(
                 models.PlnDispatchOrder.source_type == source_type,
                 models.PlnDispatchOrder.source_reference_id == source_reference_id,
+                models.PlnDispatchOrder.status != "CANCELLED",
             )
             .order_by(models.PlnDispatchOrder.id)
         )
     )
+
+
+def count_dispatch_orders_by_plan(db: Session, plan_id: int) -> int:
+    """某作业计划已生成的派工单数（删除作业计划前的前置引用校验）。"""
+    return count_where(db, models.PlnDispatchOrder, models.PlnDispatchOrder.plan_id == plan_id)
 
 
 # ==================== 领料单 ====================
@@ -460,13 +469,30 @@ def add_requisition(
 def find_requisition_by_source(
     db: Session, source_type: str, source_reference_id: int
 ) -> Optional[models.PlnMaterialRequisition]:
-    """按来源类型 + 来源单据ID 取领料单（一张计划一张领料单，幂等判重用）。"""
+    """按来源类型 + 来源单据ID 取领料单（一张计划一张领料单，幂等判重用）。
+
+    已取消（CANCELLED）的领料单不计入判重，保证取消后可按计划重新生成。
+    """
     return db.scalar(
         select(models.PlnMaterialRequisition).where(
             models.PlnMaterialRequisition.source_type == source_type,
             models.PlnMaterialRequisition.source_reference_id == source_reference_id,
+            models.PlnMaterialRequisition.status != "CANCELLED",
         )
     )
+
+
+def count_requisitions_by_plan(db: Session, plan_id: int) -> int:
+    """某作业计划已生成的领料单数（删除作业计划前的前置引用校验）。"""
+    return count_where(
+        db, models.PlnMaterialRequisition, models.PlnMaterialRequisition.plan_id == plan_id
+    )
+
+
+def delete_requisition_items(db: Session, req_id: int) -> None:
+    """删除某领料单的全部明细行（删单前显式清理）。"""
+    for item in get_requisition_items(db, req_id):
+        db.delete(item)
 
 
 def add_requisition_item(
@@ -515,6 +541,20 @@ def find_completion_report_by_plan(
             models.PlnCompletionReport.plan_id == plan_id,
             models.PlnCompletionReport.status != "CANCELLED",
         )
+    )
+
+
+def count_completion_reports_by_plan(db: Session, plan_id: int) -> int:
+    """某作业计划已生成的完工报告数（删除作业计划前的前置引用校验）。"""
+    return count_where(
+        db, models.PlnCompletionReport, models.PlnCompletionReport.plan_id == plan_id
+    )
+
+
+def count_completion_reports_by_dispatch(db: Session, dispatch_id: int) -> int:
+    """引用某派工单的完工报告数（删除派工单前的前置引用校验）。"""
+    return count_where(
+        db, models.PlnCompletionReport, models.PlnCompletionReport.dispatch_id == dispatch_id
     )
 
 

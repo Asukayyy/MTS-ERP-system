@@ -1,6 +1,6 @@
 # Planning Module（计划管理）
 
-> 状态：**已实现**（后端 52 个路径；含真实多层 BOM 展开 MRP 引擎）
+> 状态：**已实现**（后端 60 个路径；含真实多层 BOM 展开 MRP 引擎）
 > 本课程设计中**生产相关功能全部归属本模块**，不设独立的 production 模块。
 
 ## 模块职责
@@ -21,7 +21,13 @@ BUY 件通过契约交给 procurement 生成采购计划。
 | 派工单 | 增删改查、状态流转；`/dispatch-orders/from-plans` 按生产计划的工艺路线**逐工序自动生成** DRAFT 单据（作业人员留空待指派），`PATCH /dispatch-orders/{id}` 人工审核调整 |
 | 领料单 | 头 + 明细，确认时经 `inventory.contract.decrease_stock` 出库；`/requisitions/from-plans` 按生产计划的 BOM 直接子件自动生成 DRAFT 领料单，`PATCH /requisitions/{id}` 人工审核调整（含明细整表替换） |
 | 完工报告 | 头 + 明细，确认时经 `inventory.contract.increase_stock` 入库；`/completion-reports/from-plans` 按生产计划自动生成 DRAFT 完工报告（产出物料与剩余完工数量预填，报工日期/入库仓库留空），`PATCH /completion-reports/{id}` 人工补填 |
+| 单据删除 | 生产作业计划 / 派工单 / 领料单 / 完工报告均支持单条 `DELETE` 与批量 `POST /batch-delete`；**仅 DRAFT / CANCELLED 可删**，其余状态报 `3006`（只能取消）。已确认入库的领料单 / 完工报告写有库存流水，不可删除 |
 | 统计 | `/stats` |
+
+> **删除顺序**：`pln_dispatch_order` / `pln_material_requisition` / `pln_completion_report`
+> 均以 `plan_id` 外键（RESTRICT）引用作业计划，完工报告还以 `dispatch_id` 引用派工单。
+> 存在下游引用时删除请求返回 `3000` 并提示先清理，正确顺序为
+> **完工报告 → 派工单 / 领料单 → 生产作业计划**；领料单删除时其明细行一并清理。
 
 ## MRP 计算规则（实现要点）
 
@@ -82,10 +88,10 @@ BUY 件通过契约交给 procurement 生成采购计划。
 | 需求 | `/api/v1/planning/demands` |
 | MPS | `/api/v1/planning/mps` |
 | MRP | `/api/v1/planning/mrp/run`、`/mrp/runs`、`/mrp/results` |
-| 生产计划 | `/api/v1/planning/production-plans` |
-| 派工单 | `/api/v1/planning/dispatch-orders`（含 `POST /from-plans`、`PATCH /{id}`） |
-| 领料单 | `/api/v1/planning/requisitions`（含 `POST /from-plans`、`PATCH /{id}`） |
-| 完工报告 | `/api/v1/planning/completion-reports`（含 `POST /from-plans`、`PATCH /{id}`） |
+| 生产计划 | `/api/v1/planning/production-plans`（含 `POST /batch-delete`） |
+| 派工单 | `/api/v1/planning/dispatch-orders`（含 `POST /from-plans`、`PATCH /{id}`、`POST /batch-delete`） |
+| 领料单 | `/api/v1/planning/requisitions`（含 `POST /from-plans`、`PATCH /{id}`、`POST /batch-delete`） |
+| 完工报告 | `/api/v1/planning/completion-reports`（含 `POST /from-plans`、`PATCH /{id}`、`POST /batch-delete`） |
 | 统计 | `/api/v1/planning/stats`、`/health` |
 
 完整清单见 `docs/api/api-contract.md`。

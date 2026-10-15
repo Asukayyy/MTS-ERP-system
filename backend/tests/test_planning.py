@@ -1017,3 +1017,216 @@ def test_generate_completion_report_blank_fields_block_confirm(db: Session) -> N
 
     db.refresh(plan)
     assert plan.completed_qty == Decimal("3.0000")
+
+
+# ==================== 附加：单据删除（仅 DRAFT / CANCELLED） ====================
+
+
+def test_delete_plan_draft_and_cancelled_then_gone(db: Session) -> None:
+    """草稿与已取消的作业计划可物理删除，删完再查报 3003。"""
+    material_id, _ = _create_material(db, supply_type="MAKE", material_type="FINISHED")
+    draft = _make_make_plan(db, material_id)
+    cancelled = _make_make_plan(db, material_id)
+    service.set_production_plan_status(db, cancelled.id, "CANCELLED")
+    db.commit()
+    draft_id, cancelled_id = draft.id, cancelled.id
+
+    service.delete_production_plan(db, draft_id)
+    service.delete_production_plan(db, cancelled_id)
+    db.commit()
+
+    for gone_id in (draft_id, cancelled_id):
+        with pytest.raises(BusinessException) as exc:
+            service.get_production_plan(db, gone_id)
+        assert exc.value.code == 3003
+
+
+def test_delete_plan_blocked_by_non_deletable_status(db: Session) -> None:
+    """已确认的作业计划不可删（报 3006），只能取消。"""
+    material_id, _ = _create_material(db, supply_type="MAKE", material_type="FINISHED")
+    plan = _make_make_plan(db, material_id)
+    service.set_production_plan_status(db, plan.id, "CONFIRMED")
+    db.commit()
+
+    with pytest.raises(BusinessException) as exc:
+        service.delete_production_plan(db, plan.id)
+    assert exc.value.code == 3006
+    db.rollback()
+    assert service.get_production_plan(db, plan.id).status == "CONFIRMED"
+
+
+def test_delete_documents_requires_downstream_first(db: Session) -> None:
+    """删除顺序：完工报告 → 派工单/领料单 → 作业计划；有下游引用时拒绝删除。"""
+    material_id, _ = _create_material(db, supply_type="MAKE", material_type="FINISHED")
+    child_id, _ = _create_material(db)
+    _create_bom(db, material_id, [(child_id, Decimal("1"), 0, Decimal("0"))])
+    _create_routing(db, material_id, [(10, "OP10", "下料", "WC1")])
+    warehouse_id = _create_warehouse(db)
+    plan = _make_make_plan(db, material_id, qty=4)
+
+    dispatch_id = service.create_dispatch_orders_from_plans(db, [plan.id])["ids"][0]
+    req_id = service.create_requisitions_from_plans(
+        db, [plan.id], warehouse_id=warehouse_id
+    )["ids"][0]
+    report_id = service.create_completion_reports_from_plans(db, [plan.id])["ids"][0]
+    db.commit()
+
+    # 计划被下游引用 → 拒绝删除并指出具体的下游单据
+    with pytest.raises(BusinessException) as exc:
+        service.delete_production_plan(db, plan.id)
+    assert exc.value.code == 3000
+    assert "派工单" in exc.value.message
+    db.rollback()
+
+    # 按下游 → 上游的顺序清理即可删净
+    service.delete_completion_report(db, report_id)
+    service.delete_dispatch_order(db, dispatch_id)
+    service.delete_requisition(db, req_id)
+    db.commit()
+
+    # 领料单明细随单删除（CASCADE 之外仍显式清理）
+    left_items = db.execute(
+        text("SELECT COUNT(*) FROM pln_material_requisition_item WHERE requisition_id = :r"),
+        {"r": req_id},
+    ).scalar()
+    assert int(left_items) == 0
+
+    service.delete_production_plan(db, plan.id)
+    db.commit()
+    with pytest.raises(BusinessException) as exc:
+        service.get_production_plan(db, plan.id)
+    assert exc.value.code == 3003
+
+
+def test_delete_dispatch_blocked_by_completion_report_reference(db: Session) -> None:
+    """派工单被完工报告引用时不可删（外键 RESTRICT 的业务前置校验）。"""
+    material_id, _ = _create_material(db, supply_type="MAKE", material_type="FINISHED")
+    today = date.today()
+    dispatch = service.create_dispatch_order(
+        db,
+        planned_qty=Decimal("5"),
+        planned_start=today,
+        planned_end=today + timedelta(days=1),
+        operation="下料",
+    )
+    db.commit()
+    service.create_completion_report(
+        db,
+        material_id=material_id,
+        completed_qty=Decimal("5"),
+        qualified_qty=Decimal("5"),
+        dispatch_id=dispatch.id,
+    )
+    db.commit()
+
+    with pytest.raises(BusinessException) as exc:
+        service.delete_dispatch_order(db, dispatch.id)
+    assert exc.value.code == 3000
+    assert "完工报告" in exc.value.message
+    db.rollback()
+
+
+def test_delete_completed_documents_rejected(db: Session) -> None:
+    """已确认入库的领料单 / 完工报告写有库存流水，一律不可删（报 3006）。"""
+    material_id, _ = _create_material(db, supply_type="BUY")
+    warehouse_id = _create_warehouse(db)
+    _add_stock(db, material_id, warehouse_id, 100)
+    req = service.create_requisition(
+        db,
+        req_date=date.today(),
+        warehouse_id=warehouse_id,
+        items=[{"material_id": material_id, "required_qty": Decimal("10")}],
+    )
+    db.commit()
+    service.confirm_requisition(db, req.id)
+    db.commit()
+
+    with pytest.raises(BusinessException) as exc:
+        service.delete_requisition(db, req.id)
+    assert exc.value.code == 3006
+    db.rollback()
+
+    make_id, _ = _create_material(db, supply_type="MAKE", material_type="FINISHED")
+    report = service.create_completion_report(
+        db,
+        material_id=make_id,
+        completed_qty=Decimal("3"),
+        qualified_qty=Decimal("3"),
+        warehouse_id=warehouse_id,
+        report_date=date.today(),
+    )
+    db.commit()
+    service.confirm_completion_report(db, report.id)
+    db.commit()
+
+    with pytest.raises(BusinessException) as exc:
+        service.delete_completion_report(db, report.id)
+    assert exc.value.code == 3006
+    db.rollback()
+
+
+def test_cancelled_documents_can_be_regenerated_by_plan(db: Session) -> None:
+    """判重排除 CANCELLED：取消派工单/领料单后，仍可按同一计划重新生成。"""
+    material_id, _ = _create_material(db, supply_type="MAKE", material_type="FINISHED")
+    child_id, _ = _create_material(db)
+    _create_bom(db, material_id, [(child_id, Decimal("1"), 0, Decimal("0"))])
+    _create_routing(db, material_id, [(10, "OP10", "下料", "WC1")])
+    warehouse_id = _create_warehouse(db)
+    plan = _make_make_plan(db, material_id, qty=2)
+
+    first_dispatch = service.create_dispatch_orders_from_plans(db, [plan.id])
+    first_req = service.create_requisitions_from_plans(
+        db, [plan.id], warehouse_id=warehouse_id
+    )
+    db.commit()
+    assert first_dispatch["created_count"] == 1
+    assert first_req["created_count"] == 1
+
+    # 预填草稿留空日期，取消前须先补齐（与前端一致）
+    service.update_dispatch_order(
+        db,
+        first_dispatch["ids"][0],
+        schemas.DispatchOrderUpdate(
+            planned_start=plan.start_date, planned_end=plan.end_date
+        ),
+    )
+    db.commit()
+    service.set_dispatch_order_status(db, first_dispatch["ids"][0], "CANCELLED")
+    service.cancel_requisition(db, first_req["ids"][0])
+    db.commit()
+
+    again_dispatch = service.create_dispatch_orders_from_plans(db, [plan.id])
+    again_req = service.create_requisitions_from_plans(
+        db, [plan.id], warehouse_id=warehouse_id
+    )
+    db.commit()
+
+    assert again_dispatch["created_count"] == 1
+    assert again_dispatch["ids"][0] != first_dispatch["ids"][0]
+    assert again_req["created_count"] == 1
+    assert again_req["ids"][0] != first_req["ids"][0]
+
+
+def test_batch_delete_reports_skipped_for_non_deletable(db: Session) -> None:
+    """批量删除逐条容错：不可删与不存在的条目进 skipped，其余照常删除。"""
+    material_id, _ = _create_material(db, supply_type="MAKE", material_type="FINISHED")
+    ok = _make_make_plan(db, material_id)
+    blocked = _make_make_plan(db, material_id)
+    service.set_production_plan_status(db, blocked.id, "CONFIRMED")
+    db.commit()
+    ok_id, blocked_id = ok.id, blocked.id
+    missing_id = 999_999_999
+
+    result = service.batch_delete(
+        db, [ok_id, blocked_id, missing_id, ok_id], service.delete_production_plan
+    )
+    db.commit()
+
+    assert result["deleted_count"] == 1  # 重复 ID 去重后只删一条
+    reasons = {item["id"]: item["reason"] for item in result["skipped"]}
+    assert set(reasons) == {blocked_id, missing_id}
+    assert "只有草稿或已取消" in reasons[blocked_id]
+    assert "不存在" in reasons[missing_id]
+    with pytest.raises(BusinessException) as exc:
+        service.get_production_plan(db, ok_id)
+    assert exc.value.code == 3003

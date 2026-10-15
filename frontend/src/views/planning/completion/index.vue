@@ -1,13 +1,15 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 
 import { listWarehouses } from '@/api/inventory'
 import {
+  batchDeleteCompletionReports,
   cancelCompletionReport,
   confirmCompletionReport,
   createCompletionReport,
+  deleteCompletionReport,
   listCompletionReports,
   listDispatchOrders,
   listProductionPlans,
@@ -179,6 +181,61 @@ async function doCancel(row: CompletionReport): Promise<void> {
   }
 }
 
+// ---------------- 删除（仅草稿 / 已取消可删） ----------------
+const selection = ref<CompletionReport[]>([])
+
+function onSelectionChange(rows: CompletionReport[]): void {
+  selection.value = rows
+}
+
+function isDeletable(row: CompletionReport): boolean {
+  return ['DRAFT', 'CANCELLED'].includes(row.status)
+}
+
+async function remove(row: CompletionReport): Promise<void> {
+  try {
+    await ElMessageBox.confirm(`确认删除完工报告「${row.report_no}」？`, '删除确认', {
+      type: 'warning',
+    })
+  } catch {
+    return
+  }
+  try {
+    await deleteCompletionReport(row.id)
+    ElMessage.success('完工报告已删除')
+    await load()
+  } catch (error) {
+    ElMessage.error((error as Error).message)
+  }
+}
+
+async function removeSelected(): Promise<void> {
+  const ids = selection.value.map((item) => item.id)
+  if (!ids.length) return
+  try {
+    await ElMessageBox.confirm(`确认删除选中的 ${ids.length} 份完工报告？`, '批量删除确认', {
+      type: 'warning',
+    })
+  } catch {
+    return
+  }
+  try {
+    const result = await batchDeleteCompletionReports(ids)
+    if (result.skipped.length) {
+      ElMessage.warning(
+        `已删除 ${result.deleted_count} 条，${result.skipped.length} 条未删除：${result.skipped
+          .map((item) => item.reason)
+          .join('；')}`,
+      )
+    } else {
+      ElMessage.success(`已删除 ${result.deleted_count} 份完工报告`)
+    }
+    await load()
+  } catch (error) {
+    ElMessage.error((error as Error).message)
+  }
+}
+
 onMounted(load)
 </script>
 
@@ -189,6 +246,9 @@ onMounted(load)
         <div class="table-toolbar">
           <span class="page-title">完工报告</span>
           <span class="table-toolbar__spacer" />
+          <el-button :disabled="!selection.length" type="danger" plain @click="removeSelected">
+            删除选中
+          </el-button>
           <el-button @click="generateRef?.open()">按计划生成</el-button>
           <el-button type="primary" @click="openCreate">登记完工报告</el-button>
         </div>
@@ -212,7 +272,14 @@ onMounted(load)
         </el-form-item>
       </el-form>
 
-      <el-table v-loading="loading" :data="rows" border size="small">
+      <el-table
+        v-loading="loading"
+        :data="rows"
+        border
+        size="small"
+        @selection-change="onSelectionChange"
+      >
+        <el-table-column type="selection" width="44" :selectable="isDeletable" />
         <el-table-column label="报告单号" prop="report_no" min-width="150" />
         <el-table-column label="作业计划ID" prop="plan_id" width="110" align="right" />
         <el-table-column label="派工单ID" prop="dispatch_id" width="110" align="right">
@@ -231,7 +298,7 @@ onMounted(load)
         <el-table-column label="状态" width="90">
           <template #default="{ row }"><StatusTag :status="row.status" /></template>
         </el-table-column>
-        <el-table-column label="操作" width="200" fixed="right">
+        <el-table-column label="操作" width="280" fixed="right">
           <template #default="{ row }">
             <el-button v-if="row.status === 'DRAFT'" link type="primary" @click="openEdit(row)">
               编辑
@@ -247,7 +314,8 @@ onMounted(load)
             >
               取消
             </el-button>
-            <span v-if="!['DRAFT', 'CONFIRMED'].includes(row.status)">-</span>
+            <el-button v-if="isDeletable(row)" link type="danger" @click="remove(row)">删除</el-button>
+            <span v-if="!['DRAFT', 'CONFIRMED', 'CANCELLED'].includes(row.status)">-</span>
           </template>
         </el-table-column>
         <template #empty>暂无完工报告数据</template>

@@ -561,6 +561,18 @@ export interface GenerationResult {
   ids: number[]
 }
 
+/** 批量删除时单条被跳过的原因 */
+export interface BatchDeleteSkip {
+  id: number
+  reason: string
+}
+
+/** 批量删除结果：成功条数与逐条跳过原因 */
+export interface BatchDeleteResult {
+  deleted_count: number
+  skipped: BatchDeleteSkip[]
+}
+
 export interface CompletionReport {
   id: number
   report_no: string
