@@ -1,8 +1,8 @@
 # 采购模块数据流图（Data Flow Diagrams）
 
 > 本文描述采购模块的各级数据流图（DFD），与 [functional-design.md](functional-design.md)
-> 的业务流程、[er-diagram.md](er-diagram.md) 的实体关系、[physical-data-model.md](physical-data-model.md)
-> 的物理表结构相互印证。
+> 的业务流程、[conceptual-model.md](conceptual-model.md) 的实体关系（E-R 图）
+> 与物理表结构相互印证。
 >
 > 图中数据存储（D）均为本模块自有 `pur_*` 表；外部实体（E）为其他模块或用户；
 > 处理过程（P）为本模块的业务功能。跨模块数据流只通过 Service Contract 传递，
