@@ -1,5 +1,5 @@
 import { get, patch, post, put } from '@/utils/request'
-import type { HealthData, PageData } from '@/types/api'
+import type { PageData } from '@/types/api'
 import type {
   Balance,
   InitialStockConfirm,
@@ -15,10 +15,6 @@ import type {
 } from '@/types/erp'
 
 /** inventory 模块接口（库存管理），统一前缀 /api/v1/inventory */
-
-export function getInventoryHealth(): Promise<HealthData> {
-  return get<HealthData>('/inventory/health')
-}
 
 export function getInventoryStats(): Promise<InventoryStats> {
   return get<InventoryStats>('/inventory/stats')

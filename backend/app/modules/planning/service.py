@@ -123,6 +123,21 @@ def _month_end(year: int, month: int) -> date:
     return date(year, month, calendar.monthrange(year, month)[1])
 
 
+def _forecast_due_date(month: Any) -> Optional[date]:
+    """预测期间（`YYYY-MM`）→ 需求日期：取该月最后一天，非法期间返回 None。
+
+    预测按月汇总、没有逐日需求日期，取期末作为需求日期（最晚必须交付的时点），
+    这样 MRP 的需求日期不会早于预测期本身。
+    """
+    parts = str(month or "").strip().split("-")
+    if len(parts) < 2:
+        return None
+    try:
+        return _month_end(int(parts[0]), int(parts[1]))
+    except ValueError:
+        return None
+
+
 def _validate_status(value: str, allowed: set, label: str = "状态") -> None:
     if value not in allowed:
         raise BusinessException(CODE_PARAM_INVALID, f"非法{label}：{value}")
@@ -329,6 +344,55 @@ def import_demands_from_sales(db: Session, operator_id: Optional[int] = None) ->
             source_reference_id=source_reference_id,
             source_no=row.get("order_no") or row.get("source_no"),
             remark=row.get("remark"),
+            operator_id=operator_id,
+        )
+        created_ids.append(demand.id)
+    return {"created_count": len(created_ids), "skipped_count": skipped, "demand_ids": created_ids}
+
+
+def import_demands_from_forecast(
+    db: Session,
+    month_from: Optional[str] = None,
+    month_to: Optional[str] = None,
+    operator_id: Optional[int] = None,
+) -> Dict[str, Any]:
+    """把已确认销售预测拉取为 `source_type=SALES` 的计划需求（已导入的跳过）。
+
+    - 预测契约（`sales.contract.get_confirmed_forecast_demand`，只含 CONFIRMED）
+      **惰性导入**，可用 `month_from` / `month_to`（`YYYY-MM`，含端点）限定期间；
+    - 需求日期取预测月份的最后一天（见 `_forecast_due_date`）；
+    - **不把预测与订单合并**：同一物料同一期间既有订单又有预测时，两条需求
+      各自保留，净算由 MRP 按物料汇总，避免在需求侧做归属判断；
+    - 去重键带来源单号：预测行 id 与订单 id 会重号（详见
+      `repository.find_demand_by_source`），重复调用幂等。
+    """
+    try:
+        from app.modules.sales.contract import get_confirmed_forecast_demand  # type: ignore
+    except Exception as exc:  # noqa: BLE001 - 契约尚未就绪
+        raise BusinessException(CODE_CONTRACT_NOT_READY, "销售预测接口尚未就绪") from exc
+
+    rows = get_confirmed_forecast_demand(db, month_from, month_to) or []
+    created_ids: List[int] = []
+    skipped = 0
+    for row in rows:
+        forecast_id = row.get("forecast_id") or row.get("id")
+        forecast_no = row.get("forecast_no")
+        month = row.get("month") or row.get("forecast_month")
+        due = _forecast_due_date(month)
+        if due is None:
+            raise BusinessException(CODE_PARAM_INVALID, f"预测期间非法：{month}")
+        if repository.find_demand_by_source(db, "SALES", forecast_id, forecast_no):
+            skipped += 1
+            continue
+        demand = create_demand(
+            db,
+            source_type="SALES",
+            material_id=int(row["material_id"]),
+            quantity=_as_decimal(row.get("quantity") or row.get("forecast_qty")),
+            due_date=due,
+            source_reference_id=forecast_id,
+            source_no=forecast_no,
+            remark=f"销售预测 {forecast_no}（{month}）",
             operator_id=operator_id,
         )
         created_ids.append(demand.id)

@@ -8,6 +8,10 @@
 5. 发货数量超过未发数量抛 2003
 6. 退货单确认：回增库存 + 写 SALES_RETURN 流水
 7. contract 未交付需求行可被其它模块读取
+8. 退货数量超过可退额度抛 2007（草稿占用额度、取消后释放）
+9. 预测状态机与"DRAFT 才可编辑"
+10. 业务单号取 MAX+1，删单后不重号
+11. 报表接口日期参数可省
 
 所有业务编码均带随机后缀，保证可重复运行。
 """
@@ -140,6 +144,46 @@ def _create_confirmed_order(
     )
     assert confirmed.json()["code"] == 0, confirmed.json()
     return confirmed.json()["data"]
+
+
+def _create_draft_order(client: TestClient, customer_id: int, material_id: int) -> dict:
+    """建一张 DRAFT 订单，返回订单详情（用于单号 / 删单相关用例）。"""
+    response = client.post(
+        f"{SALES}/orders",
+        json={
+            "customer_id": customer_id,
+            "order_date": date.today().isoformat(),
+            "delivery_date": date.today().isoformat(),
+            "items": [{"material_id": material_id, "quantity": "1", "unit_price": "1"}],
+        },
+    )
+    assert response.json()["code"] == 0, response.json()
+    return response.json()["data"]
+
+
+def _ship_and_confirm(
+    client: TestClient, order: dict, warehouse_id: int, quantity: str
+) -> int:
+    """对订单首行发货并确认，返回发货单ID。"""
+    created = client.post(
+        f"{SALES}/shipments",
+        json={
+            "order_id": order["id"],
+            "shipment_date": date.today().isoformat(),
+            "items": [
+                {
+                    "order_item_id": order["items"][0]["id"],
+                    "warehouse_id": warehouse_id,
+                    "quantity": quantity,
+                }
+            ],
+        },
+    )
+    assert created.json()["code"] == 0, created.json()
+    shipment_id = created.json()["data"]["id"]
+    confirmed = client.post(f"{SALES}/shipments/{shipment_id}/confirm")
+    assert confirmed.json()["code"] == 0, confirmed.json()
+    return int(shipment_id)
 
 
 # ==================== 客户 ====================
@@ -351,3 +395,160 @@ def test_contract_open_order_demand(client: TestClient, db: Session) -> None:
     assert matched[0]["quantity"] == Decimal("7.0000")
     assert sales_contract.get_open_order_qty(db, material_id) >= Decimal("7")
     assert sales_contract.get_customer_name(db, customer["id"]) == "销售测试客户"
+
+
+# ==================== 退货额度 ====================
+
+
+def test_return_over_shipped_qty_rejected(client: TestClient, db: Session) -> None:
+    """可退额度 = 已发 - 已占用退货；草稿退货单也占用额度，取消后释放。
+
+    草稿必须计入占用，否则同一订单的多张草稿会各自通过校验、把可退数量用超。
+    """
+    material_id = _create_material(db)
+    warehouse_id = _create_warehouse(client)
+    _set_stock(db, material_id, warehouse_id, "100")
+    customer = _create_customer(client)
+    order = _create_confirmed_order(client, customer["id"], material_id, quantity="30")
+    _ship_and_confirm(client, order, warehouse_id, "20")
+
+    payload = {
+        "order_id": order["id"],
+        "customer_id": customer["id"],
+        "return_date": date.today().isoformat(),
+        "items": [
+            {
+                "material_id": material_id,
+                "warehouse_id": warehouse_id,
+                "quantity": "25",
+            }
+        ],
+    }
+    exceeded = client.post(f"{SALES}/returns", json=payload)
+    assert exceeded.json()["code"] == 2007, exceeded.json()
+
+    payload["items"][0]["quantity"] = "20"  # 恰好等于已发数量，可退
+    first = client.post(f"{SALES}/returns", json=payload)
+    assert first.json()["code"] == 0, first.json()
+    first_id = first.json()["data"]["id"]
+
+    payload["items"][0]["quantity"] = "5"  # 额度已被草稿占满
+    reserved = client.post(f"{SALES}/returns", json=payload)
+    assert reserved.json()["code"] == 2007, reserved.json()
+
+    cancelled = client.post(f"{SALES}/returns/{first_id}/cancel")
+    assert cancelled.json()["code"] == 0, cancelled.json()
+    after_cancel = client.post(f"{SALES}/returns", json=payload)
+    assert after_cancel.json()["code"] == 0, after_cancel.json()
+
+
+# ==================== 销售预测 ====================
+
+
+def _create_forecast(client: TestClient, material_id: int, qty: str = "100") -> dict:
+    """经 sales 接口建预测单（DRAFT），返回预测数据。"""
+    response = client.post(
+        f"{SALES}/forecasts",
+        json={
+            "material_id": material_id,
+            "forecast_month": "2026-12",
+            "forecast_qty": qty,
+        },
+    )
+    assert response.json()["code"] == 0, response.json()
+    return response.json()["data"]
+
+
+def test_forecast_status_machine(client: TestClient, db: Session) -> None:
+    """预测状态机：DRAFT → CONFIRMED → COMPLETED，终态不可再流转、不可删除。"""
+    material_id = _create_material(db)
+    forecast = _create_forecast(client, material_id)
+    url = f"{SALES}/forecasts/{forecast['id']}/status"
+
+    skipped = client.patch(url, json={"status": "COMPLETED"})
+    assert skipped.json()["code"] == 2006, skipped.json()
+
+    confirmed = client.patch(url, json={"status": "CONFIRMED"})
+    assert confirmed.json()["code"] == 0
+    assert confirmed.json()["data"]["status"] == "CONFIRMED"
+
+    # 不回退 DRAFT：Planning 是按 CONFIRMED 拉需求的，回退会让需求与状态对不上
+    back = client.patch(url, json={"status": "DRAFT"})
+    assert back.json()["code"] == 2006, back.json()
+
+    completed = client.patch(url, json={"status": "COMPLETED"})
+    assert completed.json()["code"] == 0
+    assert completed.json()["data"]["status"] == "COMPLETED"
+
+    terminal = client.patch(url, json={"status": "CANCELLED"})
+    assert terminal.json()["code"] == 2006, terminal.json()
+
+    deleted = client.delete(f"{SALES}/forecasts/{forecast['id']}")
+    assert deleted.json()["code"] == 2006, deleted.json()
+
+
+def test_forecast_editable_only_in_draft(client: TestClient, db: Session) -> None:
+    """预测单仅 DRAFT 可修改；确认后再改返回 2006。"""
+    material_id = _create_material(db)
+    forecast = _create_forecast(client, material_id, qty="10")
+    url = f"{SALES}/forecasts/{forecast['id']}"
+
+    updated = client.put(url, json={"forecast_qty": "20"})
+    assert updated.json()["code"] == 0, updated.json()
+    assert Decimal(str(updated.json()["data"]["forecast_qty"])) == Decimal("20")
+
+    client.patch(f"{url}/status", json={"status": "CONFIRMED"})
+    blocked = client.put(url, json={"forecast_qty": "30"})
+    assert blocked.json()["code"] == 2006, blocked.json()
+
+
+# ==================== 单号生成 ====================
+
+
+def test_order_no_not_reused_after_delete(client: TestClient, db: Session) -> None:
+    """单号取同前缀最大序号 +1：删掉中间一张单后，新单号不与既有单号重复。"""
+    material_id = _create_material(db)
+    customer = _create_customer(client)
+
+    first = _create_draft_order(client, customer["id"], material_id)
+    second = _create_draft_order(client, customer["id"], material_id)
+
+    deleted = client.delete(f"{SALES}/orders/{first['id']}")
+    assert deleted.json()["code"] == 0, deleted.json()
+
+    third = _create_draft_order(client, customer["id"], material_id)
+    assert third["order_no"] not in {first["order_no"], second["order_no"]}
+
+
+def test_orders_list_filters_by_date_range(client: TestClient, db: Session) -> None:
+    """订单列表按订单日期区间过滤，未落在区间内的订单不出现。"""
+    material_id = _create_material(db)
+    customer = _create_customer(client)
+    order = _create_draft_order(client, customer["id"], material_id)
+
+    today = date.today().isoformat()
+    matched = client.get(
+        f"{SALES}/orders",
+        params={"page": 1, "page_size": 20, "date_from": today, "date_to": today},
+    )
+    assert matched.json()["code"] == 0, matched.json()
+    assert order["id"] in [row["id"] for row in matched.json()["data"]["items"]]
+
+    next_year = date.today().replace(year=date.today().year + 1).isoformat()
+    missed = client.get(
+        f"{SALES}/orders",
+        params={"page": 1, "page_size": 20, "date_from": next_year, "date_to": next_year},
+    )
+    assert missed.json()["code"] == 0, missed.json()
+    assert order["id"] not in [row["id"] for row in missed.json()["data"]["items"]]
+
+
+# ==================== 报表接口健壮性 ====================
+
+
+def test_reports_work_without_date_range(client: TestClient) -> None:
+    """报表接口的日期区间可省，不传时不过滤、不报 422。"""
+    for path in ("shipments", "returns", "sales-volume", "order-status"):
+        response = client.get(f"{SALES}/reports/{path}")
+        assert response.status_code == 200, response.text
+        assert response.json()["code"] == 0, response.text

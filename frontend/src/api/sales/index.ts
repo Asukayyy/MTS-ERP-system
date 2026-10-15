@@ -1,5 +1,5 @@
 import { del, get, patch, post, put } from '@/utils/request'
-import type { HealthData, PageData } from '@/types/api'
+import type { PageData } from '@/types/api'
 import type {
   Customer,
   Forecast,
@@ -11,10 +11,6 @@ import type {
 } from '@/types/erp'
 
 /** sales 模块接口（销售管理），统一前缀 /api/v1/sales */
-
-export function getSalesHealth(): Promise<HealthData> {
-  return get<HealthData>('/sales/health')
-}
 
 export function getSalesStats(): Promise<SalesStats> {
   return get<SalesStats>('/sales/stats')

@@ -12,7 +12,7 @@ BUY 件通过契约交给 procurement 生成采购计划。
 
 | 功能 | 说明 |
 | --- | --- |
-| 需求管理 | `pln_demand` 维护；`/demands/from-sales` 拉取销售订单与预测需求；`/demands/from-replenishment` 接补库需求 |
+| 需求管理 | `pln_demand` 维护；`/demands/from-sales` 拉取销售订单需求、`/demands/from-forecast` 拉取已确认销售预测；`/demands/from-replenishment` 接补库需求 |
 | 主生产计划 MPS | 头 + 明细增删改查、状态流转（确认后只读）、`/mps/import/{preview,confirm}` 课程数据两段式导入 |
 | MRP 运算 | `/mrp/run` 触发；多层 BFS 展开、毛需求 / 净需求 / 建议下达日期计算；每次运行独立 `pln_mrp_run`，历史不覆盖 |
 | MRP 结果 | 按运行查询结果、`/mrp/runs/{id}/explain` 展示展开过程、结果状态流转 |
