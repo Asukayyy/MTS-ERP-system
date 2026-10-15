@@ -177,6 +177,7 @@ onMounted(load)
         border
         size="small"
       >
+        <el-table-column label="组织ID" prop="id" width="90" align="right" />
         <el-table-column label="组织编码" prop="org_code" min-width="150" />
         <el-table-column label="组织名称" prop="org_name" min-width="180" />
         <el-table-column label="组织类型" width="110">

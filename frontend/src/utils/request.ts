@@ -4,6 +4,7 @@ import type { AxiosError, AxiosInstance, AxiosRequestConfig, AxiosResponse } fro
 import { getCurrentOperatorId } from '@/composables/useCurrentOperator'
 import type { ApiResponse } from '@/types/api'
 import { SUCCESS_CODE } from '@/types/api'
+import { clearAuth, getToken } from '@/utils/auth'
 
 /**
  * 全局 axios 实例。
@@ -42,6 +43,11 @@ function toErrorMessage(error: AxiosError<ApiResponse<unknown>>): string {
 const WRITE_METHODS = new Set(['post', 'put', 'patch', 'delete'])
 
 request.interceptors.request.use((config) => {
+  // 携带登录凭证：后端按 Authorization: Bearer <token> 识别身份并做权限校验
+  const token = getToken()
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`
+  }
   // 过滤空串 / null / undefined 查询参数：空值表示“不参与过滤”，
   // 否则后端日期/枚举参数会把空串当作非法值返回 422。
   if (config.params !== null && typeof config.params === 'object') {
@@ -87,7 +93,7 @@ request.interceptors.request.use((config) => {
 request.interceptors.response.use(undefined, (error: AxiosError<ApiResponse<unknown>>) => {
   // 登录态失效：清除本地登录信息并跳回登录页，避免旧登录态卡在错误页面
   if (error.response?.status === 401) {
-    localStorage.removeItem('bh-erp-user')
+    clearAuth()
     if (!window.location.pathname.startsWith('/login')) {
       window.location.replace('/login')
     }

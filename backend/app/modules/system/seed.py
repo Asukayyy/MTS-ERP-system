@@ -1,6 +1,6 @@
 """system 模块 RBAC 初始化数据（种子数据）。
 
-为注册页 / 管理界面提供 **九种人员身份**（角色）、覆盖五个模块功能的权限资源树，
+为注册页 / 管理界面提供 **十三种人员身份**（角色）、覆盖五个模块功能的权限资源树，
 以及角色与权限的绑定关系。由 `app/main.py` 启动时调用 `seed_roles_and_permissions(db)`。
 
 设计约定：
@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session
 from app.modules.system import models
 
 # --------------------------------------------------------------------------- #
-# 一、九种人员身份（角色）
+# 一、十三种人员身份（角色）
 # --------------------------------------------------------------------------- #
 # 团队版 SysRole 无 data_scope / sort_order 列，数据范围约定并入 description 供注册页展示。
 ROLE_SEEDS: list[dict[str, Any]] = [
@@ -78,6 +78,30 @@ ROLE_SEEDS: list[dict[str, Any]] = [
         "status": "ACTIVE",
         "description": "只读查看各业务单据、计划结果与库存流水，用于核算监督（数据范围：全部）",
     },
+    {
+        "role_code": "DEPT_HEAD",
+        "role_name": "部长",
+        "status": "ACTIVE",
+        "description": "部门负责人：查看各业务单据与计划结果，维护本部门人员与基础信息（数据范围：全部）",
+    },
+    {
+        "role_code": "WORKER",
+        "role_name": "工人",
+        "status": "ACTIVE",
+        "description": "车间工人：查看派工与工艺，执行领料与完工入库（数据范围：仅本人）",
+    },
+    {
+        "role_code": "GROUP_LEADER",
+        "role_name": "组长",
+        "status": "ACTIVE",
+        "description": "车间组长：在工人权限基础上编制作业计划并派工（数据范围：本组织）",
+    },
+    {
+        "role_code": "DIRECTOR",
+        "role_name": "主任",
+        "status": "ACTIVE",
+        "description": "加工中心负责人：查看各业务单据与计划结果，维护本中心人员与基础信息（数据范围：全部）",
+    },
 ]
 
 # --------------------------------------------------------------------------- #
@@ -106,7 +130,7 @@ PERMISSION_SEEDS: list[dict[str, Any]] = [
     {"code": "system:routing", "name": "工艺路线管理", "perm_type": "MENU",
      "parent": "system", "path": "/system/routing", "module": "system", "sort_no": 30},
     {"code": "system:org", "name": "组织与人员", "perm_type": "MENU",
-     "parent": "system", "path": "/system/org", "module": "system", "sort_no": 40},
+     "parent": "system", "path": "/system/organization", "module": "system", "sort_no": 40},
     {"code": "system:dictionary", "name": "基础字典", "perm_type": "MENU",
      "parent": "system", "path": "/system/dictionary", "module": "system", "sort_no": 50},
     {"code": "system:user", "name": "账号管理", "perm_type": "MENU",
@@ -125,7 +149,7 @@ PERMISSION_SEEDS: list[dict[str, Any]] = [
     {"code": "system:routing:manage", "name": "维护工艺路线", "perm_type": "ACTION",
      "parent": "system:routing", "path": "/system/routing", "module": "system", "sort_no": 10},
     {"code": "system:org:manage", "name": "维护组织与人员", "perm_type": "ACTION",
-     "parent": "system:org", "path": "/system/org", "module": "system", "sort_no": 10},
+     "parent": "system:org", "path": "/system/organization", "module": "system", "sort_no": 10},
     {"code": "system:dictionary:manage", "name": "维护基础字典", "perm_type": "ACTION",
      "parent": "system:dictionary", "path": "/system/dictionary", "module": "system", "sort_no": 10},
     {"code": "system:user:manage", "name": "维护账号", "perm_type": "ACTION",
@@ -136,6 +160,10 @@ PERMISSION_SEEDS: list[dict[str, Any]] = [
      "parent": "system:permission", "path": "/system/permission", "module": "system", "sort_no": 10},
     {"code": "system:log:manage", "name": "维护操作日志", "perm_type": "ACTION",
      "parent": "system:log", "path": "/system/log", "module": "system", "sort_no": 10},
+    {"code": "system:personnel", "name": "员工管理", "perm_type": "MENU",
+     "parent": "system", "path": "/system/personnel", "module": "system", "sort_no": 45},
+    {"code": "system:personnel:manage", "name": "维护员工", "perm_type": "ACTION",
+     "parent": "system:personnel", "path": "/system/personnel", "module": "system", "sort_no": 10},
     # system 高危操作（仅管理人员持有）
     {"code": "system:user:approve", "name": "注册审批", "perm_type": "ACTION",
      "parent": "system:user", "path": "/system/users/{id}/approve", "module": "system", "sort_no": 10},
@@ -151,9 +179,9 @@ PERMISSION_SEEDS: list[dict[str, Any]] = [
     {"code": "sales:order", "name": "销售订单", "perm_type": "MENU",
      "parent": "sales", "path": "/sales/order", "module": "sales", "sort_no": 10},
     {"code": "sales:demand", "name": "销售需求与预测", "perm_type": "MENU",
-     "parent": "sales", "path": "/sales/demand", "module": "sales", "sort_no": 20},
+     "parent": "sales", "path": "/sales/forecast", "module": "sales", "sort_no": 20},
     {"code": "sales:shipping", "name": "发货指令", "perm_type": "MENU",
-     "parent": "sales", "path": "/sales/shipping", "module": "sales", "sort_no": 30},
+     "parent": "sales", "path": "/sales/shipment", "module": "sales", "sort_no": 30},
     {"code": "sales:stock", "name": "可发货量查询", "perm_type": "MENU",
      "parent": "sales", "path": "/sales/stock", "module": "sales", "sort_no": 40},
     # ---- planning：MPS / MRP / 作业计划 / 派工 / 领料 / 完工入库 / 完工质检 ----
@@ -162,13 +190,13 @@ PERMISSION_SEEDS: list[dict[str, Any]] = [
     {"code": "planning:mrp", "name": "物料需求计划 MRP", "perm_type": "MENU",
      "parent": "planning", "path": "/planning/mrp", "module": "planning", "sort_no": 20},
     {"code": "planning:schedule", "name": "生产作业计划", "perm_type": "MENU",
-     "parent": "planning", "path": "/planning/schedule", "module": "planning", "sort_no": 30},
+     "parent": "planning", "path": "/planning/work-plan", "module": "planning", "sort_no": 30},
     {"code": "planning:dispatch", "name": "派工单", "perm_type": "MENU",
      "parent": "planning", "path": "/planning/dispatch", "module": "planning", "sort_no": 40},
     {"code": "planning:picking", "name": "领料单", "perm_type": "MENU",
-     "parent": "planning", "path": "/planning/picking", "module": "planning", "sort_no": 50},
+     "parent": "planning", "path": "/planning/requisition", "module": "planning", "sort_no": 50},
     {"code": "planning:finish", "name": "完工入库", "perm_type": "MENU",
-     "parent": "planning", "path": "/planning/finish", "module": "planning", "sort_no": 60},
+     "parent": "planning", "path": "/planning/completion", "module": "planning", "sort_no": 60},
     {"code": "planning:qc", "name": "完工质检", "perm_type": "MENU",
      "parent": "planning", "path": "/planning/qc", "module": "planning", "sort_no": 70},
     # ---- procurement：采购计划 / 采购需求 / 采购订单 / 到货 / 到货质检 ----
@@ -179,18 +207,42 @@ PERMISSION_SEEDS: list[dict[str, Any]] = [
     {"code": "procurement:order", "name": "采购订单", "perm_type": "MENU",
      "parent": "procurement", "path": "/procurement/order", "module": "procurement", "sort_no": 30},
     {"code": "procurement:arrival", "name": "到货管理", "perm_type": "MENU",
-     "parent": "procurement", "path": "/procurement/arrival", "module": "procurement", "sort_no": 40},
+     "parent": "procurement", "path": "/procurement/receipt", "module": "procurement", "sort_no": 40},
     {"code": "procurement:qc", "name": "到货质检", "perm_type": "MENU",
      "parent": "procurement", "path": "/procurement/qc", "module": "procurement", "sort_no": 50},
     # ---- inventory：库存状态 / 入库 / 出库 / 流水与结存 ----
     {"code": "inventory:stock", "name": "库存状态查询", "perm_type": "MENU",
-     "parent": "inventory", "path": "/inventory/stock", "module": "inventory", "sort_no": 10},
+     "parent": "inventory", "path": "/inventory/balance", "module": "inventory", "sort_no": 10},
     {"code": "inventory:inbound", "name": "入库管理", "perm_type": "MENU",
      "parent": "inventory", "path": "/inventory/inbound", "module": "inventory", "sort_no": 20},
     {"code": "inventory:outbound", "name": "出库管理", "perm_type": "MENU",
      "parent": "inventory", "path": "/inventory/outbound", "module": "inventory", "sort_no": 30},
     {"code": "inventory:ledger", "name": "库存流水与结存", "perm_type": "MENU",
-     "parent": "inventory", "path": "/inventory/ledger", "module": "inventory", "sort_no": 40},
+     "parent": "inventory", "path": "/inventory/transaction", "module": "inventory", "sort_no": 40},
+    # ---- 补充：与前端实际路由逐一比对后新增的页面权限（原权限树遗漏） ----
+    # 前端菜单按权限编码过滤，因此每个真实页面都必须有对应的 MENU 权限码。
+    {"code": "sales:customer", "name": "客户管理", "perm_type": "MENU",
+     "parent": "sales", "path": "/sales/customer", "module": "sales", "sort_no": 50},
+    {"code": "sales:return", "name": "销售退货", "perm_type": "MENU",
+     "parent": "sales", "path": "/sales/return", "module": "sales", "sort_no": 60},
+    {"code": "planning:demand", "name": "需求管理", "perm_type": "MENU",
+     "parent": "planning", "path": "/planning/demand", "module": "planning", "sort_no": 5},
+    {"code": "procurement:supplier", "name": "供应商管理", "perm_type": "MENU",
+     "parent": "procurement", "path": "/procurement/supplier", "module": "procurement", "sort_no": 5},
+    {"code": "procurement:supplier-material", "name": "供应商物料", "perm_type": "MENU",
+     "parent": "procurement", "path": "/procurement/supplier-material", "module": "procurement", "sort_no": 6},
+    {"code": "procurement:evaluation", "name": "供应商评价", "perm_type": "MENU",
+     "parent": "procurement", "path": "/procurement/evaluation", "module": "procurement", "sort_no": 60},
+    {"code": "procurement:report", "name": "采购报表", "perm_type": "MENU",
+     "parent": "procurement", "path": "/procurement/report", "module": "procurement", "sort_no": 70},
+    {"code": "inventory:transfer", "name": "移库管理", "perm_type": "MENU",
+     "parent": "inventory", "path": "/inventory/transfer", "module": "inventory", "sort_no": 50},
+    {"code": "inventory:stocktake", "name": "库存盘点", "perm_type": "MENU",
+     "parent": "inventory", "path": "/inventory/stocktake", "module": "inventory", "sort_no": 60},
+    {"code": "inventory:reorder", "name": "订货点管理", "perm_type": "MENU",
+     "parent": "inventory", "path": "/inventory/reorder", "module": "inventory", "sort_no": 70},
+    {"code": "inventory:replenishment", "name": "补货计划", "perm_type": "MENU",
+     "parent": "inventory", "path": "/inventory/replenishment", "module": "inventory", "sort_no": 80},
 ]
 
 # 所有权限编码（供 ADMIN 全量授权使用）
@@ -215,22 +267,27 @@ ROLE_PERMISSION_BINDINGS: dict[str, list[str]] = {
     "PURCHASE": [
         "procurement", "procurement:plan", "procurement:demand",
         "procurement:order", "procurement:arrival",
+        "procurement:supplier", "procurement:supplier-material",
+        "procurement:evaluation", "procurement:report",
         "system:material", "system:dictionary",
     ],
     "SALES": [
         "sales", "sales:order", "sales:demand", "sales:shipping", "sales:stock",
+        "sales:customer", "sales:return",
         "system:material",
     ],
     "INVENTORY": [
         "inventory", "inventory:stock", "inventory:inbound",
         "inventory:outbound", "inventory:ledger",
+        "inventory:transfer", "inventory:stocktake",
+        "inventory:reorder", "inventory:replenishment",
         "sales", "sales:shipping",
         "planning", "planning:picking",
         "procurement", "procurement:arrival",
         "system:material",
     ],
     "PLAN": [
-        "planning", "planning:mps", "planning:mrp", "planning:schedule",
+        "planning", "planning:mps", "planning:mrp", "planning:schedule", "planning:demand",
         "planning:dispatch", "planning:picking", "planning:finish",
         "system:bom", "system:material",
         "inventory:stock",
@@ -243,16 +300,59 @@ ROLE_PERMISSION_BINDINGS: dict[str, list[str]] = {
     ],
     "FINANCE": [
         "sales:order", "sales:demand", "sales:shipping",
-        "procurement:plan", "procurement:order", "procurement:arrival",
+        "procurement:plan", "procurement:order", "procurement:arrival", "procurement:report",
         "planning:mps", "planning:mrp", "planning:schedule", "planning:finish",
         "inventory:stock", "inventory:inbound", "inventory:outbound", "inventory:ledger",
         "system:material",
+    ],
+    "DEPT_HEAD": [
+        "system", "system:material", "system:bom", "system:routing",
+        "system:org", "system:dictionary", "system:personnel", "system:personnel:manage",
+        "sales", "sales:order", "sales:demand", "sales:shipping", "sales:stock",
+        "sales:customer", "sales:return",
+        "planning", "planning:mps", "planning:mrp", "planning:schedule",
+        "planning:demand",
+        "planning:dispatch", "planning:picking", "planning:finish",
+        "procurement", "procurement:plan", "procurement:demand",
+        "procurement:order", "procurement:arrival",
+        "procurement:supplier", "procurement:supplier-material",
+        "procurement:evaluation", "procurement:report",
+        "inventory", "inventory:stock", "inventory:inbound",
+        "inventory:outbound", "inventory:ledger",
+        "inventory:transfer", "inventory:stocktake",
+        "inventory:reorder", "inventory:replenishment",
+    ],
+    "WORKER": [
+        "system", "system:material", "system:bom", "system:routing",
+        "planning", "planning:picking", "planning:finish",
+    ],
+    "GROUP_LEADER": [
+        "system", "system:material", "system:bom", "system:routing",
+        "planning", "planning:schedule", "planning:dispatch",
+        "planning:picking", "planning:finish",
+    ],
+    "DIRECTOR": [
+        "system", "system:material", "system:bom", "system:routing",
+        "system:org", "system:dictionary", "system:personnel", "system:personnel:manage",
+        "sales", "sales:order", "sales:demand", "sales:shipping", "sales:stock",
+        "sales:customer", "sales:return",
+        "planning", "planning:mps", "planning:mrp", "planning:schedule",
+        "planning:demand",
+        "planning:dispatch", "planning:picking", "planning:finish",
+        "procurement", "procurement:plan", "procurement:demand",
+        "procurement:order", "procurement:arrival",
+        "procurement:supplier", "procurement:supplier-material",
+        "procurement:evaluation", "procurement:report",
+        "inventory", "inventory:stock", "inventory:inbound",
+        "inventory:outbound", "inventory:ledger",
+        "inventory:transfer", "inventory:stocktake",
+        "inventory:reorder", "inventory:replenishment",
     ],
 }
 
 
 def seed_roles_and_permissions(db: Session) -> None:
-    """幂等写入九种身份角色、权限资源树与角色-权限绑定。
+    """幂等写入十三种身份角色、权限资源树与角色-权限绑定。
 
     按 `role_code` / `perm_code` 存在即跳过，只补缺失的绑定，
     不会覆盖运营期的人工调整。由应用启动时调用。

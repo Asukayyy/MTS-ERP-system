@@ -57,7 +57,7 @@ function readUser(): LoginUser | null {
 const loginUser = ref<LoginUser | null>(readUser())
 
 function logout(): void {
-  localStorage.removeItem('bh-erp-user')
+  clearAuth()
   loginUser.value = null
   ElMessage.success('已退出登录')
   router.replace('/login')
