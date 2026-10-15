@@ -8,6 +8,7 @@ import RemoteSelect from '@/components/common/RemoteSelect.vue'
 import { useCurrentOperator } from '@/composables/useCurrentOperator'
 import { useAppStore } from '@/stores/modules/app'
 import type { RemoteOption } from '@/types/erp'
+import { clearAuth, getAuth } from '@/utils/auth'
 
 const route = useRoute()
 const router = useRouter()
@@ -39,22 +40,7 @@ function onOperatorChange(value: number | undefined): void {
   setOperator({ id: value, name: optionLabels.get(value) ?? '' })
 }
 
-interface LoginUser {
-  user: { display_name?: string; username?: string }
-  roles?: { role_name?: string }[]
-}
-
-function readUser(): LoginUser | null {
-  const raw = localStorage.getItem('bh-erp-user')
-  if (!raw) return null
-  try {
-    return JSON.parse(raw) as LoginUser
-  } catch {
-    return null
-  }
-}
-
-const loginUser = ref<LoginUser | null>(readUser())
+const loginUser = ref(getAuth())
 
 function logout(): void {
   clearAuth()
