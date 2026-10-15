@@ -116,6 +116,25 @@ def import_demands_from_sales(
 
 
 @router.post(
+    "/demands/from-forecast",
+    response_model=ApiResponse[schemas.DemandImportResult],
+    summary="从销售预测导入需求",
+)
+def import_demands_from_forecast(
+    month_from: Optional[str] = Query(default=None, description="预测起始月份 YYYY-MM（含）"),
+    month_to: Optional[str] = Query(default=None, description="预测结束月份 YYYY-MM（含）"),
+    db: Session = Depends(get_db),
+) -> ApiResponse[schemas.DemandImportResult]:
+    """把已确认销售预测拉取为 `source_type=SALES` 的计划需求（已导入的跳过）。
+
+    需求日期取预测月份的最后一天；`month_from` / `month_to` 可限定预测期间。
+    """
+    result = service.import_demands_from_forecast(db, month_from, month_to)
+    db.commit()
+    return success(result)
+
+
+@router.post(
     "/demands/from-replenishment",
     response_model=ApiResponse[schemas.DemandOut],
     summary="从库存补库需求生成需求",

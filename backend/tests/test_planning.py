@@ -26,7 +26,7 @@ from sqlalchemy.orm import Session
 
 from app.common.exceptions import BusinessException
 from app.modules.inventory import service as inventory_service
-from app.modules.planning import schemas, service
+from app.modules.planning import repository, schemas, service
 
 
 def _tag() -> str:
@@ -484,3 +484,122 @@ def test_mps_import_preview_reports_unknown_material(db: Session) -> None:
     assert preview["summary"]["valid_count"] == 0
     assert preview["summary"]["error_count"] == 1
     assert "不存在" in preview["errors"][0]["message"]
+
+
+# ==================== 销售预测 → 计划需求 ====================
+
+
+def _create_forecast(
+    db: Session, material_id: int, month: str, qty, status: str = "CONFIRMED"
+):
+    """写入一条销售预测，返回 (forecast_id, forecast_no)。"""
+    forecast_no = f"FC{_tag()}"
+    db.execute(
+        text(
+            "INSERT INTO sal_forecast (forecast_no, customer_id, material_id, forecast_month, "
+            "forecast_qty, status, created_at, updated_at) "
+            "VALUES (:no, NULL, :m, :month, :qty, :st, NOW(), NOW())"
+        ),
+        {
+            "no": forecast_no,
+            "m": material_id,
+            "month": month,
+            "qty": Decimal(str(qty)),
+            "st": status,
+        },
+    )
+    db.commit()
+    forecast_id = int(
+        db.execute(
+            text("SELECT id FROM sal_forecast WHERE forecast_no = :c"), {"c": forecast_no}
+        ).scalar()
+    )
+    return forecast_id, forecast_no
+
+
+def test_import_demands_from_forecast_uses_month_end_as_due_date(db: Session) -> None:
+    """预测导入：需求日期取预测月份最后一天，来源单号与数量原样落库。"""
+    material_id, _ = _create_material(db, supply_type="MAKE", material_type="FINISHED")
+    _, forecast_no = _create_forecast(db, material_id, "2026-02", "120")
+
+    result = service.import_demands_from_forecast(db, "2026-02", "2026-02")
+    db.commit()
+
+    assert result["created_count"] == 1
+    assert result["skipped_count"] == 0
+    demand = service.get_demand(db, result["demand_ids"][0])
+    assert demand.source_type == "SALES"
+    assert demand.source_no == forecast_no
+    assert demand.material_id == material_id
+    assert demand.quantity == Decimal("120.0000")
+    assert demand.due_date == date(2026, 2, 28)  # 2026-02 非闰年，月末为 28 日
+    assert demand.status == "DRAFT"
+
+
+def test_import_demands_from_forecast_is_idempotent(db: Session) -> None:
+    """预测导入：重复调用幂等，已导入的被跳过。"""
+    material_id, _ = _create_material(db, supply_type="MAKE", material_type="FINISHED")
+    _create_forecast(db, material_id, "2026-04", "80")
+
+    first = service.import_demands_from_forecast(db, "2026-04", "2026-04")
+    db.commit()
+    second = service.import_demands_from_forecast(db, "2026-04", "2026-04")
+    db.commit()
+
+    assert first["created_count"] == 1
+    assert second["created_count"] == 0
+    assert second["skipped_count"] == 1
+    assert second["demand_ids"] == []
+
+
+def test_import_demands_from_forecast_dedupes_by_source_no(db: Session) -> None:
+    """预测导入：id 与订单需求重号时不被误判为已导入（去重键含来源单号）。"""
+    material_id, _ = _create_material(db, supply_type="MAKE", material_type="FINISHED")
+    forecast_id, _ = _create_forecast(db, material_id, "2026-05", "60")
+
+    # 造一条 id 与预测行相同的销售订单需求（source_type 同为 SALES）
+    service.create_demand(
+        db,
+        source_type="SALES",
+        material_id=material_id,
+        quantity=Decimal("30"),
+        due_date=date(2026, 5, 10),
+        source_reference_id=forecast_id,
+        source_no=f"SO{_tag()}",
+    )
+    db.commit()
+
+    result = service.import_demands_from_forecast(db, "2026-05", "2026-05")
+    db.commit()
+
+    assert result["created_count"] == 1
+    assert result["skipped_count"] == 0
+
+
+def test_import_demands_from_forecast_respects_month_range(db: Session) -> None:
+    """预测导入：month_from / month_to 限定期间，区间外的预测不导入。"""
+    material_id, _ = _create_material(db, supply_type="MAKE", material_type="FINISHED")
+    _create_forecast(db, material_id, "2026-06", "10")
+    _create_forecast(db, material_id, "2026-07", "20")
+
+    result = service.import_demands_from_forecast(db, "2026-07", "2026-07")
+    db.commit()
+
+    assert result["created_count"] == 1
+    demand = service.get_demand(db, result["demand_ids"][0])
+    assert demand.due_date == date(2026, 7, 31)
+    assert demand.quantity == Decimal("20.0000")
+
+
+def test_import_demands_from_forecast_skips_draft_forecast(db: Session) -> None:
+    """预测导入：只取已确认（CONFIRMED）预测，DRAFT 不导入。"""
+    material_id, _ = _create_material(db, supply_type="MAKE", material_type="FINISHED")
+    forecast_id, forecast_no = _create_forecast(
+        db, material_id, "2026-08", "40", status="DRAFT"
+    )
+
+    result = service.import_demands_from_forecast(db, "2026-08", "2026-08")
+    db.commit()
+
+    assert result["created_count"] == 0
+    assert repository.find_demand_by_source(db, "SALES", forecast_id, forecast_no) is None
