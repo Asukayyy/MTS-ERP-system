@@ -265,22 +265,55 @@ async function submit(): Promise<void> {
 </template>
 
 <style scoped>
+/* 注册页：与登录页同一套浅色风格，卡片压在插画右侧留白区 */
 .register-page {
   display: flex;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-end;
   min-height: 100%;
-  padding: 24px 0;
-  background-color: #f5f7fa;
+  padding: 40px 7vw 40px 24px;
+  background: #f5f7fa url('../../assets/login-bg.png') center / cover no-repeat;
 }
 
 .register-page__card {
-  width: 520px;
+  position: relative;
+  z-index: 1;
+  width: 560px;
+  border: 1px solid #e6ebf2;
+  border-radius: 14px;
+  box-shadow: 0 18px 44px rgba(31, 45, 61, 0.12);
+  /* Element Plus 控件跟随插画的蓝橙配色 */
+  --el-color-primary: #3a7bd5;
+  --el-color-primary-light-3: #5b93de;
+  --el-color-primary-light-5: #7dabe6;
+  --el-color-primary-light-7: #a0c3ee;
+  --el-color-primary-light-8: #b1cdf2;
+  --el-color-primary-light-9: #e3edf9;
+  --el-color-primary-dark-2: #2f6bc0;
+  --el-text-color-primary: #1f2d3d;
+  --el-text-color-regular: #4a5568;
+  --el-text-color-placeholder: #9aa7b8;
+  --el-border-color: #dfe5ee;
+  --el-border-color-light: #e8eef7;
+  --el-border-color-hover: #b9cbe6;
+}
+
+/* 卡片上沿的蓝橙点缀，与登录页一致 */
+.register-page__card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  height: 3px;
+  border-radius: 13px 13px 0 0;
+  background: linear-gradient(90deg, #3a7bd5, #f0a13c);
 }
 
 .register-page__title {
   font-size: 16px;
   font-weight: 600;
+  color: #1f2d3d;
 }
 
 .register-page__org {
@@ -294,7 +327,7 @@ async function submit(): Promise<void> {
 .register-page__role-desc {
   font-size: 12px;
   line-height: 1.4;
-  color: #909399;
+  color: #7a8699;
   white-space: normal;
 }
 
@@ -304,13 +337,28 @@ async function submit(): Promise<void> {
 
 .register-page__footer {
   text-align: center;
-  color: #909399;
+  color: #7a8699;
   font-size: 13px;
 }
 
 .register-page__link {
   margin-left: 6px;
-  color: #409eff;
+  color: #3a7bd5;
   text-decoration: none;
+}
+
+.register-page__link:hover {
+  text-decoration: underline;
+}
+
+/* 窄屏时卡片居中，并把背景压淡保证对比 */
+@media (max-width: 1200px) {
+  .register-page {
+    justify-content: center;
+    padding: 40px 20px;
+    background-image:
+      linear-gradient(rgba(247, 249, 252, 0.88), rgba(247, 249, 252, 0.95)),
+      url('../../assets/login-bg.png');
+  }
 }
 </style>

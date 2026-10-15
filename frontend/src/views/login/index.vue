@@ -57,24 +57,6 @@ async function submit(): Promise<void> {
     <form class="login__card" @submit.prevent="submit">
       <div class="login__header">
         <h3 class="login__title">大牛技术有限公司</h3>
-        <!-- 卡片右上角悬浮的金色图标组（纯装饰） -->
-        <div class="login__badges" aria-hidden="true">
-          <span class="login__badge">
-            <svg viewBox="0 0 24 24" fill="currentColor">
-              <path d="M12 2 3 7v10l9 5 9-5V7l-9-5Zm0 2.3L18.7 8 12 11.7 5.3 8 12 4.3ZM5 9.7v6.1l6 3.3v-6.1L5 9.7Zm14 0-6 3.3v6.1l6-3.3V9.7Z" />
-            </svg>
-          </span>
-          <span class="login__badge">
-            <svg viewBox="0 0 24 24" fill="currentColor">
-              <path d="M4 19h3v-6H4v6Zm5 0h3V5H9v14Zm5 0h3v-9h-3v9Z" />
-            </svg>
-          </span>
-          <span class="login__badge">
-            <svg viewBox="0 0 24 24" fill="currentColor">
-              <path d="M4 5h16v3H4V5Zm1 5h14v9H5v-9Zm2 2v5h4v-5H7Z" />
-            </svg>
-          </span>
-        </div>
       </div>
 
       <div class="login__body">
@@ -134,21 +116,13 @@ async function submit(): Promise<void> {
 .login {
   display: flex;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-end; /* 表单压在插画右侧的留白区 */
   height: 100%;
   min-height: 100%;
-  padding: 80px 24px 40px;
+  padding: 40px 7vw 40px 24px;
   overflow-y: auto;
-  background: #171a1f url('../../assets/login-bg.jpg') center / cover no-repeat;
+  background: #f5f7fa url('../../assets/login-bg.png') center / cover no-repeat;
   font-family: 'Numans', 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
-}
-
-/* 压暗背景，保证半透明卡片上的文字可读 */
-.login::before {
-  content: '';
-  position: fixed;
-  inset: 0;
-  background: linear-gradient(rgba(0, 0, 0, 0.35), rgba(0, 0, 0, 0.65));
 }
 
 .login__card {
@@ -156,68 +130,64 @@ async function submit(): Promise<void> {
   z-index: 1;
   width: 100%;
   max-width: 400px;
-  background-color: rgba(0, 0, 0, 0.5);
-  border-radius: 6px;
-  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5);
-  color: #fff;
+  border: 1px solid #e6ebf2;
+  border-radius: 14px;
+  background-color: #fff;
+  box-shadow: 0 18px 44px rgba(31, 45, 61, 0.12);
+  color: #1f2d3d;
+}
+
+/* 卡片上沿的蓝橙点缀，呼应插画配色 */
+.login__card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  height: 3px;
+  border-radius: 13px 13px 0 0;
+  background: linear-gradient(90deg, #3a7bd5, #f0a13c);
 }
 
 .login__header {
-  position: relative;
-  padding: 16px 20px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+  padding: 20px 22px 16px;
+  border-bottom: 1px solid #f0f3f8;
 }
 
 .login__title {
   margin: 0;
-  font-size: 28px;
-  font-weight: 500;
-  color: #fff;
-}
-
-/* 悬浮在卡片右上角、探出卡片边缘的图标组 */
-.login__badges {
-  position: absolute;
-  right: 20px;
-  top: -52px;
-  display: flex;
-  gap: 14px;
-}
-
-.login__badge {
-  display: block;
-  color: #ffc312;
-  line-height: 0;
-}
-
-.login__badge svg {
-  width: 48px;
-  height: 48px;
+  font-size: 22px;
+  font-weight: 600;
+  color: #1f2d3d;
 }
 
 .login__body {
-  padding: 20px;
+  padding: 20px 22px;
 }
 
 .login__field {
   display: flex;
   margin-bottom: 16px;
-  border-radius: 4px;
+  border: 1px solid #dfe5ee;
+  border-radius: 8px;
   overflow: hidden;
-  transition: box-shadow 0.2s;
+  background-color: #fff;
+  transition: border-color 0.2s, box-shadow 0.2s;
 }
 
 .login__field:focus-within {
-  box-shadow: 0 0 0 2px rgba(255, 195, 18, 0.65);
+  border-color: #3a7bd5;
+  box-shadow: 0 0 0 3px rgba(58, 123, 213, 0.14);
 }
 
 .login__icon {
   display: flex;
-  flex: 0 0 50px;
+  flex: 0 0 46px;
   align-items: center;
   justify-content: center;
-  background-color: #ffc312;
-  color: #1a1a1a;
+  border-right: 1px solid #e8eef7;
+  background-color: #f2f6fd;
+  color: #3a7bd5;
 }
 
 .login__icon svg {
@@ -228,11 +198,11 @@ async function submit(): Promise<void> {
 .login__input {
   flex: 1;
   min-width: 0;
-  height: 44px;
+  height: 42px;
   padding: 0 12px;
   border: 0;
   background-color: #fff;
-  color: #222;
+  color: #1f2d3d;
   font-size: 15px;
   font-family: inherit;
 }
@@ -242,7 +212,13 @@ async function submit(): Promise<void> {
 }
 
 .login__input::placeholder {
-  color: #9aa0a6;
+  color: #9aa7b8;
+}
+
+/* 浏览器自动填充会给输入框刷上浅黄底，这里压回白底 */
+.login__input:-webkit-autofill {
+  -webkit-text-fill-color: #1f2d3d;
+  box-shadow: inset 0 0 0 100px #fff;
 }
 
 .login__remember {
@@ -251,14 +227,14 @@ async function submit(): Promise<void> {
   align-items: center;
   margin-bottom: 16px;
   font-size: 14px;
-  color: #fff;
+  color: #4a5568;
   cursor: pointer;
 }
 
 .login__remember input {
   width: 18px;
   height: 18px;
-  accent-color: #ffc312;
+  accent-color: #3a7bd5;
   cursor: pointer;
 }
 
@@ -272,39 +248,41 @@ async function submit(): Promise<void> {
   height: 40px;
   padding: 0 18px;
   border: 0;
-  border-radius: 4px;
-  background-color: #ffc312;
-  color: #1a1a1a;
+  border-radius: 8px;
+  background-color: #3a7bd5;
+  color: #fff;
   font-size: 15px;
   font-family: inherit;
   cursor: pointer;
-  transition: background-color 0.2s;
+  box-shadow: 0 6px 16px rgba(58, 123, 213, 0.28);
+  transition: background-color 0.2s, box-shadow 0.2s;
 }
 
 .login__submit:hover:not(:disabled) {
-  background-color: #fff;
+  background-color: #3268b7;
+  box-shadow: 0 8px 20px rgba(58, 123, 213, 0.36);
 }
 
 .login__submit:disabled {
-  opacity: 0.65;
+  opacity: 0.6;
   cursor: not-allowed;
 }
 
 .login__footer {
-  padding: 14px 20px 18px;
-  border-top: 1px solid rgba(255, 255, 255, 0.12);
+  padding: 14px 22px 18px;
+  border-top: 1px solid #f0f3f8;
   text-align: center;
   font-size: 13px;
 }
 
 .login__links {
-  color: #fff;
+  color: #7a8699;
   line-height: 1.9;
 }
 
 .login__links a {
   margin-left: 4px;
-  color: #ffc312;
+  color: #3a7bd5;
   text-decoration: none;
 }
 
@@ -312,23 +290,20 @@ async function submit(): Promise<void> {
   text-decoration: underline;
 }
 
-@media (max-width: 480px) {
+/* 窄屏时插画会被卡片压住，卡片回到居中并把背景压淡保证对比 */
+@media (max-width: 1000px) {
   .login {
-    padding: 64px 16px 24px;
+    justify-content: center;
+    padding: 48px 20px;
+    background-image:
+      linear-gradient(rgba(247, 249, 252, 0.88), rgba(247, 249, 252, 0.95)),
+      url('../../assets/login-bg.png');
   }
+}
 
-  .login__badges {
-    top: -40px;
-    gap: 10px;
-  }
-
-  .login__badge svg {
-    width: 36px;
-    height: 36px;
-  }
-
+@media (max-width: 480px) {
   .login__title {
-    font-size: 22px;
+    font-size: 19px;
   }
 }
 </style>
