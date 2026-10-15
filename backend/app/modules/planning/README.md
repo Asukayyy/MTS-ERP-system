@@ -1,6 +1,6 @@
 # Planning Module（计划管理）
 
-> 状态：**已实现**（后端 60 个路径；含真实多层 BOM 展开 MRP 引擎）
+> 状态：**已实现**（后端 61 个路径；含真实多层 BOM 展开 MRP 引擎）
 > 本课程设计中**生产相关功能全部归属本模块**，不设独立的 production 模块。
 
 ## 模块职责
@@ -12,7 +12,7 @@ BUY 件通过契约交给 procurement 生成采购计划。
 
 | 功能 | 说明 |
 | --- | --- |
-| 需求管理 | `pln_demand` 维护；`/demands/from-sales` 拉取销售订单与预测需求；`/demands/from-replenishment` 接补库需求（**仅转计划 `PRODUCTION`**，转采购 `REORDER` 由采购模块受理） |
+| 需求管理 | `pln_demand` 维护；`/demands/from-sales` 拉取销售订单需求、`/demands/from-forecast` 拉取已确认销售预测；`/demands/from-replenishment` 接补库需求（**仅转计划 `PRODUCTION`**，转采购 `REORDER` 由采购模块受理） |
 | 主生产计划 MPS | 头 + 明细增删改查、状态流转（确认后只读）、`/mps/import/{preview,confirm}` 课程数据两段式导入 |
 | MRP 运算 | `/mrp/run` 触发；多层 BFS 展开、毛需求 / 净需求 / 建议下达日期计算；每次运行独立 `pln_mrp_run`，历史不覆盖 |
 | MRP 结果 | 按运行查询结果、`/mrp/runs/{id}/explain` 展示展开过程、结果状态流转 |

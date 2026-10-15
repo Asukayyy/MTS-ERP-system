@@ -183,6 +183,7 @@ export interface User {
   username: string
   display_name: string
   personnel_id?: number | null
+  employee_no?: string | null
   status: string
   last_login_at?: string | null
   remark?: string | null
@@ -212,6 +213,7 @@ export interface SystemStats {
 }
 
 export interface LoginResult {
+  token: string
   user: User
   roles: Role[]
   permissions: Permission[]
@@ -337,16 +339,6 @@ export interface SalesReturn {
   status: string
   remark?: string | null
   items: ReturnItem[]
-}
-
-export interface OrderStatusReport {
-  order_no: string
-  customer_name?: string | null
-  order_date: string
-  status: string
-  total_qty: Num
-  delivered_qty: Num
-  fulfillment_rate: Num
 }
 
 export interface SalesStats {

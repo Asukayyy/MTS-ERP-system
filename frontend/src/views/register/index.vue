@@ -1,12 +1,11 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 
 import { listOrganizationsFlat, listRegisterRoles, register } from '@/api/system'
-import RemoteSelect from '@/components/common/RemoteSelect.vue'
-import type { RemoteOption, Role } from '@/types/erp'
+import type { Organization, Role } from '@/types/erp'
 
 const router = useRouter()
 
@@ -14,6 +13,8 @@ const formRef = ref<FormInstance>()
 const submitting = ref(false)
 const rolesLoading = ref(false)
 const roleOptions = ref<Role[]>([])
+const orgLoading = ref(false)
+const orgs = ref<Organization[]>([])
 
 const form = reactive({
   username: '',
@@ -22,6 +23,7 @@ const form = reactive({
   password2: '',
   employee_no: '',
   org_id: undefined as number | undefined,
+  workshop_id: undefined as number | undefined,
   role_id: undefined as number | undefined,
 })
 
@@ -45,16 +47,79 @@ const rules: FormRules = {
   role_id: [{ required: true, message: '请选择身份', trigger: 'change' }],
 }
 
-/** 部门下拉数据源：组织树扁平化 + 关键字过滤（与「员工管理」页保持一致） */
-async function loadOrgOptions(keyword: string): Promise<RemoteOption[]> {
-  const list = await listOrganizationsFlat()
-  const text = (keyword || '').trim()
-  return list
-    .filter((item) => !text || item.org_code.includes(text) || item.org_name.includes(text))
-    .map((item) => ({ id: item.id, label: `${item.org_code} ${item.org_name}` }))
+/** 部门编码 → 该部门可选身份（职能身份 + 部长；总经办本身即管理岗，只留管理人员） */
+const ORG_ROLE_MAP: Record<string, string[]> = {
+  'DEP-ADMIN': ['ADMIN'],
+  'DEP-DESIGN': ['DESIGN', 'DEPT_HEAD'],
+  'DEP-PLAN': ['PLAN', 'DEPT_HEAD'],
+  'DEP-PURCHASE': ['PURCHASE', 'DEPT_HEAD'],
+  'DEP-SALES': ['SALES', 'DEPT_HEAD'],
+  'DEP-WAREHOUSE': ['INVENTORY', 'DEPT_HEAD'],
+  'DEP-QC': ['QC', 'DEPT_HEAD'],
+  'DEP-FINANCE': ['FINANCE', 'DEPT_HEAD'],
+  'MFG-CTR': ['MAKE', 'DIRECTOR'],
 }
 
+/** 车间可选身份：工人 / 组长 */
+const WORKSHOP_ROLE_CODES = ['WORKER', 'GROUP_LEADER']
+
+/** 一级可选：各部门 + 工厂（去掉公司根节点与车间） */
+const topLevelOrgs = computed(() =>
+  orgs.value.filter((item) => item.org_type !== 'COMPANY' && item.org_type !== 'WORKSHOP'),
+)
+
+/** 当前选中的一级组织 */
+const selectedOrg = computed(() => orgs.value.find((item) => item.id === form.org_id) ?? null)
+
+/** 是否选中了工厂（智能加工中心） */
+const isFactory = computed(() => selectedOrg.value?.org_type === 'FACTORY')
+
+/** 工厂下的车间 */
+const workshopOptions = computed(() =>
+  isFactory.value ? orgs.value.filter((item) => item.parent_id === form.org_id && item.org_type === 'WORKSHOP') : [],
+)
+
+/** 当前选中的车间 */
+const selectedWorkshop = computed(
+  () => workshopOptions.value.find((item) => item.id === form.workshop_id) ?? null,
+)
+
+/** 身份过滤依据的组织：工厂下若选了车间以车间为准，否则用工厂本身 */
+const effectiveOrg = computed(() =>
+  isFactory.value ? (selectedWorkshop.value ?? selectedOrg.value) : selectedOrg.value,
+)
+
+/** 当前组织可选的身份（随部门 / 车间联动） */
+const availableRoles = computed(() => {
+  const org = effectiveOrg.value
+  if (!org) return []
+  const codes = org.org_type === 'WORKSHOP' ? WORKSHOP_ROLE_CODES : (ORG_ROLE_MAP[org.org_code] ?? [])
+  return roleOptions.value.filter((role) => codes.includes(role.role_code))
+})
+
+// 切换一级组织时清空车间，避免残留上一次的选择
+watch(
+  () => form.org_id,
+  () => {
+    form.workshop_id = undefined
+  },
+)
+
+// 部门 / 车间变化时清空已选身份，避免残留不匹配的选择
+watch([() => form.org_id, () => form.workshop_id], () => {
+  form.role_id = undefined
+})
+
 onMounted(async () => {
+  orgLoading.value = true
+  try {
+    orgs.value = await listOrganizationsFlat()
+  } catch (error) {
+    ElMessage.error((error as Error).message)
+  } finally {
+    orgLoading.value = false
+  }
+
   rolesLoading.value = true
   try {
     roleOptions.value = await listRegisterRoles()
@@ -74,7 +139,7 @@ async function submit(): Promise<void> {
       username: form.username,
       password: form.password,
       display_name: form.display_name,
-      org_id: form.org_id as number,
+      org_id: (form.workshop_id ?? form.org_id) as number,
       employee_no: form.employee_no.trim() || undefined,
       role_ids: [form.role_id as number],
     })
@@ -103,12 +168,36 @@ async function submit(): Promise<void> {
           <el-input v-model="form.display_name" placeholder="姓名（同时作为员工姓名）" size="large" />
         </el-form-item>
         <el-form-item label="所属部门" prop="org_id">
-          <RemoteSelect
+          <el-select
             v-model="form.org_id"
-            :loader="loadOrgOptions"
             placeholder="选择你的部门"
+            size="large"
             class="register-page__org"
-          />
+            :loading="orgLoading"
+          >
+            <el-option
+              v-for="org in topLevelOrgs"
+              :key="org.id"
+              :label="`${org.org_code} ${org.org_name}`"
+              :value="org.id"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item v-if="isFactory" label="所属车间" prop="workshop_id">
+          <el-select
+            v-model="form.workshop_id"
+            placeholder="选择具体车间（选填）"
+            size="large"
+            class="register-page__org"
+            clearable
+          >
+            <el-option
+              v-for="ws in workshopOptions"
+              :key="ws.id"
+              :label="`${ws.org_code} ${ws.org_name}`"
+              :value="ws.id"
+            />
+          </el-select>
         </el-form-item>
         <el-form-item label="工号" prop="employee_no">
           <el-input
@@ -136,9 +225,15 @@ async function submit(): Promise<void> {
           />
         </el-form-item>
         <el-form-item label="选择身份" prop="role_id">
-          <el-select v-model="form.role_id" placeholder="选择你的身份" size="large" class="register-page__org">
+          <el-select
+            v-model="form.role_id"
+            :placeholder="isFactory && !form.workshop_id ? '选车间后可选工人/组长' : '请选择你的身份'"
+            size="large"
+            class="register-page__org"
+            :disabled="!availableRoles.length"
+          >
             <el-option
-              v-for="role in roleOptions"
+              v-for="role in availableRoles"
               :key="role.id"
               :label="role.role_name"
               :value="role.id"

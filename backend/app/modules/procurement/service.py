@@ -15,7 +15,7 @@
 错误码区段：`4000~4999`。
 """
 
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -1067,7 +1067,13 @@ def create_order_from_plan(
     )
     order_date = order_date or date.today()
     if expected_date is None:
-        expected_date = order_date
+        materials = _material_map(db, [item.material_id for item in plan_items])
+        lead_time_days = max(
+            (int((materials.get(item.material_id) or {}).get("lead_time_days") or 0)
+             for item in plan_items),
+            default=0,
+        )
+        expected_date = order_date + timedelta(days=lead_time_days)
 
     pending: List[Tuple[models.PurPurchasePlanItem, Decimal]] = []
     for item in plan_items:
@@ -1694,8 +1700,9 @@ def create_purchase_plan_from_mrp(
 
     - 行 `source_type="MRP"`、`source_reference_id=mrp_result.id`，
       数量取 `order_qty`、需求日期取 `requirement_date`；
-    - **幂等**：同一 `source_reference_id` 已存在且计划未终结时复用该计划并只补新增行，
-      已终结计划则新建计划（保证历史可追溯）；
+    - **幂等**：同一 `source_reference_id`（MRP 结果ID）已存在且计划未终结时
+      复用该计划并只补新增行，否则新建计划（保证历史可追溯）；
+      不同 MRP 结果ID 视为不同需求，不跨来源合并；
     - **不提交事务**，由调用方提交。
     """
     from app.modules.planning.contract import get_mrp_results  # 惰性 import（契约）
@@ -1710,8 +1717,6 @@ def create_purchase_plan_from_mrp(
 
     reference_ids = [int(row["id"]) for row in buy_results]
     plan = _resolve_reusable_plan(db, "MRP", reference_ids)
-    if plan is None:
-        plan = repository.find_active_plan_by_source_type(db, "MRP")
     if plan is None:
         plan = _create_plan_header(
             db,
@@ -1758,6 +1763,7 @@ def create_purchase_plan_from_replenishment(
     - 需求明细通过 `inventory.contract.get_replenishment_request(db, request_id)` 读取
       （**函数内惰性 import**，契约尚未就绪时抛 4007）；
     - **幂等**：同一 `request_id` 已受理且计划未终结时复用该计划，不重复建单；
+      不同补库需求ID 视为不同需求，不跨来源合并；
     - **不提交事务**，由调用方提交。
     """
     try:
@@ -1783,8 +1789,6 @@ def create_purchase_plan_from_replenishment(
     request_qty = _as_decimal(_field("request_qty"))
 
     plan = _resolve_reusable_plan(db, "REORDER", [request_id])
-    if plan is None:
-        plan = repository.find_active_plan_by_source_type(db, "REORDER")
     if plan is None:
         plan = _create_plan_header(
             db,

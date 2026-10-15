@@ -32,6 +32,15 @@ def count_where(db: Session, model, *criteria) -> int:
     return db.scalar(select(func.count()).select_from(model).where(*criteria)) or 0
 
 
+def count_by_date_range(db: Session, model, field, date_from: date, date_to: date) -> int:
+    """统计业务日期落在 `[date_from, date_to)` 内的行数。
+
+    区间取右开：调用方传"次月首日"即可覆盖整月，不必关心当月有多少天。
+    """
+    stmt = select(func.count()).select_from(model).where(field >= date_from, field < date_to)
+    return db.scalar(stmt) or 0
+
+
 def _paginate(db: Session, stmt, page: int, page_size: int) -> Tuple[List, int]:
     """对 select 语句做统一分页，返回 (items, total)。"""
     total = db.scalar(select(func.count()).select_from(stmt.subquery())) or 0
@@ -40,14 +49,16 @@ def _paginate(db: Session, stmt, page: int, page_size: int) -> Tuple[List, int]:
 
 
 def next_no(db: Session, model, field, prefix: str) -> str:
-    """生成业务单号：`<prefix><4位序号>`（按前缀内计数，保证同日多次调用递增）。"""
-    total = (
-        db.scalar(
-            select(func.count()).select_from(model).where(field.like(f"{prefix}%"))
-        )
-        or 0
-    )
-    return f"{prefix}{total + 1:04d}"
+    """生成业务单号：`<prefix><4位序号>`。
+
+    取同前缀单号的**最大序号 +1**，而不是按行数计数：按计数时只要删掉任意一条
+    单据，下一个单号就会与既有单号重复（单号字段都有唯一索引，会直接抛唯一键
+    冲突）。只统计纯数字后缀，避免用户自定义的 `<prefix>ABC` 之类单号干扰。
+    """
+    stmt = select(func.max(field)).where(field.regexp_match(f"^{prefix}[0-9]+$"))
+    max_no = db.scalar(stmt)
+    seq = int(str(max_no)[len(prefix):]) if max_no else 0
+    return f"{prefix}{seq + 1:04d}"
 
 
 # ==================== 客户 ====================
@@ -329,11 +340,54 @@ def get_return_items(db: Session, return_id: int) -> List[models.SalReturnItem]:
     )
 
 
+def delivered_qty_by_material(db: Session, order_id: int) -> dict:
+    """按物料汇总某订单的已发数量，返回 `{material_id: Decimal}`。"""
+    stmt = (
+        select(
+            models.SalOrderItem.material_id,
+            func.coalesce(func.sum(models.SalOrderItem.delivered_qty), 0),
+        )
+        .where(models.SalOrderItem.order_id == order_id)
+        .group_by(models.SalOrderItem.material_id)
+    )
+    return {material_id: Decimal(str(qty)) for material_id, qty in db.execute(stmt).all()}
+
+
+def returned_qty_by_material(
+    db: Session, order_id: int, exclude_return_id: Optional[int] = None
+) -> dict:
+    """按物料汇总某订单已占用的退货数量，返回 `{material_id: Decimal}`。
+
+    统计所有未取消的退货单（**含 DRAFT**），否则同一订单的多张草稿退货单会各自
+    都通过额度校验、把可退数量用超。确认退货时传 `exclude_return_id` 排除本单，
+    避免把自己的明细重复计入已占用。
+    """
+    stmt = (
+        select(
+            models.SalReturnItem.material_id,
+            func.coalesce(func.sum(models.SalReturnItem.quantity), 0),
+        )
+        .join(models.SalReturn, models.SalReturn.id == models.SalReturnItem.return_id)
+        .where(
+            models.SalReturn.order_id == order_id,
+            models.SalReturn.status != "CANCELLED",
+        )
+        .group_by(models.SalReturnItem.material_id)
+    )
+    if exclude_return_id is not None:
+        stmt = stmt.where(models.SalReturn.id != exclude_return_id)
+    return {material_id: Decimal(str(qty)) for material_id, qty in db.execute(stmt).all()}
+
+
 # ==================== 报表 / 统计 ====================
 
 
 def order_status_rows(db: Session) -> List[Tuple]:
-    """订单执行状态：按订单汇总订单数量与已发数量。"""
+    """订单执行状态：按订单汇总订单数量与已发数量。
+
+    用 LEFT JOIN：还没有明细的 DRAFT 订单同样要出现在报表里，用 INNER JOIN 会把
+    它们静默漏掉。
+    """
     stmt = (
         select(
             models.SalOrder.id,
@@ -344,7 +398,7 @@ def order_status_rows(db: Session) -> List[Tuple]:
             func.coalesce(func.sum(models.SalOrderItem.quantity), 0),
             func.coalesce(func.sum(models.SalOrderItem.delivered_qty), 0),
         )
-        .join(models.SalOrderItem, models.SalOrderItem.order_id == models.SalOrder.id)
+        .outerjoin(models.SalOrderItem, models.SalOrderItem.order_id == models.SalOrder.id)
         .group_by(
             models.SalOrder.id,
             models.SalOrder.order_no,
@@ -358,9 +412,9 @@ def order_status_rows(db: Session) -> List[Tuple]:
 
 
 def shipment_report_rows(
-    db: Session, date_from: date, date_to: date
+    db: Session, date_from: Optional[date] = None, date_to: Optional[date] = None
 ) -> List[Tuple]:
-    """发货记录（行级）：按发货日期区间查询。"""
+    """发货记录（行级）：按发货日期区间查询，两个日期都可省（省则不过滤）。"""
     stmt = (
         select(
             models.SalShipment.id,
@@ -376,19 +430,19 @@ def shipment_report_rows(
         )
         .join(models.SalShipmentItem, models.SalShipmentItem.shipment_id == models.SalShipment.id)
         .join(models.SalOrder, models.SalOrder.id == models.SalShipment.order_id)
-        .where(
-            models.SalShipment.shipment_date >= date_from,
-            models.SalShipment.shipment_date <= date_to,
-        )
         .order_by(models.SalShipment.id.desc(), models.SalShipmentItem.id)
     )
+    if date_from is not None:
+        stmt = stmt.where(models.SalShipment.shipment_date >= date_from)
+    if date_to is not None:
+        stmt = stmt.where(models.SalShipment.shipment_date <= date_to)
     return list(db.execute(stmt).all())
 
 
 def return_report_rows(
-    db: Session, date_from: date, date_to: date
+    db: Session, date_from: Optional[date] = None, date_to: Optional[date] = None
 ) -> List[Tuple]:
-    """退货记录（行级）：按退货日期区间查询。"""
+    """退货记录（行级）：按退货日期区间查询，两个日期都可省（省则不过滤）。"""
     stmt = (
         select(
             models.SalReturn.id,
@@ -403,46 +457,59 @@ def return_report_rows(
             models.SalReturnItem.quality_status,
         )
         .join(models.SalReturnItem, models.SalReturnItem.return_id == models.SalReturn.id)
-        .where(
-            models.SalReturn.return_date >= date_from,
-            models.SalReturn.return_date <= date_to,
-        )
         .order_by(models.SalReturn.id.desc(), models.SalReturnItem.id)
     )
+    if date_from is not None:
+        stmt = stmt.where(models.SalReturn.return_date >= date_from)
+    if date_to is not None:
+        stmt = stmt.where(models.SalReturn.return_date <= date_to)
     return list(db.execute(stmt).all())
 
 
-def sales_volume_rows(db: Session, date_from: date, date_to: date) -> List[Tuple]:
-    """销售量汇总：已确认发货单按物料汇总发货数量。"""
+def sales_volume_rows(
+    db: Session, date_from: Optional[date] = None, date_to: Optional[date] = None
+) -> List[Tuple]:
+    """销售量汇总：已确认发货单按物料汇总发货数量，日期区间可选。"""
     stmt = (
         select(
             models.SalShipmentItem.material_id,
             func.coalesce(func.sum(models.SalShipmentItem.quantity), 0),
         )
         .join(models.SalShipment, models.SalShipment.id == models.SalShipmentItem.shipment_id)
-        .where(
-            models.SalShipment.status == "COMPLETED",
-            models.SalShipment.shipment_date >= date_from,
-            models.SalShipment.shipment_date <= date_to,
-        )
+        .where(models.SalShipment.status == "COMPLETED")
         .group_by(models.SalShipmentItem.material_id)
         .order_by(models.SalShipmentItem.material_id)
     )
+    if date_from is not None:
+        stmt = stmt.where(models.SalShipment.shipment_date >= date_from)
+    if date_to is not None:
+        stmt = stmt.where(models.SalShipment.shipment_date <= date_to)
     return list(db.execute(stmt).all())
 
 
-def order_status_counts(db: Session) -> dict:
-    """按状态统计销售订单数量。"""
+def order_status_counts(
+    db: Session, date_from: Optional[date] = None, date_to: Optional[date] = None
+) -> dict:
+    """按状态统计销售订单数量，可选按订单日期限定 `[date_from, date_to)`。"""
     stmt = (
         select(models.SalOrder.status, func.count())
         .select_from(models.SalOrder)
         .group_by(models.SalOrder.status)
     )
+    if date_from is not None:
+        stmt = stmt.where(models.SalOrder.order_date >= date_from)
+    if date_to is not None:
+        stmt = stmt.where(models.SalOrder.order_date < date_to)
     return {status: count for status, count in db.execute(stmt).all()}
 
 
-def pending_shipment_order_count(db: Session) -> int:
-    """未发完的订单数：状态 CONFIRMED/IN_PROGRESS 且存在未交付行。"""
+def pending_shipment_order_count(
+    db: Session, date_from: Optional[date] = None, date_to: Optional[date] = None
+) -> int:
+    """未发完的订单数：状态 CONFIRMED/IN_PROGRESS 且存在未交付行。
+
+    可选按订单日期限定 `[date_from, date_to)`。
+    """
     stmt = (
         select(func.count(func.distinct(models.SalOrder.id)))
         .select_from(models.SalOrder)
@@ -452,6 +519,10 @@ def pending_shipment_order_count(db: Session) -> int:
             models.SalOrderItem.quantity > models.SalOrderItem.delivered_qty,
         )
     )
+    if date_from is not None:
+        stmt = stmt.where(models.SalOrder.order_date >= date_from)
+    if date_to is not None:
+        stmt = stmt.where(models.SalOrder.order_date < date_to)
     return db.scalar(stmt) or 0
 
 

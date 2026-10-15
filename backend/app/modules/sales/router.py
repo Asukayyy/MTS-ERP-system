@@ -567,11 +567,11 @@ def order_status_report(db: Session = Depends(get_db)) -> ApiResponse[List[schem
     summary="报表：发货记录",
 )
 def shipments_report(
-    date_from: date = Query(description="发货日期起"),
-    date_to: date = Query(description="发货日期止"),
+    date_from: Optional[date] = Query(default=None, description="发货日期起，可省"),
+    date_to: Optional[date] = Query(default=None, description="发货日期止，可省"),
     db: Session = Depends(get_db),
 ) -> ApiResponse[List[schemas.ShipmentReportOut]]:
-    """发货记录报表（行级）。"""
+    """发货记录报表（行级）。日期区间可省，省则不过滤。"""
     return success(service.shipments_report(db, date_from, date_to))
 
 
@@ -581,11 +581,11 @@ def shipments_report(
     summary="报表：退货记录",
 )
 def returns_report(
-    date_from: date = Query(description="退货日期起"),
-    date_to: date = Query(description="退货日期止"),
+    date_from: Optional[date] = Query(default=None, description="退货日期起，可省"),
+    date_to: Optional[date] = Query(default=None, description="退货日期止，可省"),
     db: Session = Depends(get_db),
 ) -> ApiResponse[List[schemas.ReturnReportOut]]:
-    """退货记录报表（行级）。"""
+    """退货记录报表（行级）。日期区间可省，省则不过滤。"""
     return success(service.returns_report(db, date_from, date_to))
 
 
@@ -595,15 +595,15 @@ def returns_report(
     summary="报表：销售量按物料汇总",
 )
 def sales_volume_report(
-    date_from: date = Query(description="发货日期起"),
-    date_to: date = Query(description="发货日期止"),
+    date_from: Optional[date] = Query(default=None, description="发货日期起，可省"),
+    date_to: Optional[date] = Query(default=None, description="发货日期止，可省"),
     db: Session = Depends(get_db),
 ) -> ApiResponse[List[schemas.SalesVolumeOut]]:
-    """销售量按物料汇总（已确认发货单）。"""
+    """销售量按物料汇总（已确认发货单）。日期区间可省，省则不过滤。"""
     return success(service.sales_volume_report(db, date_from, date_to))
 
 
 @router.get("/stats", response_model=ApiResponse[schemas.SalesStatsOut], summary="销售统计")
 def stats(db: Session = Depends(get_db)) -> ApiResponse[schemas.SalesStatsOut]:
-    """销售模块统计（供 dashboard 使用）。"""
+    """销售模块统计（供 dashboard 使用）。业务量按本月统计。"""
     return success(service.stats(db))

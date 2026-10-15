@@ -248,6 +248,7 @@
 | `POST` | `/api/v1/planning/demands/from-replenishment` | 从库存补库需求生成需求 | — | — | `DemandFromReplenishmentRequest` |
 | `POST` | `/api/v1/planning/demands/from-replenishment/import` | 从库存补库需求批量导入需求（仅转计划 `PRODUCTION`） | — | — | — |
 | `POST` | `/api/v1/planning/demands/from-sales` | 从销售订单导入需求 | — | — | — |
+| `POST` | `/api/v1/planning/demands/from-forecast` | 从销售预测导入需求 | — | `month_from`、`month_to` | — |
 | `GET` | `/api/v1/planning/demands/{demand_id}` | 需求详情 | `demand_id` | — | — |
 | `PATCH` | `/api/v1/planning/demands/{demand_id}/status` | 需求状态流转 | `demand_id` | — | `DemandStatusUpdate` |
 | `GET` | `/api/v1/planning/dispatch-orders` | 派工单列表 | — | `status`、`plan_id`、`page`、`page_size` | — |

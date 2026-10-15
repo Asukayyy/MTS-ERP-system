@@ -1,10 +1,9 @@
 import { del, get, patch, post, put } from '@/utils/request'
-import type { HealthData, PageData } from '@/types/api'
+import type { PageData } from '@/types/api'
 import type {
   Customer,
   Forecast,
   Order,
-  OrderStatusReport,
   Product,
   SalesReturn,
   SalesStats,
@@ -12,10 +11,6 @@ import type {
 } from '@/types/erp'
 
 /** sales 模块接口（销售管理），统一前缀 /api/v1/sales */
-
-export function getSalesHealth(): Promise<HealthData> {
-  return get<HealthData>('/sales/health')
-}
 
 export function getSalesStats(): Promise<SalesStats> {
   return get<SalesStats>('/sales/stats')
@@ -143,22 +138,4 @@ export function cancelReturn(id: number, operatorId?: number): Promise<SalesRetu
   return post<SalesReturn>(`/sales/returns/${id}/cancel`, undefined, {
     params: operatorId ? { operator_id: operatorId } : undefined,
   })
-}
-
-// ---------------- 报表 ----------------
-
-export function getOrderStatusReport(): Promise<OrderStatusReport[]> {
-  return get<OrderStatusReport[]>('/sales/reports/order-status')
-}
-
-export function getShipmentReport(params: { date_from: string; date_to: string }): Promise<unknown[]> {
-  return get<unknown[]>('/sales/reports/shipments', params)
-}
-
-export function getReturnReport(params: { date_from: string; date_to: string }): Promise<unknown[]> {
-  return get<unknown[]>('/sales/reports/returns', params)
-}
-
-export function getSalesVolumeReport(params: { date_from: string; date_to: string }): Promise<unknown[]> {
-  return get<unknown[]>('/sales/reports/sales-volume', params)
 }

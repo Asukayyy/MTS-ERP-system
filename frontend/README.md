@@ -18,7 +18,7 @@ frontend/
 │   │   ├── login/              # 登录前页面（占位）
 │   │   ├── error/              # 404
 │   │   └── system/ sales/ planning/ procurement/ inventory/
-│   ├── components/common/      # 跨模块公共组件（如 ModulePlaceholder）
+│   ├── components/common/      # 跨模块公共组件（RemoteSelect、StatusTag）
 │   ├── layouts/                # BasicLayout + AppHeader + AppSidebar + menu.ts
 │   ├── router/                 # index.ts（路由实例）、routes.ts（路由表）
 │   ├── stores/                 # Pinia：index.ts、modules/app.ts

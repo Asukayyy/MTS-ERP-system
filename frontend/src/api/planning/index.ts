@@ -1,5 +1,5 @@
 import { del, get, patch, post, put } from '@/utils/request'
-import type { HealthData, PageData } from '@/types/api'
+import type { PageData } from '@/types/api'
 import type {
   BatchDeleteResult,
   CompletionReport,
@@ -17,10 +17,6 @@ import type {
 } from '@/types/erp'
 
 /** planning 模块接口（计划管理），统一前缀 /api/v1/planning */
-
-export function getPlanningHealth(): Promise<HealthData> {
-  return get<HealthData>('/planning/health')
-}
 
 export function getPlanningStats(): Promise<PlanningStats> {
   return get<PlanningStats>('/planning/stats')

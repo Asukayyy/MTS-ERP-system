@@ -71,17 +71,26 @@ def get_demands_by_ids(db: Session, demand_ids: Sequence[int]) -> List[models.Pl
 
 
 def find_demand_by_source(
-    db: Session, source_type: str, source_reference_id: Optional[int]
+    db: Session,
+    source_type: str,
+    source_reference_id: Optional[int],
+    source_no: Optional[str] = None,
 ):
-    """按来源类型 + 来源单据ID 查找已有需求（导入去重用）。"""
+    """按来源类型 + 来源单据ID 查找已有需求（导入去重用）。
+
+    `source_no` 非空时一并匹配：`source_reference_id` 是跨模块多态引用，
+    销售订单与销售预测行的 id 会重号，只有带上来源单号才能区分同一
+    `source_type` 下的不同来源单据（否则预测需求会被订单需求误判为已导入）。
+    """
     if source_reference_id is None:
         return None
-    return db.scalar(
-        select(models.PlnDemand).where(
-            models.PlnDemand.source_type == source_type,
-            models.PlnDemand.source_reference_id == source_reference_id,
-        )
-    )
+    conditions = [
+        models.PlnDemand.source_type == source_type,
+        models.PlnDemand.source_reference_id == source_reference_id,
+    ]
+    if source_no:
+        conditions.append(models.PlnDemand.source_no == source_no)
+    return db.scalar(select(models.PlnDemand).where(*conditions))
 
 
 # ==================== MPS ====================

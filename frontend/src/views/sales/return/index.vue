@@ -7,6 +7,7 @@ import {
   cancelReturn,
   confirmReturn,
   createReturn,
+  getOrder,
   listCustomers,
   listOrders,
   listProducts,
@@ -71,9 +72,18 @@ const form = reactive<{
 })
 
 const rules: FormRules = {
+  order_id: [{ required: true, message: '请选择原销售订单', trigger: 'change' }],
   customer_id: [{ required: true, message: '请选择客户', trigger: 'change' }],
   return_date: [{ required: true, message: '请选择退货日期', trigger: 'change' }],
   warehouse_id: [{ required: true, message: '请选择退回仓库', trigger: 'change' }],
+}
+
+/** 退货额度按原订单已发数量核算，选订单后自动带出该订单客户，避免 2004 */
+async function onOrderChange(value: number | undefined): Promise<void> {
+  form.customer_id = undefined
+  if (value === undefined) return
+  const order = await getOrder(value)
+  form.customer_id = order.customer_id
 }
 
 function addLine(): void {
@@ -96,7 +106,12 @@ function openCreate(): void {
 async function submit(): Promise<void> {
   const valid = await formRef.value?.validate().catch(() => false)
   if (!valid) return
-  if (form.customer_id === undefined || form.warehouse_id === undefined) return
+  if (
+    form.order_id === undefined ||
+    form.customer_id === undefined ||
+    form.warehouse_id === undefined
+  )
+    return
   const items = form.items.filter((item) => item.material_id !== undefined && item.quantity > 0)
   if (!items.length) {
     ElMessage.warning('请至少添加一行退货明细')
@@ -105,7 +120,7 @@ async function submit(): Promise<void> {
   submitting.value = true
   try {
     await createReturn({
-      order_id: form.order_id ?? null,
+      order_id: form.order_id,
       customer_id: form.customer_id,
       return_date: form.return_date,
       reason: form.reason || null,
@@ -246,8 +261,14 @@ onMounted(load)
             </el-form-item>
           </el-col>
           <el-col :span="12">
-            <el-form-item label="原销售订单">
-              <RemoteSelect v-model="form.order_id" :loader="loadOrderOptions" placeholder="可选" style="width: 100%" />
+            <el-form-item label="原销售订单" prop="order_id">
+              <RemoteSelect
+                v-model="form.order_id"
+                :loader="loadOrderOptions"
+                placeholder="必选"
+                style="width: 100%"
+                @change="onOrderChange"
+              />
             </el-form-item>
           </el-col>
           <el-col :span="12">
@@ -290,7 +311,9 @@ onMounted(load)
           </template>
         </el-table-column>
       </el-table>
-      <p class="form-tip">保存后为草稿状态，确认时才会写入库存流水。</p>
+      <p class="form-tip">
+        退货单必须关联原销售订单，数量不得超过该订单该物料的已发货数量（草稿单也占额度）；确认时才写入库存。
+      </p>
       <template #footer>
         <el-button @click="dialogVisible = false">取消</el-button>
         <el-button type="primary" :loading="submitting" @click="submit">保存</el-button>
