@@ -83,6 +83,7 @@
 | 场景 | 正确做法 | 错误做法 |
 | --- | --- | --- |
 | planning 需要销售需求 | 调用 sales 提供的 contract | 直接 `select` `sal_order` 表 |
+| planning 需要工艺路线工序（生成派工单） | 调用 `system.contract.get_active_routing_operations` | 直接 `select` `sys_routing` / `sys_routing_operation` |
 | inventory 需要物料信息 | 调用 system 提供的 contract | 跨模块 JOIN `sys_material` |
 | sales 需要可发货量 | 调用 inventory 提供的 contract | 直接读 `inv_balance` |
 
