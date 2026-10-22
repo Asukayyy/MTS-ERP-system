@@ -54,36 +54,28 @@ async function submit(): Promise<void> {
 
 <template>
   <div class="login">
+    <div class="login__art" aria-hidden="true"></div>
+
+    <div class="login__brand">
+      <svg class="login__brand-icon" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M12 21v-7" stroke="#3d9d94" stroke-width="2" stroke-linecap="round" />
+        <circle cx="12" cy="8" r="5" fill="#e0944a" />
+        <circle cx="6.5" cy="12.5" r="2.8" fill="#3d9d94" />
+        <circle cx="17.5" cy="12.5" r="2.8" fill="#3d9d94" />
+      </svg>
+      <span class="login__brand-name">大树科技有限公司</span>
+    </div>
+
     <form class="login__card" @submit.prevent="submit">
+      <span class="login__ribbon" aria-hidden="true"></span>
+      <span class="login__tab" aria-hidden="true"></span>
+
       <div class="login__header">
-        <h3 class="login__title">大牛技术有限公司</h3>
-        <!-- 卡片右上角悬浮的金色图标组（纯装饰） -->
-        <div class="login__badges" aria-hidden="true">
-          <span class="login__badge">
-            <svg viewBox="0 0 24 24" fill="currentColor">
-              <path d="M12 2 3 7v10l9 5 9-5V7l-9-5Zm0 2.3L18.7 8 12 11.7 5.3 8 12 4.3ZM5 9.7v6.1l6 3.3v-6.1L5 9.7Zm14 0-6 3.3v6.1l6-3.3V9.7Z" />
-            </svg>
-          </span>
-          <span class="login__badge">
-            <svg viewBox="0 0 24 24" fill="currentColor">
-              <path d="M4 19h3v-6H4v6Zm5 0h3V5H9v14Zm5 0h3v-9h-3v9Z" />
-            </svg>
-          </span>
-          <span class="login__badge">
-            <svg viewBox="0 0 24 24" fill="currentColor">
-              <path d="M4 5h16v3H4V5Zm1 5h14v9H5v-9Zm2 2v5h4v-5H7Z" />
-            </svg>
-          </span>
-        </div>
+        <h3 class="login__title">大树科技有限公司</h3>
       </div>
 
       <div class="login__body">
         <div class="login__field">
-          <span class="login__icon">
-            <svg viewBox="0 0 24 24" fill="currentColor">
-              <path d="M12 12a5 5 0 1 0 0-10 5 5 0 0 0 0 10Zm0 2c-4.4 0-8 2.2-8 5v1h16v-1c0-2.8-3.6-5-8-5Z" />
-            </svg>
-          </span>
           <input
             v-model="form.username"
             class="login__input"
@@ -94,11 +86,6 @@ async function submit(): Promise<void> {
         </div>
 
         <div class="login__field">
-          <span class="login__icon">
-            <svg viewBox="0 0 24 24" fill="currentColor">
-              <path d="M12 2a5 5 0 0 0-5 5v3H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8a2 2 0 0 0-2-2h-1V7a5 5 0 0 0-5-5Zm0 2a3 3 0 0 1 3 3v3H9V7a3 3 0 0 1 3-3Zm0 11a2 2 0 1 1 0 4 2 2 0 0 1 0-4Z" />
-            </svg>
-          </span>
           <input
             v-model="form.password"
             class="login__input"
@@ -113,11 +100,9 @@ async function submit(): Promise<void> {
           记住用户名
         </label>
 
-        <div class="login__actions">
-          <button class="login__submit" type="submit" :disabled="submitting">
-            {{ submitting ? '登录中…' : '登 录' }}
-          </button>
-        </div>
+        <button class="login__submit" type="submit" :disabled="submitting">
+          {{ submitting ? '登录中…' : '登 录' }}
+        </button>
       </div>
 
       <div class="login__footer">
@@ -132,179 +117,195 @@ async function submit(): Promise<void> {
 
 <style scoped>
 .login {
+  position: relative;
   display: flex;
   align-items: center;
-  justify-content: center;
-  height: 100%;
+  justify-content: flex-end;
   min-height: 100%;
-  padding: 80px 24px 40px;
-  overflow-y: auto;
-  background: #171a1f url('../../assets/login-bg.jpg') center / cover no-repeat;
+  padding: 48px clamp(28px, 5vw, 80px) 48px 24px;
+  overflow: hidden;
+  background: #faf8f4;
   font-family: 'Numans', 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
 }
 
-/* 压暗背景，保证半透明卡片上的文字可读 */
-.login::before {
-  content: '';
-  position: fixed;
-  inset: 0;
-  background: linear-gradient(rgba(0, 0, 0, 0.35), rgba(0, 0, 0, 0.65));
+/* 左侧沿用设计稿的插画，右边缘渐变淡出与页面底色衔接 */
+.login__art {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 60%;
+  background: url('../../assets/auth-left.png') left bottom / cover no-repeat;
+  -webkit-mask-image: linear-gradient(90deg, #000 92%, transparent 100%);
+  mask-image: linear-gradient(90deg, #000 92%, transparent 100%);
+}
+
+.login__brand {
+  display: none;
 }
 
 .login__card {
   position: relative;
   z-index: 1;
   width: 100%;
-  max-width: 400px;
-  background-color: rgba(0, 0, 0, 0.5);
-  border-radius: 6px;
-  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5);
-  color: #fff;
+  max-width: 420px;
+  border: 1px solid #ece8e0;
+  border-radius: 20px;
+  background-color: #fff;
+  box-shadow: 0 22px 50px rgba(80, 92, 88, 0.13);
+}
+
+/* 卡纸叠层：一片薄荷绿 + 一片白，轻微旋转，呼应设计稿的层叠卡片 */
+.login__card::before,
+.login__card::after {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  border-radius: 20px;
+}
+
+.login__card::before {
+  transform: rotate(-2.4deg) translate(-10px, 8px);
+  background-color: #d8e7e2;
+}
+
+.login__card::after {
+  transform: rotate(1.4deg) translate(10px, 4px);
+  border: 1px solid #e8e4dc;
+  background-color: #fff;
+}
+
+/* 右上角橙色书签 */
+.login__ribbon {
+  position: absolute;
+  top: -9px;
+  right: 30px;
+  width: 22px;
+  height: 34px;
+  border-radius: 2px;
+  background-color: #f0a24e;
+  clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 76%, 0 100%);
+  box-shadow: 0 3px 6px rgba(240, 162, 78, 0.32);
+}
+
+/* 右侧边缘的薄荷绿小标签 */
+.login__tab {
+  position: absolute;
+  top: 44%;
+  right: -13px;
+  width: 26px;
+  height: 58px;
+  border-radius: 8px;
+  background-color: #5cb6ae;
 }
 
 .login__header {
-  position: relative;
-  padding: 16px 20px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+  padding: 30px 30px 4px;
 }
 
 .login__title {
   margin: 0;
-  font-size: 28px;
-  font-weight: 500;
-  color: #fff;
-}
-
-/* 悬浮在卡片右上角、探出卡片边缘的图标组 */
-.login__badges {
-  position: absolute;
-  right: 20px;
-  top: -52px;
-  display: flex;
-  gap: 14px;
-}
-
-.login__badge {
-  display: block;
-  color: #ffc312;
-  line-height: 0;
-}
-
-.login__badge svg {
-  width: 48px;
-  height: 48px;
+  color: #33413f;
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: 2px;
 }
 
 .login__body {
-  padding: 20px;
+  padding: 20px 30px 26px;
 }
 
 .login__field {
-  display: flex;
-  margin-bottom: 16px;
-  border-radius: 4px;
-  overflow: hidden;
-  transition: box-shadow 0.2s;
-}
-
-.login__field:focus-within {
-  box-shadow: 0 0 0 2px rgba(255, 195, 18, 0.65);
-}
-
-.login__icon {
-  display: flex;
-  flex: 0 0 50px;
-  align-items: center;
-  justify-content: center;
-  background-color: #ffc312;
-  color: #1a1a1a;
-}
-
-.login__icon svg {
-  width: 22px;
-  height: 22px;
+  margin-bottom: 14px;
 }
 
 .login__input {
-  flex: 1;
-  min-width: 0;
-  height: 44px;
-  padding: 0 12px;
-  border: 0;
+  width: 100%;
+  height: 46px;
+  padding: 0 14px;
+  border: 1px solid #e6e2da;
+  border-radius: 10px;
   background-color: #fff;
-  color: #222;
+  color: #33413f;
   font-size: 15px;
   font-family: inherit;
+  transition: border-color 0.2s, box-shadow 0.2s;
 }
 
 .login__input:focus {
+  border-color: #5cb6ae;
   outline: none;
+  box-shadow: 0 0 0 3px rgba(92, 182, 174, 0.16);
 }
 
 .login__input::placeholder {
-  color: #9aa0a6;
+  color: #a9a294;
+}
+
+/* 浏览器自动填充会给输入框刷上浅黄底，这里压回白底 */
+.login__input:-webkit-autofill {
+  -webkit-text-fill-color: #33413f;
+  box-shadow: inset 0 0 0 100px #fff;
 }
 
 .login__remember {
   display: flex;
   gap: 8px;
   align-items: center;
-  margin-bottom: 16px;
+  margin: 4px 0 18px;
+  color: #6f6858;
   font-size: 14px;
-  color: #fff;
   cursor: pointer;
 }
 
 .login__remember input {
   width: 18px;
   height: 18px;
-  accent-color: #ffc312;
+  accent-color: #5cb6ae;
   cursor: pointer;
-}
-
-.login__actions {
-  display: flex;
-  justify-content: flex-end;
 }
 
 .login__submit {
-  min-width: 100px;
-  height: 40px;
-  padding: 0 18px;
+  width: 100%;
+  height: 46px;
   border: 0;
-  border-radius: 4px;
-  background-color: #ffc312;
-  color: #1a1a1a;
+  border-radius: 23px;
+  background-color: #5cb6ae;
+  color: #fff;
   font-size: 15px;
   font-family: inherit;
+  letter-spacing: 4px;
   cursor: pointer;
-  transition: background-color 0.2s;
+  box-shadow: 0 8px 18px rgba(92, 182, 174, 0.3);
+  transition: background-color 0.2s, box-shadow 0.2s;
 }
 
 .login__submit:hover:not(:disabled) {
-  background-color: #fff;
+  background-color: #4fa9a1;
+  box-shadow: 0 10px 22px rgba(92, 182, 174, 0.36);
 }
 
 .login__submit:disabled {
-  opacity: 0.65;
+  opacity: 0.6;
   cursor: not-allowed;
 }
 
 .login__footer {
-  padding: 14px 20px 18px;
-  border-top: 1px solid rgba(255, 255, 255, 0.12);
+  padding: 14px 30px 22px;
+  border-top: 1px solid #f2eee7;
   text-align: center;
   font-size: 13px;
 }
 
 .login__links {
-  color: #fff;
+  color: #8a8375;
   line-height: 1.9;
 }
 
 .login__links a {
   margin-left: 4px;
-  color: #ffc312;
+  color: #4fa9a1;
   text-decoration: none;
 }
 
@@ -312,23 +313,47 @@ async function submit(): Promise<void> {
   text-decoration: underline;
 }
 
-@media (max-width: 480px) {
+@media (max-width: 1100px) {
   .login {
-    padding: 64px 16px 24px;
+    justify-content: center;
+    padding: 96px 20px 40px;
   }
 
-  .login__badges {
-    top: -40px;
+  .login__art {
+    display: none;
+  }
+
+  .login__brand {
+    position: absolute;
+    top: 24px;
+    left: 22px;
+    display: flex;
+    align-items: center;
     gap: 10px;
   }
 
-  .login__badge svg {
-    width: 36px;
-    height: 36px;
+  .login__brand-icon {
+    width: 26px;
+    height: 26px;
   }
 
+  .login__brand-name {
+    color: #33413f;
+    font-size: 15px;
+    font-weight: 600;
+    letter-spacing: 1px;
+  }
+}
+
+@media (max-width: 480px) {
   .login__title {
-    font-size: 22px;
+    font-size: 18px;
+  }
+
+  .login__header,
+  .login__body {
+    padding-right: 22px;
+    padding-left: 22px;
   }
 }
 </style>

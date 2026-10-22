@@ -40,7 +40,8 @@ const selectedVersion = computed(() => versions.value.find((item) => item.id ===
 
 /** 选项加载：物料 */
 async function materialOptions(keyword: string): Promise<RemoteOption[]> {
-  const data = await listMaterials({ keyword, page: 1, page_size: 20 })
+  // 取后端允许的最大页长，避免"不输关键字时只列出前 20 个物料"把较早创建的物料整个藏掉
+  const data = await listMaterials({ keyword, page: 1, page_size: 200 })
   return data.items.map((item) => ({
     id: item.id,
     label: `${item.material_code} ${item.material_name}`,
@@ -218,7 +219,7 @@ async function removeItem(row: BomItem): Promise<void> {
 const versionDialogVisible = ref(false)
 const versionSubmitting = ref(false)
 const versionFormRef = ref<FormInstance>()
-const versionForm = reactive({ bom_version: '', effective_date: '', remark: '' })
+const versionForm = reactive({ bom_version: '', effective_date: '', expiry_date: '', remark: '' })
 const versionRules: FormRules = {
   bom_version: [{ required: true, message: '请输入版本号，如 V2.0', trigger: 'blur' }],
 }
@@ -253,14 +254,41 @@ function removeItemRow(index: number): void {
   })
 }
 
+/**
+ * 重置弹窗内尚未提交的输入。
+ * 有选中版本且已加载子项时，以其子项作为新版本的起点（即"在原基础修改"）；
+ * 否则回到一行空行（从空白新建）。
+ */
+function resetVersionRows(): void {
+  const base = selectedVersion.value
+  if (base && versionItems.value.length) {
+    versionItemRows.value = versionItems.value.map((item, index) => ({
+      material_id: item.material_id,
+      quantity: Number(item.quantity),
+      lead_time_offset: item.lead_time_offset,
+      scrap_rate: Number(item.scrap_rate),
+      sequence_no: index + 1,
+      remark: item.remark ?? '',
+    }))
+    return
+  }
+  versionItemRows.value = []
+  addItemRow()
+}
+
+/** 「全部重置」：清空弹窗内本次未保存的版本信息与子项，回到基准状态，不触碰库里已有数据。 */
+function resetVersionForm(): void {
+  Object.assign(versionForm, { bom_version: '', effective_date: '', expiry_date: '', remark: '' })
+  resetVersionRows()
+  versionFormRef.value?.clearValidate()
+}
+
 function openCreateVersion(): void {
   if (!selectedMaterialId.value) {
     ElMessage.warning('请先在左侧选择物料节点')
     return
   }
-  Object.assign(versionForm, { bom_version: '', effective_date: '', remark: '' })
-  versionItemRows.value = []
-  addItemRow()
+  resetVersionForm()
   versionDialogVisible.value = true
 }
 
@@ -286,6 +314,7 @@ async function submitVersion(): Promise<void> {
       material_id: selectedMaterialId.value,
       bom_version: versionForm.bom_version,
       effective_date: versionForm.effective_date || null,
+      expiry_date: versionForm.expiry_date || null,
       is_active: false,
       status: 'ACTIVE',
       remark: versionForm.remark,
@@ -361,21 +390,21 @@ onMounted(() => {
             placeholder="选择根物料"
             style="width: 280px"
           />
-          <el-button type="primary" :loading="treeLoading" @click="loadTree">展开多层 BOM</el-button>
+          <el-button type="primary" :loading="treeLoading" @click="loadTree">展开结构树</el-button>
         </div>
       </template>
 
       <el-row :gutter="12">
         <el-col :xs="24" :md="8" :lg="7">
           <el-card shadow="never" class="bom-panel">
-            <template #header><span>多层 BOM 结构</span></template>
+            <template #header><span>BOM 结构树</span></template>
             <el-tree
               v-loading="treeLoading"
               :data="treeData"
               node-key="material_id"
               :props="{ label: 'material_name', children: 'children' }"
               default-expand-all
-              empty-text="请选择根物料后展开"
+              empty-text="选择根物料后展开，点节点即可编辑其 BOM"
               @node-click="selectNode"
             >
               <template #default="{ data }">
@@ -508,19 +537,33 @@ onMounted(() => {
     <el-dialog v-model="versionDialogVisible" title="新增 BOM 版本（一次性填好版本与子项）" width="860px">
       <el-form ref="versionFormRef" :model="versionForm" :rules="versionRules" label-width="100px">
         <el-row :gutter="12">
-          <el-col :span="8">
+          <el-col :span="12">
             <el-form-item label="母件物料">
               <el-input :model-value="nodeMaterial ? `${nodeMaterial.material_code} ${nodeMaterial.material_name}` : ''" disabled />
             </el-form-item>
           </el-col>
-          <el-col :span="8">
+          <el-col :span="12">
             <el-form-item label="版本号" prop="bom_version">
               <el-input v-model="versionForm.bom_version" placeholder="如 V1.0" />
             </el-form-item>
           </el-col>
-          <el-col :span="8">
+        </el-row>
+        <el-row :gutter="12">
+          <el-col :span="12">
             <el-form-item label="生效日期">
               <el-date-picker v-model="versionForm.effective_date" type="date" value-format="YYYY-MM-DD" style="width: 100%" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="失效日期">
+              <el-date-picker
+                v-model="versionForm.expiry_date"
+                type="date"
+                value-format="YYYY-MM-DD"
+                placeholder="留空表示长期有效"
+                clearable
+                style="width: 100%"
+              />
             </el-form-item>
           </el-col>
         </el-row>
@@ -530,6 +573,9 @@ onMounted(() => {
       <div class="bom-items-editor">
         <div class="table-toolbar">
           <span>子项明细（可一次填多行）</span>
+          <span style="font-size: 12px; color: var(--el-text-color-secondary)">
+            初始子项{{ selectedVersion ? `来自版本 ${selectedVersion.bom_version}` : '为空' }}，可直接增删后保存
+          </span>
           <span class="table-toolbar__spacer" />
           <el-button type="primary" plain size="small" @click="addItemRow">+ 添加子项</el-button>
         </div>
@@ -565,6 +611,7 @@ onMounted(() => {
         </el-table>
       </div>
       <template #footer>
+        <el-button @click="resetVersionForm">全部重置</el-button>
         <el-button @click="versionDialogVisible = false">取消</el-button>
         <el-button type="primary" :loading="versionSubmitting" @click="submitVersion">保存</el-button>
       </template>
