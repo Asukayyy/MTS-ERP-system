@@ -2,7 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
-import { getInventoryStats, getLowStockReport, getStockSummary } from '@/api/inventory'
+import { getInventoryStats, getStockSummary } from '@/api/inventory'
 import {
   getPlanningStats,
   listMrpResults,
@@ -16,7 +16,6 @@ import StatusTag from '@/components/common/StatusTag.vue'
 import { toNumber } from '@/composables/usePagedTable'
 import type {
   InventoryStats,
-  LowStock,
   PlanningStats,
   ProcurementStats,
   SalesReturn,
@@ -33,7 +32,6 @@ const planning = ref<PlanningStats | null>(null)
 const inventory = ref<InventoryStats | null>(null)
 const sales = ref<SalesStats | null>(null)
 const procurement = ref<ProcurementStats | null>(null)
-const lowStock = ref<LowStock[]>([])
 const recentReturns = ref<SalesReturn[]>([])
 const mrpShortageCount = ref(0)
 const mrpRunNo = ref('')
@@ -97,9 +95,6 @@ async function loadAll(): Promise<void> {
     guard('采购统计', async () => {
       procurement.value = await getProcurementStats()
     }),
-    guard('库存预警', async () => {
-      lowStock.value = await getLowStockReport()
-    }),
     guard('近期退货', async () => {
       const data = await listReturns({ page: 1, page_size: 5 })
       recentReturns.value = data.items
@@ -159,13 +154,6 @@ const metrics = computed(() => [
     type: 'primary',
   },
   { label: '成品库存', value: finishedStockQty.value, unit: '件', path: '/inventory/balance', type: 'success' },
-  {
-    label: '库存预警',
-    value: inventory.value?.low_stock_count ?? lowStock.value.length,
-    unit: '项',
-    path: '/inventory/reorder',
-    type: 'danger',
-  },
   {
     label: '待发货订单',
     value: sales.value?.pending_shipment_order_count ?? 0,
@@ -244,29 +232,6 @@ onMounted(loadAll)
     </el-card>
 
     <el-row :gutter="12">
-      <el-col :xs="24" :lg="12">
-        <el-card class="dashboard__block" shadow="never">
-          <template #header>
-            <div class="dashboard__block-header">
-              <span class="dashboard__block-title">库存预警（可用量低于安全库存）</span>
-              <el-button link type="primary" @click="router.push('/inventory/reorder')">去处理</el-button>
-            </div>
-          </template>
-          <el-table :data="lowStock" size="small" border max-height="280">
-            <el-table-column label="物料编码" prop="material_code" min-width="120" />
-            <el-table-column label="物料名称" prop="material_name" min-width="140" />
-            <el-table-column label="可用量" prop="available_quantity" width="100" align="right" />
-            <el-table-column label="安全库存" prop="safety_stock" width="100" align="right" />
-            <el-table-column label="缺口" width="100" align="right">
-              <template #default="{ row }">
-                <span class="text-danger">{{ row.shortage_qty }}</span>
-              </template>
-            </el-table-column>
-            <template #empty>暂无库存预警</template>
-          </el-table>
-        </el-card>
-      </el-col>
-
       <el-col :xs="24" :lg="12">
         <el-card class="dashboard__block" shadow="never">
           <template #header>

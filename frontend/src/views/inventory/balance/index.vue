@@ -1,11 +1,10 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { onMounted } from 'vue'
 
-import { getLowStockReport, listBalances, listWarehouses } from '@/api/inventory'
+import { listBalances, listWarehouses } from '@/api/inventory'
 import RemoteSelect from '@/components/common/RemoteSelect.vue'
 import { usePagedTable, toNumber } from '@/composables/usePagedTable'
-import type { Balance, LowStock, RemoteOption } from '@/types/erp'
+import type { Balance, RemoteOption } from '@/types/erp'
 
 const { loading, rows, total, page, pageSize, query, load, search, reset, changePage, changeSize } =
   usePagedTable<Balance, { keyword: string; warehouse_id: number | undefined }>(
@@ -18,32 +17,8 @@ async function loadWarehouseOptions(keyword: string): Promise<RemoteOption[]> {
   return data.items.map((item) => ({ id: item.id, label: `${item.warehouse_code} ${item.warehouse_name}` }))
 }
 
-// ---------------- 低库存 / 缺料报表 ----------------
-
-const lowStockLoading = ref(false)
-const lowStockRows = ref<LowStock[]>([])
-
-async function loadLowStock(): Promise<void> {
-  lowStockLoading.value = true
-  try {
-    lowStockRows.value = await getLowStockReport()
-  } catch (error) {
-    ElMessage.error((error as Error).message)
-  } finally {
-    lowStockLoading.value = false
-  }
-}
-
-// ---------------- 低库存 / 缺料报表 ----------------
-
-function refreshAll(): void {
-  search()
-  loadLowStock()
-}
-
 onMounted(() => {
   load()
-  loadLowStock()
 })
 </script>
 
@@ -54,7 +29,7 @@ onMounted(() => {
         <div class="table-toolbar">
           <span class="page-title">实时库存</span>
           <span class="table-toolbar__spacer" />
-          <el-button @click="refreshAll">刷新</el-button>
+          <el-button @click="load">刷新</el-button>
         </div>
       </template>
 
@@ -78,7 +53,6 @@ onMounted(() => {
           <template #default="{ row }">{{ row.warehouse_name || `ID ${row.warehouse_id}` }}</template>
         </el-table-column>
         <el-table-column label="现有量" prop="on_hand" width="110" align="right" />
-        <el-table-column label="锁定量" prop="locked_quantity" width="110" align="right" />
         <el-table-column label="可用量" width="110" align="right">
           <template #default="{ row }">
             <span :class="{ 'qty-zero': toNumber(row.available_quantity) <= 0 }">{{ row.available_quantity }}</span>
@@ -98,24 +72,6 @@ onMounted(() => {
           @size-change="changeSize"
         />
       </div>
-    </el-card>
-
-    <el-card shadow="never" style="margin-top: 12px">
-      <template #header>
-        <div class="table-toolbar">
-          <span class="page-title">库存预警（低于安全库存）</span>
-          <span class="table-toolbar__spacer" />
-          <el-button @click="loadLowStock">刷新</el-button>
-        </div>
-      </template>
-      <el-table v-loading="lowStockLoading" :data="lowStockRows" border size="small">
-        <el-table-column label="物料编码" prop="material_code" min-width="130" />
-        <el-table-column label="物料名称" prop="material_name" min-width="160" />
-        <el-table-column label="可用量" prop="available_quantity" width="120" align="right" />
-        <el-table-column label="安全库存" prop="safety_stock" width="120" align="right" />
-        <el-table-column label="缺口数量" prop="shortage_qty" width="120" align="right" />
-        <template #empty>暂无低于安全库存的物料</template>
-      </el-table>
     </el-card>
   </div>
 </template>
