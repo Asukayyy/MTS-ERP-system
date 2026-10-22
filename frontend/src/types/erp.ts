@@ -341,16 +341,6 @@ export interface SalesReturn {
   items: ReturnItem[]
 }
 
-export interface OrderStatusReport {
-  order_no: string
-  customer_name?: string | null
-  order_date: string
-  status: string
-  total_qty: Num
-  delivered_qty: Num
-  fulfillment_rate: Num
-}
-
 export interface SalesStats {
   customer_count: number
   order_count: number
@@ -504,6 +494,8 @@ export interface ProductionPlan {
 export interface DispatchOrder {
   id: number
   dispatch_no: string
+  source_type: string
+  source_reference_id?: number | null
   plan_id?: number | null
   operation?: string | null
   planned_qty: Num
@@ -527,12 +519,50 @@ export interface RequisitionItem {
 export interface Requisition {
   id: number
   req_no: string
+  source_type: string
+  source_reference_id?: number | null
   plan_id?: number | null
   warehouse_id?: number | null
   req_date: string
   status: string
   remark?: string | null
   items: RequisitionItem[]
+}
+
+/** 按生产作业计划批量生成时的单条失败原因 */
+export interface GenerationError {
+  plan_id: number
+  plan_no?: string | null
+  material_code?: string | null
+  reason: string
+}
+
+/** 按生产作业计划批量生成时的单条跳过原因 */
+export interface GenerationSkip {
+  plan_id: number
+  plan_no?: string | null
+  reason: string
+}
+
+/** 按生产作业计划批量生成结果汇总 */
+export interface GenerationResult {
+  created_count: number
+  skipped_count: number
+  errors: GenerationError[]
+  skipped: GenerationSkip[]
+  ids: number[]
+}
+
+/** 批量删除时单条被跳过的原因 */
+export interface BatchDeleteSkip {
+  id: number
+  reason: string
+}
+
+/** 批量删除结果：成功条数与逐条跳过原因 */
+export interface BatchDeleteResult {
+  deleted_count: number
+  skipped: BatchDeleteSkip[]
 }
 
 export interface CompletionReport {
@@ -544,8 +574,8 @@ export interface CompletionReport {
   completed_qty: Num
   qualified_qty: Num
   scrap_qty: Num
-  warehouse_id: number
-  report_date: string
+  warehouse_id?: number | null
+  report_date?: string | null
   status: string
   remark?: string | null
 }

@@ -227,6 +227,33 @@ def get_routing_by_material_version(
     )
 
 
+def get_active_routing_for_material(
+    db: Session, material_id: int
+) -> Optional[models.SysRouting]:
+    """取某物料当前生效的工艺路线头（status=ACTIVE，多个版本时取最新一条）。"""
+    stmt = (
+        select(models.SysRouting)
+        .where(
+            models.SysRouting.material_id == material_id,
+            models.SysRouting.status == "ACTIVE",
+        )
+        .order_by(models.SysRouting.id.desc())
+    )
+    return db.scalar(stmt)
+
+
+def list_routing_operations(
+    db: Session, routing_id: int
+) -> List[models.SysRoutingOperation]:
+    return list(
+        db.scalars(
+            select(models.SysRoutingOperation)
+            .where(models.SysRoutingOperation.routing_id == routing_id)
+            .order_by(models.SysRoutingOperation.sequence_no, models.SysRoutingOperation.id)
+        )
+    )
+
+
 def add_routing(db: Session, routing: models.SysRouting) -> models.SysRouting:
     db.add(routing)
     db.flush()

@@ -1,5 +1,5 @@
 import { del, get, patch, post, put } from '@/utils/request'
-import type { HealthData, PageData } from '@/types/api'
+import type { PageData } from '@/types/api'
 import type {
   OrderReportRow,
   PendingReceiptRow,
@@ -21,10 +21,6 @@ import type {
  *
  * 路径与后端 `app/modules/procurement/router.py` 一一对应，不使用任何本地假数据。
  */
-
-export function getProcurementHealth(): Promise<HealthData> {
-  return get<HealthData>('/procurement/health')
-}
 
 export function getProcurementStats(): Promise<ProcurementStats> {
   return get<ProcurementStats>('/procurement/stats')

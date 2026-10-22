@@ -191,22 +191,41 @@ class DispatchOrderCreate(BaseModel):
     operation: Optional[str] = None
     planned_qty: Decimal = Field(gt=0, description="派工数量")
     worker_id: Optional[int] = Field(default=None, description="作业人员（sys_personnel.id）")
-    planned_start: date = Field(description="计划开始日期")
-    planned_end: date = Field(description="计划结束日期")
+    planned_start: Optional[date] = Field(default=None, description="计划开始日期，草稿可留空")
+    planned_end: Optional[date] = Field(default=None, description="计划结束日期，草稿可留空")
     remark: Optional[str] = None
 
 
 class DispatchOrderOut(_IdOut):
     dispatch_no: str
+    source_type: str
+    source_reference_id: Optional[int] = None
     plan_id: Optional[int] = None
     operation: Optional[str] = None
     planned_qty: Decimal
     completed_qty: Decimal
     worker_id: Optional[int] = None
-    planned_start: date
-    planned_end: date
+    planned_start: Optional[date] = None
+    planned_end: Optional[date] = None
     status: str
     remark: Optional[str] = None
+
+
+class DispatchOrderUpdate(BaseModel):
+    """派工单修改入参（人工审核调整，仅 DRAFT 可改；未传字段不改）。"""
+
+    operation: Optional[str] = None
+    planned_qty: Optional[Decimal] = Field(default=None, gt=0, description="派工数量")
+    worker_id: Optional[int] = Field(default=None, description="作业人员（sys_personnel.id）")
+    planned_start: Optional[date] = None
+    planned_end: Optional[date] = None
+    remark: Optional[str] = None
+
+
+class DispatchOrderFromPlansRequest(BaseModel):
+    """按生产作业计划生成派工单入参。"""
+
+    plan_ids: List[int] = Field(min_length=1, description="生产作业计划ID集合")
 
 
 # ---------------- 领料单 ----------------
@@ -220,7 +239,7 @@ class RequisitionCreate(BaseModel):
     req_no: Optional[str] = Field(default=None, description="领料单号，留空自动生成")
     plan_id: Optional[int] = None
     warehouse_id: Optional[int] = Field(default=None, description="领料仓库ID")
-    req_date: date = Field(description="领料日期")
+    req_date: Optional[date] = Field(default=None, description="领料日期，草稿可留空")
     remark: Optional[str] = None
     items: List[RequisitionItemCreate] = Field(default_factory=list, description="领料行")
 
@@ -235,12 +254,87 @@ class RequisitionItemOut(_IdOut):
 
 class RequisitionOut(_IdOut):
     req_no: str
+    source_type: str
+    source_reference_id: Optional[int] = None
     plan_id: Optional[int] = None
     warehouse_id: Optional[int] = None
-    req_date: date
+    req_date: Optional[date] = None
     status: str
     remark: Optional[str] = None
     items: List[RequisitionItemOut] = Field(default_factory=list)
+
+
+class RequisitionItemUpdate(BaseModel):
+    material_id: int = Field(description="物料ID")
+    required_qty: Decimal = Field(gt=0, description="需求数量")
+    remark: Optional[str] = None
+
+
+class RequisitionUpdate(BaseModel):
+    """领料单修改入参（人工审核调整，仅 DRAFT 可改；未传字段不改，`items` 传则整表替换）。"""
+
+    warehouse_id: Optional[int] = Field(default=None, description="领料仓库ID")
+    req_date: Optional[date] = None
+    remark: Optional[str] = None
+    items: Optional[List[RequisitionItemUpdate]] = Field(
+        default=None, description="领料行，传入则整表替换"
+    )
+
+
+class RequisitionFromPlansRequest(BaseModel):
+    """按生产作业计划生成领料单入参。"""
+
+    plan_ids: List[int] = Field(min_length=1, description="生产作业计划ID集合")
+    warehouse_id: Optional[int] = Field(default=None, description="领料仓库ID，可留空后续补填")
+
+
+# ---------------- 批量生成结果 ----------------
+class GenerationErrorOut(BaseModel):
+    """单条计划生成失败原因。"""
+
+    plan_id: int
+    plan_no: Optional[str] = None
+    material_code: Optional[str] = None
+    reason: str
+
+
+class GenerationSkipOut(BaseModel):
+    """单条计划被跳过的原因。"""
+
+    plan_id: int
+    plan_no: Optional[str] = None
+    reason: str
+
+
+class GenerationResultOut(BaseModel):
+    """批量生成汇总：新建 / 跳过 / 失败明细。"""
+
+    created_count: int
+    skipped_count: int
+    errors: List[GenerationErrorOut] = Field(default_factory=list)
+    skipped: List[GenerationSkipOut] = Field(default_factory=list)
+    ids: List[int] = Field(default_factory=list)
+
+
+# ---------------- 批量删除 ----------------
+class BatchDeleteRequest(BaseModel):
+    """批量删除入参：待删除单据 ID 集合。"""
+
+    ids: List[int] = Field(min_length=1, description="待删除单据ID集合")
+
+
+class BatchDeleteSkipOut(BaseModel):
+    """单条被跳过删除的原因。"""
+
+    id: int = Field(description="单据ID")
+    reason: str = Field(description="跳过原因")
+
+
+class BatchDeleteResultOut(BaseModel):
+    """批量删除汇总：成功条数 / 逐条跳过原因。"""
+
+    deleted_count: int = Field(description="成功删除条数")
+    skipped: List[BatchDeleteSkipOut] = Field(default_factory=list, description="逐条跳过原因")
 
 
 # ---------------- 完工报告 ----------------
@@ -252,8 +346,8 @@ class CompletionReportCreate(BaseModel):
     completed_qty: Decimal = Field(gt=0, description="完工数量")
     qualified_qty: Decimal = Field(ge=0, description="合格数量（入库数量）")
     scrap_qty: Decimal = Field(default=Decimal("0"), ge=0, description="报废数量")
-    warehouse_id: int = Field(description="入库仓库ID")
-    report_date: date = Field(description="报工日期")
+    warehouse_id: Optional[int] = Field(default=None, description="入库仓库ID，草稿可留空")
+    report_date: Optional[date] = Field(default=None, description="报工日期，草稿可留空")
     remark: Optional[str] = None
 
 
@@ -265,10 +359,28 @@ class CompletionReportOut(_IdOut):
     completed_qty: Decimal
     qualified_qty: Decimal
     scrap_qty: Decimal
-    warehouse_id: int
-    report_date: date
+    warehouse_id: Optional[int] = None
+    report_date: Optional[date] = None
     status: str
     remark: Optional[str] = None
+
+
+class CompletionReportUpdate(BaseModel):
+    """完工报告修改入参（人工补填，仅 DRAFT 可改；未传字段不改）。"""
+
+    dispatch_id: Optional[int] = Field(default=None, description="派工单ID")
+    completed_qty: Optional[Decimal] = Field(default=None, gt=0, description="完工数量")
+    qualified_qty: Optional[Decimal] = Field(default=None, ge=0, description="合格数量（入库数量）")
+    scrap_qty: Optional[Decimal] = Field(default=None, ge=0, description="报废数量")
+    warehouse_id: Optional[int] = Field(default=None, description="入库仓库ID")
+    report_date: Optional[date] = Field(default=None, description="报工日期")
+    remark: Optional[str] = None
+
+
+class CompletionReportFromPlansRequest(BaseModel):
+    """按生产作业计划生成完工报告入参。"""
+
+    plan_ids: List[int] = Field(min_length=1, description="生产作业计划ID集合")
 
 
 # ---------------- 统计 ----------------

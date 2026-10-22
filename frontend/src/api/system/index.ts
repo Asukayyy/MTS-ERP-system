@@ -1,5 +1,5 @@
 import { del, get, patch, post, put } from '@/utils/request'
-import type { HealthData, PageData } from '@/types/api'
+import type { PageData } from '@/types/api'
 import type {
   Bom,
   BomItem,
@@ -21,11 +21,6 @@ import type {
 } from '@/types/erp'
 
 /** system 模块接口（基础信息 / 系统管理），统一前缀 /api/v1/system */
-
-/** 占位健康检查，用于验证前后端连通性 */
-export function getSystemHealth(): Promise<HealthData> {
-  return get<HealthData>('/system/health')
-}
 
 /** 系统基础数据统计 */
 export function getSystemStats(): Promise<SystemStats> {

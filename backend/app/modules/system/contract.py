@@ -239,6 +239,52 @@ def has_bom(db: Session, material_id: int) -> bool:
     return get_active_bom(db, material_id) is not None
 
 
+# ==================== 工艺路线 ====================
+
+
+def get_active_routing_operations(
+    db: Session, material_id: int
+) -> List[Dict[str, Any]]:
+    """取某物料当前生效工艺路线的工序集合，供派工单按工序自动生成使用。
+
+    返回按 `sequence_no` 升序的 `[
+        {routing_id, routing_code, routing_version, sequence_no,
+         operation_code, operation_name, work_center, setup_time, run_time}
+    ]`；未维护生效工艺路线时返回空列表。
+    """
+    routing = db.scalar(
+        select(models.SysRouting)
+        .where(
+            models.SysRouting.material_id == material_id,
+            models.SysRouting.status == RecordStatus.ACTIVE.value,
+        )
+        .order_by(models.SysRouting.id.desc())
+    )
+    if not routing:
+        return []
+    operations = db.scalars(
+        select(models.SysRoutingOperation)
+        .where(models.SysRoutingOperation.routing_id == routing.id)
+        .order_by(
+            models.SysRoutingOperation.sequence_no, models.SysRoutingOperation.id
+        )
+    )
+    return [
+        {
+            "routing_id": routing.id,
+            "routing_code": routing.routing_code,
+            "routing_version": routing.routing_version,
+            "sequence_no": op.sequence_no,
+            "operation_code": op.operation_code,
+            "operation_name": op.operation_name,
+            "work_center": op.work_center,
+            "setup_time": op.setup_time,
+            "run_time": op.run_time,
+        }
+        for op in operations
+    ]
+
+
 # ==================== 操作日志（规格 §24） ====================
 
 

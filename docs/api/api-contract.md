@@ -230,24 +230,34 @@
 | `POST` | `/api/v1/sales/shipments/{shipment_id}/confirm` | 确认发货（调用库存出库） | `shipment_id` | `operator_id` | — |
 | `GET` | `/api/v1/sales/stats` | 销售统计 | — | — | — |
 
-### 2.3 计划与生产管理（`planning`，前缀 `/api/v1/planning`）—— 45 个操作
+### 2.3 计划与生产管理（`planning`，前缀 `/api/v1/planning`）—— 60 个操作
 
 | 方法 | 路径 | 说明 | 路径参数 | 查询参数 | 请求体 |
 | --- | --- | --- | --- | --- | --- |
 | `GET` | `/api/v1/planning/completion-reports` | 完工报告列表 | — | `status`、`plan_id`、`page`、`page_size` | — |
 | `POST` | `/api/v1/planning/completion-reports` | 新增完工报告 | — | — | `CompletionReportCreate` |
+| `POST` | `/api/v1/planning/completion-reports/batch-delete` | 批量删除完工报告（仅 DRAFT / CANCELLED，逐条返回跳过原因） | — | — | `BatchDeleteRequest` |
+| `POST` | `/api/v1/planning/completion-reports/from-plans` | 按生产作业计划生成完工报告（DRAFT，产出物料与剩余数量预填） | — | — | `CompletionReportFromPlansRequest` |
 | `GET` | `/api/v1/planning/completion-reports/{report_id}` | 完工报告详情 | `report_id` | — | — |
+| `DELETE` | `/api/v1/planning/completion-reports/{report_id}` | 删除完工报告（仅 DRAFT / CANCELLED） | `report_id` | — | — |
+| `PATCH` | `/api/v1/planning/completion-reports/{report_id}` | 修改完工报告（人工补填，仅 DRAFT） | `report_id` | — | `CompletionReportUpdate` |
 | `POST` | `/api/v1/planning/completion-reports/{report_id}/cancel` | 取消完工报告 | `report_id` | — | — |
 | `POST` | `/api/v1/planning/completion-reports/{report_id}/confirm` | 确认完工（入库） | `report_id` | — | — |
 | `GET` | `/api/v1/planning/demands` | 需求列表 | — | `source_type`、`status`、`page`、`page_size` | — |
 | `POST` | `/api/v1/planning/demands` | 新增需求 | — | — | `DemandCreate` |
 | `POST` | `/api/v1/planning/demands/from-replenishment` | 从库存补库需求生成需求 | — | — | `DemandFromReplenishmentRequest` |
+| `POST` | `/api/v1/planning/demands/from-replenishment/import` | 从库存补库需求批量导入需求（仅转计划 `PRODUCTION`） | — | — | — |
 | `POST` | `/api/v1/planning/demands/from-sales` | 从销售订单导入需求 | — | — | — |
+| `POST` | `/api/v1/planning/demands/from-forecast` | 从销售预测导入需求 | — | `month_from`、`month_to` | — |
 | `GET` | `/api/v1/planning/demands/{demand_id}` | 需求详情 | `demand_id` | — | — |
 | `PATCH` | `/api/v1/planning/demands/{demand_id}/status` | 需求状态流转 | `demand_id` | — | `DemandStatusUpdate` |
 | `GET` | `/api/v1/planning/dispatch-orders` | 派工单列表 | — | `status`、`plan_id`、`page`、`page_size` | — |
 | `POST` | `/api/v1/planning/dispatch-orders` | 新增派工单 | — | — | `DispatchOrderCreate` |
+| `POST` | `/api/v1/planning/dispatch-orders/batch-delete` | 批量删除派工单（仅 DRAFT / CANCELLED，逐条返回跳过原因） | — | — | `BatchDeleteRequest` |
+| `POST` | `/api/v1/planning/dispatch-orders/from-plans` | 按生产作业计划逐工序生成派工单（DRAFT） | — | — | `DispatchOrderFromPlansRequest` |
 | `GET` | `/api/v1/planning/dispatch-orders/{dispatch_id}` | 派工单详情 | `dispatch_id` | — | — |
+| `DELETE` | `/api/v1/planning/dispatch-orders/{dispatch_id}` | 删除派工单（仅 DRAFT / CANCELLED，须先删除引用它的完工报告） | `dispatch_id` | — | — |
+| `PATCH` | `/api/v1/planning/dispatch-orders/{dispatch_id}` | 修改派工单（人工审核，仅 DRAFT） | `dispatch_id` | — | `DispatchOrderUpdate` |
 | `PATCH` | `/api/v1/planning/dispatch-orders/{dispatch_id}/status` | 派工单状态流转 | `dispatch_id` | — | `app__modules__planning__schemas__StatusUpdate` |
 | `GET` | `/api/v1/planning/health` | planning 模块健康检查（占位） | — | — | — |
 | `GET` | `/api/v1/planning/mps` | MPS 列表 | — | `status`、`year`、`page`、`page_size` | — |
@@ -269,13 +279,19 @@
 | `GET` | `/api/v1/planning/mrp/runs/{run_id}/results` | MRP 批次结果（分页） | `run_id` | `supply_type`、`status`、`page`、`page_size` | — |
 | `GET` | `/api/v1/planning/production-plans` | 生产作业计划列表 | — | `status`、`material_id`、`page`、`page_size` | — |
 | `POST` | `/api/v1/planning/production-plans` | 新增生产作业计划 | — | — | `ProductionPlanCreate` |
+| `POST` | `/api/v1/planning/production-plans/batch-delete` | 批量删除生产作业计划（仅 DRAFT / CANCELLED，须先清理下游单据） | — | — | `BatchDeleteRequest` |
 | `POST` | `/api/v1/planning/production-plans/from-mrp` | 由 MRP 结果生成生产作业计划 | — | — | `ProductionPlanFromMrpRequest` |
 | `GET` | `/api/v1/planning/production-plans/{plan_id}` | 生产作业计划详情 | `plan_id` | — | — |
+| `DELETE` | `/api/v1/planning/production-plans/{plan_id}` | 删除生产作业计划（仅 DRAFT / CANCELLED，须先删除派工单 / 领料单 / 完工报告） | `plan_id` | — | — |
 | `PUT` | `/api/v1/planning/production-plans/{plan_id}` | 修改生产作业计划 | `plan_id` | — | `ProductionPlanUpdate` |
 | `PATCH` | `/api/v1/planning/production-plans/{plan_id}/status` | 生产作业计划状态流转 | `plan_id` | — | `app__modules__planning__schemas__StatusUpdate` |
 | `GET` | `/api/v1/planning/requisitions` | 领料单列表 | — | `status`、`plan_id`、`page`、`page_size` | — |
 | `POST` | `/api/v1/planning/requisitions` | 新增领料单 | — | — | `RequisitionCreate` |
+| `POST` | `/api/v1/planning/requisitions/batch-delete` | 批量删除领料单（仅 DRAFT / CANCELLED，明细一并删除） | — | — | `BatchDeleteRequest` |
+| `POST` | `/api/v1/planning/requisitions/from-plans` | 按生产作业计划 BOM 子件生成领料单（DRAFT） | — | — | `RequisitionFromPlansRequest` |
 | `GET` | `/api/v1/planning/requisitions/{req_id}` | 领料单详情 | `req_id` | — | — |
+| `DELETE` | `/api/v1/planning/requisitions/{req_id}` | 删除领料单（仅 DRAFT / CANCELLED，明细一并删除；已确认出库的不可删） | `req_id` | — | — |
+| `PATCH` | `/api/v1/planning/requisitions/{req_id}` | 修改领料单（人工审核，仅 DRAFT） | `req_id` | — | `RequisitionUpdate` |
 | `POST` | `/api/v1/planning/requisitions/{req_id}/cancel` | 取消领料单 | `req_id` | — | — |
 | `POST` | `/api/v1/planning/requisitions/{req_id}/confirm` | 确认领料（出库） | `req_id` | — | — |
 | `GET` | `/api/v1/planning/stats` | 计划模块统计 | — | — | — |

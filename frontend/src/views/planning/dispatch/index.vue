@@ -1,13 +1,22 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 
-import { createDispatchOrder, listDispatchOrders, listProductionPlans, setDispatchOrderStatus } from '@/api/planning'
+import {
+  batchDeleteDispatchOrders,
+  createDispatchOrder,
+  deleteDispatchOrder,
+  listDispatchOrders,
+  listProductionPlans,
+  setDispatchOrderStatus,
+  updateDispatchOrder,
+} from '@/api/planning'
 import { listPersonnel } from '@/api/system'
 import RemoteSelect from '@/components/common/RemoteSelect.vue'
 import StatusTag from '@/components/common/StatusTag.vue'
-import { usePagedTable } from '@/composables/usePagedTable'
+import GenerateFromPlansDialog from '@/components/planning/GenerateFromPlansDialog.vue'
+import { usePagedTable, toNumber } from '@/composables/usePagedTable'
 import type { DispatchOrder, RemoteOption } from '@/types/erp'
 
 const { loading, rows, total, page, pageSize, query, load, search, reset, changePage, changeSize } =
@@ -28,40 +37,56 @@ async function loadWorkerOptions(keyword: string): Promise<RemoteOption[]> {
 
 const dialogVisible = ref(false)
 const submitting = ref(false)
+const editingId = ref<number | null>(null)
 const formRef = ref<FormInstance>()
+const generateRef = ref<InstanceType<typeof GenerateFromPlansDialog>>()
 const form = reactive<{
   plan_id: number | undefined
   operation: string
   planned_qty: number
   worker_id: number | undefined
-  planned_start: string
-  planned_end: string
+  planned_start: string | null
+  planned_end: string | null
   remark: string
 }>({
   plan_id: undefined,
   operation: '',
   planned_qty: 1,
   worker_id: undefined,
-  planned_start: '',
-  planned_end: '',
+  planned_start: null,
+  planned_end: null,
   remark: '',
 })
 
+// 日期与作业人员为草稿阶段可留空的字段，由人工指定；确认前服务端会校验
 const rules: FormRules = {
   planned_qty: [{ required: true, message: '请输入派工数量', trigger: 'blur' }],
-  planned_start: [{ required: true, message: '请选择计划开始日期', trigger: 'change' }],
-  planned_end: [{ required: true, message: '请选择计划结束日期', trigger: 'change' }],
 }
 
 function openCreate(): void {
+  editingId.value = null
   Object.assign(form, {
     plan_id: undefined,
     operation: '',
     planned_qty: 1,
     worker_id: undefined,
-    planned_start: '',
-    planned_end: '',
+    planned_start: null,
+    planned_end: null,
     remark: '',
+  })
+  dialogVisible.value = true
+}
+
+function openEdit(row: DispatchOrder): void {
+  editingId.value = row.id
+  Object.assign(form, {
+    plan_id: row.plan_id ?? undefined,
+    operation: row.operation ?? '',
+    planned_qty: toNumber(row.planned_qty),
+    worker_id: row.worker_id ?? undefined,
+    planned_start: row.planned_start ?? null,
+    planned_end: row.planned_end ?? null,
+    remark: row.remark ?? '',
   })
   dialogVisible.value = true
 }
@@ -71,16 +96,28 @@ async function submit(): Promise<void> {
   if (!valid) return
   submitting.value = true
   try {
-    await createDispatchOrder({
-      plan_id: form.plan_id ?? null,
-      operation: form.operation || null,
-      planned_qty: form.planned_qty,
-      worker_id: form.worker_id ?? null,
-      planned_start: form.planned_start,
-      planned_end: form.planned_end,
-      remark: form.remark || null,
-    })
-    ElMessage.success('派工单已新增')
+    if (editingId.value === null) {
+      await createDispatchOrder({
+        plan_id: form.plan_id ?? null,
+        operation: form.operation || null,
+        planned_qty: form.planned_qty,
+        worker_id: form.worker_id ?? null,
+        planned_start: form.planned_start || null,
+        planned_end: form.planned_end || null,
+        remark: form.remark || null,
+      })
+      ElMessage.success('派工单已新增')
+    } else {
+      await updateDispatchOrder(editingId.value, {
+        operation: form.operation || null,
+        planned_qty: form.planned_qty,
+        worker_id: form.worker_id ?? null,
+        planned_start: form.planned_start || null,
+        planned_end: form.planned_end || null,
+        remark: form.remark || null,
+      })
+      ElMessage.success('派工单已修改')
+    }
     dialogVisible.value = false
     await load()
   } catch (error) {
@@ -100,6 +137,61 @@ async function changeStatus(row: DispatchOrder, status: string): Promise<void> {
   }
 }
 
+// ---------------- 删除（仅草稿 / 已取消可删） ----------------
+const selection = ref<DispatchOrder[]>([])
+
+function onSelectionChange(rows: DispatchOrder[]): void {
+  selection.value = rows
+}
+
+function isDeletable(row: DispatchOrder): boolean {
+  return ['DRAFT', 'CANCELLED'].includes(row.status)
+}
+
+async function remove(row: DispatchOrder): Promise<void> {
+  try {
+    await ElMessageBox.confirm(`确认删除派工单「${row.dispatch_no}」？`, '删除确认', {
+      type: 'warning',
+    })
+  } catch {
+    return
+  }
+  try {
+    await deleteDispatchOrder(row.id)
+    ElMessage.success('派工单已删除')
+    await load()
+  } catch (error) {
+    ElMessage.error((error as Error).message)
+  }
+}
+
+async function removeSelected(): Promise<void> {
+  const ids = selection.value.map((item) => item.id)
+  if (!ids.length) return
+  try {
+    await ElMessageBox.confirm(`确认删除选中的 ${ids.length} 张派工单？`, '批量删除确认', {
+      type: 'warning',
+    })
+  } catch {
+    return
+  }
+  try {
+    const result = await batchDeleteDispatchOrders(ids)
+    if (result.skipped.length) {
+      ElMessage.warning(
+        `已删除 ${result.deleted_count} 条，${result.skipped.length} 条未删除：${result.skipped
+          .map((item) => item.reason)
+          .join('；')}`,
+      )
+    } else {
+      ElMessage.success(`已删除 ${result.deleted_count} 张派工单`)
+    }
+    await load()
+  } catch (error) {
+    ElMessage.error((error as Error).message)
+  }
+}
+
 onMounted(load)
 </script>
 
@@ -110,6 +202,10 @@ onMounted(load)
         <div class="table-toolbar">
           <span class="page-title">派工单</span>
           <span class="table-toolbar__spacer" />
+          <el-button :disabled="!selection.length" type="danger" plain @click="removeSelected">
+            删除选中
+          </el-button>
+          <el-button @click="generateRef?.open()">按计划生成</el-button>
           <el-button type="primary" @click="openCreate">新增派工单</el-button>
         </div>
       </template>
@@ -134,20 +230,39 @@ onMounted(load)
         </el-form-item>
       </el-form>
 
-      <el-table v-loading="loading" :data="rows" border size="small">
+      <el-table
+        v-loading="loading"
+        :data="rows"
+        border
+        size="small"
+        @selection-change="onSelectionChange"
+      >
+        <el-table-column type="selection" width="44" :selectable="isDeletable" />
         <el-table-column label="派工单号" prop="dispatch_no" min-width="150" />
+        <el-table-column label="来源" width="90">
+          <template #default="{ row }"><StatusTag :status="row.source_type" /></template>
+        </el-table-column>
         <el-table-column label="作业计划ID" prop="plan_id" width="110" align="right" />
         <el-table-column label="工序" prop="operation" min-width="130" />
         <el-table-column label="派工数量" prop="planned_qty" width="110" align="right" />
         <el-table-column label="已完工" prop="completed_qty" width="100" align="right" />
-        <el-table-column label="作业人员ID" prop="worker_id" width="110" align="right" />
-        <el-table-column label="计划开始" prop="planned_start" width="110" />
-        <el-table-column label="计划结束" prop="planned_end" width="110" />
+        <el-table-column label="作业人员ID" prop="worker_id" width="110" align="right">
+          <template #default="{ row }">{{ row.worker_id ?? '待指派' }}</template>
+        </el-table-column>
+        <el-table-column label="计划开始" prop="planned_start" width="110">
+          <template #default="{ row }">{{ row.planned_start || '待填写' }}</template>
+        </el-table-column>
+        <el-table-column label="计划结束" prop="planned_end" width="110">
+          <template #default="{ row }">{{ row.planned_end || '待填写' }}</template>
+        </el-table-column>
         <el-table-column label="状态" width="90">
           <template #default="{ row }"><StatusTag :status="row.status" /></template>
         </el-table-column>
-        <el-table-column label="操作" width="250" fixed="right">
+        <el-table-column label="操作" width="330" fixed="right">
           <template #default="{ row }">
+            <el-button v-if="row.status === 'DRAFT'" link type="primary" @click="openEdit(row)">
+              编辑
+            </el-button>
             <el-button v-if="row.status === 'DRAFT'" link type="primary" @click="changeStatus(row, 'CONFIRMED')">
               确认
             </el-button>
@@ -168,7 +283,8 @@ onMounted(load)
             >
               取消
             </el-button>
-            <span v-if="row.status === 'COMPLETED' || row.status === 'CANCELLED'">-</span>
+            <el-button v-if="isDeletable(row)" link type="danger" @click="remove(row)">删除</el-button>
+            <span v-if="row.status === 'COMPLETED'">-</span>
           </template>
         </el-table-column>
         <template #empty>暂无派工单数据</template>
@@ -187,10 +303,16 @@ onMounted(load)
       </div>
     </el-card>
 
-    <el-dialog v-model="dialogVisible" title="新增派工单" width="640px">
+    <el-dialog v-model="dialogVisible" :title="editingId === null ? '新增派工单' : '编辑派工单'" width="640px">
       <el-form ref="formRef" :model="form" :rules="rules" label-width="120px">
         <el-form-item label="作业计划">
-          <RemoteSelect v-model="form.plan_id" :loader="loadPlanOptions" placeholder="可选" style="width: 100%" />
+          <RemoteSelect
+            v-model="form.plan_id"
+            :loader="loadPlanOptions"
+            :disabled="editingId !== null"
+            placeholder="可选"
+            style="width: 100%"
+          />
         </el-form-item>
         <el-form-item label="工序">
           <el-input v-model="form.operation" placeholder="如 组装 / 喷涂" />
@@ -202,10 +324,22 @@ onMounted(load)
           <RemoteSelect v-model="form.worker_id" :loader="loadWorkerOptions" placeholder="可选" style="width: 100%" />
         </el-form-item>
         <el-form-item label="计划开始日期" prop="planned_start">
-          <el-date-picker v-model="form.planned_start" type="date" value-format="YYYY-MM-DD" style="width: 100%" />
+          <el-date-picker
+            v-model="form.planned_start"
+            type="date"
+            value-format="YYYY-MM-DD"
+            placeholder="确认前必填"
+            style="width: 100%"
+          />
         </el-form-item>
         <el-form-item label="计划结束日期" prop="planned_end">
-          <el-date-picker v-model="form.planned_end" type="date" value-format="YYYY-MM-DD" style="width: 100%" />
+          <el-date-picker
+            v-model="form.planned_end"
+            type="date"
+            value-format="YYYY-MM-DD"
+            placeholder="确认前必填"
+            style="width: 100%"
+          />
         </el-form-item>
         <el-form-item label="备注">
           <el-input v-model="form.remark" type="textarea" :rows="2" />
@@ -216,5 +350,7 @@ onMounted(load)
         <el-button type="primary" :loading="submitting" @click="submit">保存</el-button>
       </template>
     </el-dialog>
+
+    <GenerateFromPlansDialog ref="generateRef" mode="dispatch" @generated="load" />
   </div>
 </template>

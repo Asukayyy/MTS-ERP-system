@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 
 import {
+  batchDeleteProductionPlans,
   createProductionPlan,
+  deleteProductionPlan,
   listProductionPlans,
   setProductionPlanStatus,
   updateProductionPlan,
@@ -124,6 +126,61 @@ async function changeStatus(row: ProductionPlan, status: string): Promise<void> 
   }
 }
 
+// ---------------- 删除（仅草稿 / 已取消可删） ----------------
+const selection = ref<ProductionPlan[]>([])
+
+function onSelectionChange(rows: ProductionPlan[]): void {
+  selection.value = rows
+}
+
+function isDeletable(row: ProductionPlan): boolean {
+  return ['DRAFT', 'CANCELLED'].includes(row.status)
+}
+
+async function remove(row: ProductionPlan): Promise<void> {
+  try {
+    await ElMessageBox.confirm(`确认删除作业计划「${row.plan_no}」？`, '删除确认', {
+      type: 'warning',
+    })
+  } catch {
+    return
+  }
+  try {
+    await deleteProductionPlan(row.id)
+    ElMessage.success('作业计划已删除')
+    await load()
+  } catch (error) {
+    ElMessage.error((error as Error).message)
+  }
+}
+
+async function removeSelected(): Promise<void> {
+  const ids = selection.value.map((item) => item.id)
+  if (!ids.length) return
+  try {
+    await ElMessageBox.confirm(`确认删除选中的 ${ids.length} 条作业计划？`, '批量删除确认', {
+      type: 'warning',
+    })
+  } catch {
+    return
+  }
+  try {
+    const result = await batchDeleteProductionPlans(ids)
+    if (result.skipped.length) {
+      ElMessage.warning(
+        `已删除 ${result.deleted_count} 条，${result.skipped.length} 条未删除：${result.skipped
+          .map((item) => item.reason)
+          .join('；')}`,
+      )
+    } else {
+      ElMessage.success(`已删除 ${result.deleted_count} 条作业计划`)
+    }
+    await load()
+  } catch (error) {
+    ElMessage.error((error as Error).message)
+  }
+}
+
 onMounted(load)
 </script>
 
@@ -134,6 +191,9 @@ onMounted(load)
         <div class="table-toolbar">
           <span class="page-title">生产作业计划</span>
           <span class="table-toolbar__spacer" />
+          <el-button :disabled="!selection.length" type="danger" plain @click="removeSelected">
+            删除选中
+          </el-button>
           <el-button type="primary" @click="openCreate">新增作业计划</el-button>
         </div>
       </template>
@@ -158,7 +218,14 @@ onMounted(load)
         </el-form-item>
       </el-form>
 
-      <el-table v-loading="loading" :data="rows" border size="small">
+      <el-table
+        v-loading="loading"
+        :data="rows"
+        border
+        size="small"
+        @selection-change="onSelectionChange"
+      >
+        <el-table-column type="selection" width="44" :selectable="isDeletable" />
         <el-table-column label="计划编号" prop="plan_no" min-width="150" />
         <el-table-column label="物料ID" prop="material_id" width="100" align="right" />
         <el-table-column label="来源" width="100">
@@ -172,7 +239,7 @@ onMounted(load)
         <el-table-column label="状态" width="90">
           <template #default="{ row }"><StatusTag :status="row.status" /></template>
         </el-table-column>
-        <el-table-column label="操作" width="250" fixed="right">
+        <el-table-column label="操作" width="300" fixed="right">
           <template #default="{ row }">
             <el-button v-if="row.status === 'DRAFT'" link type="primary" @click="changeStatus(row, 'CONFIRMED')">
               确认
@@ -195,6 +262,7 @@ onMounted(load)
               取消
             </el-button>
             <el-button v-if="row.status === 'DRAFT'" link type="primary" @click="openEdit(row)">编辑</el-button>
+            <el-button v-if="isDeletable(row)" link type="danger" @click="remove(row)">删除</el-button>
           </template>
         </el-table-column>
         <template #empty>暂无生产作业计划数据</template>

@@ -797,9 +797,9 @@ def test_end_to_end_chair_mts(client: TestClient) -> None:
         f"PRODUCTION 补库 → 生产计划#{production_confirmed['handled_ref_id']}（source=REPLENISHMENT）"
     )
 
-    # 7.3 补库需求 → 计划需求（拉取式：从库存契约接口批量导入 STOCKFILL 需求，已导入的跳过）
+    # 7.3 补库需求 → 计划需求（拉取式：只导入转计划 PRODUCTION 的补库需求，已导入的跳过）
     import_first = _ok(client, "POST", f"{PLANNING}/demands/from-replenishment/import")
-    assert import_first["created_count"] >= 2, import_first
+    assert import_first["created_count"] >= 1, import_first
     import_second = _ok(client, "POST", f"{PLANNING}/demands/from-replenishment/import")
     assert import_second["created_count"] <= import_first["created_count"], "重复导入不应新增"
 
@@ -834,14 +834,19 @@ def test_end_to_end_chair_mts(client: TestClient) -> None:
     assert prod_demand["source_type"] == "STOCKFILL"
     assert int(prod_demand["material_id"]) == semi_id
     assert _d(prod_demand["quantity"]) == Decimal("10")
-    reorder_demand = _stockfill_demand(int(reorder_request["id"]))
-    assert reorder_demand["source_no"] == reorder_request["request_no"]
-    assert int(reorder_demand["material_id"]) == reorder_material_id
+    # 转采购（REORDER）的补库需求归 Procurement 受理，不得进入计划模块
+    reorder_demands = [
+        item
+        for item in _all_stockfill_demands()
+        if int(item.get("source_reference_id") or -1) == int(reorder_request["id"])
+    ]
+    assert reorder_demands == [], "REORDER 补库需求不应导入计划模块"
 
     note(
-        f"[7.3] 拉取式导入：从库存接口批量导入 STOCKFILL 计划需求 "
+        f"[7.3] 拉取式导入：只导入转计划的补库需求 "
         f"（新建 {import_first['created_count']} / 重复导入跳过 {import_second['skipped_count']}），"
-        f"补库需求#{production_request['id']}、#{reorder_request['id']} 均生成需求且幂等"
+        f"补库需求#{production_request['id']} 生成需求且幂等，"
+        f"转采购的补库需求#{reorder_request['id']} 不导入计划模块"
     )
 
     # ------------------------------------------------------------------
