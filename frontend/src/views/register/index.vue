@@ -155,165 +155,241 @@ async function submit(): Promise<void> {
 
 <template>
   <div class="register-page">
-    <el-card class="register-page__card" shadow="never">
-      <template #header>
-        <span class="register-page__title">BH-ERP 账号注册</span>
-      </template>
+    <div class="register-page__art" aria-hidden="true"></div>
 
-      <el-form ref="formRef" :model="form" :rules="rules" label-width="90px">
-        <el-form-item label="用户名" prop="username">
-          <el-input v-model="form.username" placeholder="登录名（唯一）" size="large" />
-        </el-form-item>
-        <el-form-item label="显示名" prop="display_name">
-          <el-input v-model="form.display_name" placeholder="姓名（同时作为员工姓名）" size="large" />
-        </el-form-item>
-        <el-form-item label="所属部门" prop="org_id">
-          <el-select
-            v-model="form.org_id"
-            placeholder="选择你的部门"
-            size="large"
-            class="register-page__org"
-            :loading="orgLoading"
-          >
-            <el-option
-              v-for="org in topLevelOrgs"
-              :key="org.id"
-              :label="`${org.org_code} ${org.org_name}`"
-              :value="org.id"
-            />
-          </el-select>
-        </el-form-item>
-        <el-form-item v-if="isFactory" label="所属车间" prop="workshop_id">
-          <el-select
-            v-model="form.workshop_id"
-            placeholder="选择具体车间（选填）"
-            size="large"
-            class="register-page__org"
-            clearable
-          >
-            <el-option
-              v-for="ws in workshopOptions"
-              :key="ws.id"
-              :label="`${ws.org_code} ${ws.org_name}`"
-              :value="ws.id"
-            />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="工号" prop="employee_no">
-          <el-input
-            v-model="form.employee_no"
-            placeholder="留空自动生成（如 EMP00001）"
-            size="large"
-          />
-        </el-form-item>
-        <el-form-item label="密码" prop="password">
-          <el-input
-            v-model="form.password"
-            type="password"
-            placeholder="至少 6 位"
-            size="large"
-            show-password
-          />
-        </el-form-item>
-        <el-form-item label="确认密码" prop="password2">
-          <el-input
-            v-model="form.password2"
-            type="password"
-            placeholder="再次输入密码"
-            size="large"
-            show-password
-          />
-        </el-form-item>
-        <el-form-item label="选择身份" prop="role_id">
-          <el-select
-            v-model="form.role_id"
-            :placeholder="isFactory && !form.workshop_id ? '选车间后可选工人/组长' : '请选择你的身份'"
-            size="large"
-            class="register-page__org"
-            :disabled="!availableRoles.length"
-          >
-            <el-option
-              v-for="role in availableRoles"
-              :key="role.id"
-              :label="role.role_name"
-              :value="role.id"
+    <div class="register-page__brand">
+      <svg class="register-page__brand-icon" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M12 21v-7" stroke="#3d9d94" stroke-width="2" stroke-linecap="round" />
+        <circle cx="12" cy="8" r="5" fill="#e0944a" />
+        <circle cx="6.5" cy="12.5" r="2.8" fill="#3d9d94" />
+        <circle cx="17.5" cy="12.5" r="2.8" fill="#3d9d94" />
+      </svg>
+      <span class="register-page__brand-name">大树科技有限公司</span>
+    </div>
+
+    <div class="register-page__stack">
+      <span class="register-page__ribbon" aria-hidden="true"></span>
+      <span class="register-page__tab" aria-hidden="true"></span>
+      <el-card class="register-page__card" shadow="never">
+        <template #header>
+          <span class="register-page__title">账号注册</span>
+        </template>
+
+        <el-form ref="formRef" :model="form" :rules="rules" label-width="90px">
+          <el-form-item label="用户名" prop="username">
+            <el-input v-model="form.username" placeholder="登录名（唯一）" size="large" />
+          </el-form-item>
+          <el-form-item label="显示名" prop="display_name">
+            <el-input v-model="form.display_name" placeholder="姓名（同时作为员工姓名）" size="large" />
+          </el-form-item>
+          <el-form-item label="所属部门" prop="org_id">
+            <el-select
+              v-model="form.org_id"
+              placeholder="选择你的部门"
+              size="large"
+              class="register-page__org"
+              :loading="orgLoading"
             >
-              <div class="register-page__role-name">{{ role.role_name }}</div>
-              <div v-if="role.description" class="register-page__role-desc">{{ role.description }}</div>
-            </el-option>
-          </el-select>
-        </el-form-item>
-        <el-button
-          class="register-page__button"
-          type="primary"
-          size="large"
-          :loading="submitting || rolesLoading"
-          @click="submit"
-        >
-          注 册
-        </el-button>
-      </el-form>
+              <el-option
+                v-for="org in topLevelOrgs"
+                :key="org.id"
+                :label="`${org.org_code} ${org.org_name}`"
+                :value="org.id"
+              />
+            </el-select>
+          </el-form-item>
+          <el-form-item v-if="isFactory" label="所属车间" prop="workshop_id">
+            <el-select
+              v-model="form.workshop_id"
+              placeholder="选择具体车间（选填）"
+              size="large"
+              class="register-page__org"
+              clearable
+            >
+              <el-option
+                v-for="ws in workshopOptions"
+                :key="ws.id"
+                :label="`${ws.org_code} ${ws.org_name}`"
+                :value="ws.id"
+              />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="工号" prop="employee_no">
+            <el-input
+              v-model="form.employee_no"
+              placeholder="留空自动生成（如 EMP00001）"
+              size="large"
+            />
+          </el-form-item>
+          <el-form-item label="密码" prop="password">
+            <el-input
+              v-model="form.password"
+              type="password"
+              placeholder="至少 6 位"
+              size="large"
+              show-password
+            />
+          </el-form-item>
+          <el-form-item label="确认密码" prop="password2">
+            <el-input
+              v-model="form.password2"
+              type="password"
+              placeholder="再次输入密码"
+              size="large"
+              show-password
+            />
+          </el-form-item>
+          <el-form-item label="选择身份" prop="role_id">
+            <el-select
+              v-model="form.role_id"
+              :placeholder="isFactory && !form.workshop_id ? '选车间后可选工人/组长' : '请选择你的身份'"
+              size="large"
+              class="register-page__org"
+              :disabled="!availableRoles.length"
+            >
+              <el-option
+                v-for="role in availableRoles"
+                :key="role.id"
+                :label="role.role_name"
+                :value="role.id"
+              >
+                <div class="register-page__role-name">{{ role.role_name }}</div>
+                <div v-if="role.description" class="register-page__role-desc">{{ role.description }}</div>
+              </el-option>
+            </el-select>
+          </el-form-item>
+          <el-button
+            class="register-page__button"
+            type="primary"
+            size="large"
+            :loading="submitting || rolesLoading"
+            @click="submit"
+          >
+            注 册
+          </el-button>
+        </el-form>
 
-      <el-divider />
+        <el-divider />
 
-      <div class="register-page__footer">
-        <span>注册同时创建员工档案，归属所选部门，工号自动或手动分配。</span>
-        <router-link class="register-page__link" to="/login">去登录</router-link>
-      </div>
-    </el-card>
+        <div class="register-page__footer">
+          <span>注册同时创建员工档案，归属所选部门，工号自动或手动分配。</span>
+          <router-link class="register-page__link" to="/login">去登录</router-link>
+        </div>
+      </el-card>
+    </div>
   </div>
 </template>
 
 <style scoped>
-/* 注册页：与登录页同一套浅色风格，卡片压在插画右侧留白区 */
+/* 注册页：沿用设计稿的插画与卡纸叠层，只把表单换成本系统的注册表单 */
 .register-page {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: flex-end;
   min-height: 100%;
-  padding: 40px 7vw 40px 24px;
-  background: #f5f7fa url('../../assets/login-bg.png') center / cover no-repeat;
+  padding: 48px clamp(28px, 5vw, 80px) 48px 24px;
+  overflow: hidden;
+  background: #faf8f4;
+  font-family: 'Numans', 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+}
+
+.register-page__art {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 60%;
+  background: url('../../assets/auth-left.png') left bottom / cover no-repeat;
+  -webkit-mask-image: linear-gradient(90deg, #000 92%, transparent 100%);
+  mask-image: linear-gradient(90deg, #000 92%, transparent 100%);
+}
+
+.register-page__brand {
+  display: none;
+}
+
+.register-page__stack {
+  position: relative;
+  z-index: 1;
+  flex: 0 1 520px;
+  width: 100%;
+  max-width: 520px;
 }
 
 .register-page__card {
   position: relative;
-  z-index: 1;
-  width: 560px;
-  border: 1px solid #e6ebf2;
-  border-radius: 14px;
-  box-shadow: 0 18px 44px rgba(31, 45, 61, 0.12);
-  /* Element Plus 控件跟随插画的蓝橙配色 */
-  --el-color-primary: #3a7bd5;
-  --el-color-primary-light-3: #5b93de;
-  --el-color-primary-light-5: #7dabe6;
-  --el-color-primary-light-7: #a0c3ee;
-  --el-color-primary-light-8: #b1cdf2;
-  --el-color-primary-light-9: #e3edf9;
-  --el-color-primary-dark-2: #2f6bc0;
-  --el-text-color-primary: #1f2d3d;
-  --el-text-color-regular: #4a5568;
-  --el-text-color-placeholder: #9aa7b8;
-  --el-border-color: #dfe5ee;
-  --el-border-color-light: #e8eef7;
-  --el-border-color-hover: #b9cbe6;
+  overflow: visible;
+  border: 1px solid #ece8e0;
+  border-radius: 20px;
+  box-shadow: 0 22px 50px rgba(80, 92, 88, 0.13);
+  /* Element Plus 控件跟随设计稿的橙青配色 */
+  --el-color-primary: #5cb6ae;
+  --el-color-primary-light-3: #7cc6bf;
+  --el-color-primary-light-5: #9dd5d0;
+  --el-color-primary-light-7: #bee3df;
+  --el-color-primary-light-8: #cfece9;
+  --el-color-primary-light-9: #e6f3f1;
+  --el-color-primary-dark-2: #4fa9a1;
+  --el-text-color-primary: #33413f;
+  --el-text-color-regular: #5c5648;
+  --el-text-color-placeholder: #a9a294;
+  --el-border-color: #e6e2da;
+  --el-border-color-light: #f2eee7;
+  --el-border-color-hover: #cdc3ae;
+  --el-border-radius-base: 10px;
 }
 
-/* 卡片上沿的蓝橙点缀，与登录页一致 */
-.register-page__card::before {
+/* 卡纸叠层：薄荷绿 + 白，与登录卡片一致 */
+.register-page__card::before,
+.register-page__card::after {
   content: '';
   position: absolute;
-  top: 0;
-  right: 0;
-  left: 0;
-  height: 3px;
-  border-radius: 13px 13px 0 0;
-  background: linear-gradient(90deg, #3a7bd5, #f0a13c);
+  z-index: -1;
+  inset: 0;
+  border-radius: 20px;
+}
+
+.register-page__card::before {
+  transform: rotate(-2.2deg) translate(-9px, 8px);
+  background-color: #d8e7e2;
+}
+
+.register-page__card::after {
+  transform: rotate(1.4deg) translate(9px, 4px);
+  border: 1px solid #e8e4dc;
+  background-color: #fff;
+}
+
+.register-page__ribbon {
+  position: absolute;
+  top: -9px;
+  right: 34px;
+  z-index: 2;
+  width: 22px;
+  height: 34px;
+  border-radius: 2px;
+  background-color: #f0a24e;
+  clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 76%, 0 100%);
+  box-shadow: 0 3px 6px rgba(240, 162, 78, 0.32);
+}
+
+.register-page__tab {
+  position: absolute;
+  top: 42%;
+  right: -13px;
+  z-index: 2;
+  width: 26px;
+  height: 58px;
+  border-radius: 8px;
+  background-color: #5cb6ae;
 }
 
 .register-page__title {
-  font-size: 16px;
+  color: #33413f;
+  font-size: 18px;
   font-weight: 600;
-  color: #1f2d3d;
+  letter-spacing: 2px;
 }
 
 .register-page__org {
@@ -327,23 +403,28 @@ async function submit(): Promise<void> {
 .register-page__role-desc {
   font-size: 12px;
   line-height: 1.4;
-  color: #7a8699;
+  color: #8a8375;
   white-space: normal;
 }
 
 .register-page__button {
   width: 100%;
+  height: 46px;
+  margin-top: 6px;
+  border-radius: 23px;
+  letter-spacing: 4px;
+  box-shadow: 0 8px 18px rgba(92, 182, 174, 0.3);
 }
 
 .register-page__footer {
-  text-align: center;
-  color: #7a8699;
+  color: #8a8375;
   font-size: 13px;
+  text-align: center;
 }
 
 .register-page__link {
   margin-left: 6px;
-  color: #3a7bd5;
+  color: #4fa9a1;
   text-decoration: none;
 }
 
@@ -351,14 +432,39 @@ async function submit(): Promise<void> {
   text-decoration: underline;
 }
 
-/* 窄屏时卡片居中，并把背景压淡保证对比 */
-@media (max-width: 1200px) {
+@media (max-width: 1279px) {
   .register-page {
     justify-content: center;
-    padding: 40px 20px;
-    background-image:
-      linear-gradient(rgba(247, 249, 252, 0.88), rgba(247, 249, 252, 0.95)),
-      url('../../assets/login-bg.png');
+    padding: 96px 20px 40px;
+  }
+
+  .register-page__art {
+    display: none;
+  }
+
+  .register-page__brand {
+    position: absolute;
+    top: 24px;
+    left: 22px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .register-page__brand-icon {
+    width: 26px;
+    height: 26px;
+  }
+
+  .register-page__brand-name {
+    color: #33413f;
+    font-size: 15px;
+    font-weight: 600;
+    letter-spacing: 1px;
+  }
+
+  .register-page__stack {
+    flex: 0 1 520px;
   }
 }
 </style>
