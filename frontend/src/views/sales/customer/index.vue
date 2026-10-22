@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 
-import { createCustomer, listCustomers, setCustomerStatus, updateCustomer } from '@/api/sales'
+import { createCustomer, deleteCustomer, listCustomers, setCustomerStatus, updateCustomer } from '@/api/sales'
 import StatusTag from '@/components/common/StatusTag.vue'
 import { usePagedTable } from '@/composables/usePagedTable'
 import type { Customer } from '@/types/erp'
@@ -112,6 +112,22 @@ async function toggleStatus(row: Customer): Promise<void> {
   }
 }
 
+async function remove(row: Customer): Promise<void> {
+  const confirmed = await ElMessageBox.confirm(
+    `确认删除客户「${row.customer_name}」吗？删除后不可恢复。`,
+    '删除确认',
+    { type: 'warning' },
+  ).catch(() => false)
+  if (!confirmed) return
+  try {
+    await deleteCustomer(row.id)
+    ElMessage.success('客户已删除')
+    await load()
+  } catch (error) {
+    ElMessage.error((error as Error).message)
+  }
+}
+
 onMounted(load)
 </script>
 
@@ -152,7 +168,7 @@ onMounted(load)
         <el-table-column label="状态" width="90">
           <template #default="{ row }"><StatusTag :status="row.status" /></template>
         </el-table-column>
-        <el-table-column label="操作" width="140" fixed="right">
+        <el-table-column label="操作" width="190" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" @click="openEdit(row)">编辑</el-button>
             <el-button
@@ -162,6 +178,7 @@ onMounted(load)
             >
               {{ row.status === 'ACTIVE' ? '停用' : '启用' }}
             </el-button>
+            <el-button link type="danger" @click="remove(row)">删除</el-button>
           </template>
         </el-table-column>
         <template #empty>暂无客户数据</template>

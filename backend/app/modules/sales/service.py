@@ -44,6 +44,7 @@ CODE_RETURN_MISMATCH = 2004  # 退货单与原订单客户不一致
 CODE_NOT_FOUND = 2005  # 资源不存在
 CODE_STATUS_INVALID = 2006  # 单据状态不允许该操作
 CODE_RETURN_QTY_EXCEED = 2007  # 退货数量超过可退数量（已发 - 已退）
+CODE_REFERENCED = 2008  # 资源已被业务单据引用，不可删除
 
 MODULE = "sales"
 
@@ -471,6 +472,30 @@ def set_customer_status(
         detail=f"客户 {customer.customer_code} 状态改为 {status}",
     )
     return _customer_dict(customer)
+
+
+def delete_customer(
+    db: Session, customer_id: int, operator_id: Optional[int] = None
+) -> None:
+    """物理删除客户；已被销售单据引用时拒绝，避免破坏外键与历史数据。"""
+    customer = _require_customer(db, customer_id)
+    references = repository.count_customer_references(db, customer_id)
+    if references:
+        raise BusinessException(
+            CODE_REFERENCED,
+            f"客户 {customer.customer_code} 已被 {references} 条销售单据引用，无法删除（可改为停用）",
+        )
+    code = customer.customer_code
+    repository.delete_customer(db, customer)
+    log_operation(
+        db,
+        module=MODULE,
+        action="DELETE",
+        target_type="sal_customer",
+        target_id=customer_id,
+        operator_id=operator_id,
+        detail=f"删除客户 {code}",
+    )
 
 
 # ==================== 销售产品查询（只读物料主数据） ====================

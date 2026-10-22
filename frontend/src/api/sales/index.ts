@@ -34,6 +34,10 @@ export function setCustomerStatus(id: number, status: string, operatorId?: numbe
   return patch<Customer>(`/sales/customers/${id}/status`, { status, operator_id: operatorId })
 }
 
+export function deleteCustomer(id: number, operatorId?: number): Promise<void> {
+  return del<void>(`/sales/customers/${id}`, { params: { operator_id: operatorId } })
+}
+
 // ---------------- 销售产品 ----------------
 
 export function listProducts(params: Record<string, unknown> = {}): Promise<Product[]> {

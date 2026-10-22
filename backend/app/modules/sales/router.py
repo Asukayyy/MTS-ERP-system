@@ -135,6 +135,22 @@ def set_customer_status(
     return success(customer)
 
 
+@router.delete(
+    "/customers/{customer_id}",
+    response_model=ApiResponse[None],
+    summary="删除客户",
+)
+def delete_customer(
+    customer_id: int,
+    operator_id: Optional[int] = Query(default=None),
+    db: Session = Depends(get_db),
+) -> ApiResponse[None]:
+    """物理删除客户；已被订单/发货/退货/预测引用时拒绝。"""
+    service.delete_customer(db, customer_id, operator_id)
+    db.commit()
+    return success()
+
+
 # ==================== 销售产品查询（只读成品物料） ====================
 
 
