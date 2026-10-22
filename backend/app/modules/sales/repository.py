@@ -111,6 +111,31 @@ def add_customer(db: Session, customer: models.SalCustomer) -> models.SalCustome
     return customer
 
 
+def count_customer_references(db: Session, customer_id: int) -> int:
+    """统计引用该客户的销售单据数（订单/发货/退货/预测），供删除前校验。"""
+    total = 0
+    for model in (
+        models.SalOrder,
+        models.SalShipment,
+        models.SalReturn,
+        models.SalForecast,
+    ):
+        total += int(
+            db.scalar(
+                select(func.count())
+                .select_from(model)
+                .where(model.customer_id == customer_id)
+            )
+            or 0
+        )
+    return total
+
+
+def delete_customer(db: Session, customer: models.SalCustomer) -> None:
+    db.delete(customer)
+    db.flush()
+
+
 # ==================== 销售预测 ====================
 
 

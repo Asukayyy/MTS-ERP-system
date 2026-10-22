@@ -12,7 +12,7 @@ const router: Router = createRouter({
 // 浏览器标题跟随路由 meta.title
 router.afterEach((to) => {
   // 未配置 VITE_APP_TITLE 时的默认标题，取公司名
-  const appTitle = import.meta.env.VITE_APP_TITLE || '大牛技术有限公司'
+  const appTitle = import.meta.env.VITE_APP_TITLE || '大树科技有限公司'
   document.title = to.meta.title ? `${to.meta.title} - ${appTitle}` : appTitle
 })
 
