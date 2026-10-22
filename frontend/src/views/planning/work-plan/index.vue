@@ -227,7 +227,8 @@ onMounted(load)
       >
         <el-table-column type="selection" width="44" :selectable="isDeletable" />
         <el-table-column label="计划编号" prop="plan_no" min-width="150" />
-        <el-table-column label="物料ID" prop="material_id" width="100" align="right" />
+        <el-table-column label="物料编码" prop="material_code" min-width="140" />
+        <el-table-column label="物料名称" prop="material_name" min-width="140" />
         <el-table-column label="来源" width="100">
           <template #default="{ row }"><StatusTag :status="row.source_type" /></template>
         </el-table-column>

@@ -38,11 +38,12 @@ from app.core.mixins import AuditMixin, BigIntFk, BigIntPk, CodeStr
 
 
 class PlnDemand(Base, AuditMixin):
-    """统一需求入口：合并销售需求 / 库存补库需求 / MPS 需求。
+    """统一需求入口：合并销售订单 / 销售预测 / 库存补库需求 / MPS 需求。
 
-    `source_type` 取值见 `app.shared.enums.MrpSourceType`（SALES/STOCKFILL/MPS）。
-    `source_reference_id` 为跨模块多态引用（指向 sal_order / inv_replenishment_request 等），
-    只做索引不做物理外键。
+    `source_type` 取值见 `app.shared.enums.MrpSourceType`
+    （SALES/FORECAST/STOCKFILL/MPS）；其中 MPS 汇总只取 SALES 与 STOCKFILL。
+    `source_reference_id` 为跨模块多态引用（指向 sal_order / sal_forecast /
+    inv_replenishment_request 等），只做索引不做物理外键。
     """
 
     __tablename__ = "pln_demand"
@@ -50,7 +51,7 @@ class PlnDemand(Base, AuditMixin):
     id: Mapped[BigIntPk]
     demand_no: Mapped[CodeStr] = mapped_column(unique=True, comment="需求单号")
     source_type: Mapped[str] = mapped_column(
-        String(20), nullable=False, index=True, comment="需求来源 SALES/STOCKFILL/MPS"
+        String(20), nullable=False, index=True, comment="需求来源 SALES/FORECAST/STOCKFILL/MPS"
     )
     source_reference_id: Mapped[Optional[int]] = mapped_column(
         Integer, nullable=True, index=True, comment="来源单据ID（跨模块多态引用）"
@@ -67,7 +68,10 @@ class PlnDemand(Base, AuditMixin):
     remark: Mapped[Optional[str]] = mapped_column(Text, nullable=True, comment="备注")
 
     __table_args__ = (
-        CheckConstraint("source_type IN ('SALES','STOCKFILL','MPS')", name="ck_pln_demand_source"),
+        CheckConstraint(
+            "source_type IN ('SALES','FORECAST','STOCKFILL','MPS')",
+            name="ck_pln_demand_source",
+        ),
         CheckConstraint(
             "status IN ('DRAFT','CONFIRMED','RELEASED','COMPLETED','CANCELLED')",
             name="ck_pln_demand_status",
@@ -135,6 +139,9 @@ class PlnMpsItem(Base, AuditMixin):
         String(20), nullable=False, default="DRAFT", comment="状态"
     )
     remark: Mapped[Optional[str]] = mapped_column(Text, nullable=True, comment="备注")
+    source_demand_ids: Mapped[Optional[str]] = mapped_column(
+        String(500), nullable=True, comment="来源需求ID（逗号分隔，由需求汇总生成时写入）"
+    )
 
     mps: Mapped[PlnMps] = relationship(back_populates="items")
 

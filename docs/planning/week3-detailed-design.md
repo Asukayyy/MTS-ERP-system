@@ -57,12 +57,13 @@ CONFIRMED 亦可直接 ──▶ COMPLETED
 
 实现见 `service.py::run_mrp()`，与代码逐条对应：
 
-1. **第 0 层毛需求**来自三处：MPS 行（`planned_qty` / `end_date`）、指定 `pln_demand`
-   （状态 `CONFIRMED` / `RELEASED`）、可选销售订单需求（`include_sales_demand`）。
+1. **第 0 层毛需求**只来自 **MPS 行**（`planned_qty` / `end_date`）。需求必须先经
+   `/mps/from-demands` 汇总为 MPS（只聚合销售订单 `SALES` 与补库申请 `STOCKFILL`，
+   销售预测 `FORECAST` 不参与），MRP 不再接受 `demand_ids` 或 `include_sales_demand`。
 2. **逐层展开（广度优先）**：每层先净算，再用**父件净需求**（不是毛需求）展开下一层：
 
    ```
-   子件毛需求 = 父件净需求 × 用量 × (1 + 损耗率)
+   子件毛需求 = 父件下达量（净需求取整后）× 用量   （损耗率不参与计算）
    子件需求日期 = 父件需求日期 − lead_time_offset
    ```
 

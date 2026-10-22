@@ -344,6 +344,28 @@ def get_available_qty(
     return repository.sum_available(db, material_id, warehouse_id)
 
 
+def get_available_by_warehouse(db: Session, material_id: int) -> List[Dict[str, Any]]:
+    """某物料各仓库可用量明细（可用量 > 0），按可用量倒序。
+
+    供销售订单确认时把需求分配到具体仓库（`sales` 通过 `inventory.contract` 调用）。
+    """
+    return [
+        {
+            "warehouse_id": int(row[0]),
+            "on_hand": Decimal(str(row[1])),
+            "available": Decimal(str(row[2])),
+        }
+        for row in repository.list_available_by_warehouse(db, material_id)
+    ]
+
+
+def get_warehouse_names(
+    db: Session, warehouse_ids: Sequence[int]
+) -> Dict[int, Dict[str, str]]:
+    """批量取仓库编码与名称，用于列表展示（`planning` 通过契约调用）。"""
+    return repository.warehouse_names(db, warehouse_ids)
+
+
 def get_stock_snapshot(
     db: Session, material_ids: Sequence[int], warehouse_id: Optional[int] = None
 ) -> Dict[int, Dict[str, Decimal]]:

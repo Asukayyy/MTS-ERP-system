@@ -7,7 +7,7 @@
 
 from datetime import date
 from decimal import Decimal
-from typing import List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
@@ -73,6 +73,20 @@ def list_warehouses(
 
 def get_warehouse(db: Session, warehouse_id: int) -> Optional[models.InvWarehouse]:
     return db.get(models.InvWarehouse, warehouse_id)
+
+
+def warehouse_names(db: Session, warehouse_ids: Sequence[int]) -> Dict[int, Dict[str, str]]:
+    """批量取仓库编码与名称，返回 `{warehouse_id: {"warehouse_code", "warehouse_name"}}`。"""
+    ids = [int(i) for i in warehouse_ids if i]
+    if not ids:
+        return {}
+    rows = db.scalars(
+        select(models.InvWarehouse).where(models.InvWarehouse.id.in_(ids))
+    )
+    return {
+        row.id: {"warehouse_code": row.warehouse_code, "warehouse_name": row.warehouse_name}
+        for row in rows
+    }
 
 
 def get_warehouse_by_code(db: Session, warehouse_code: str) -> Optional[models.InvWarehouse]:
@@ -167,6 +181,27 @@ def sum_available(
     if warehouse_id is not None:
         stmt = stmt.where(models.InvBalance.warehouse_id == warehouse_id)
     return Decimal(str(db.scalar(stmt) or 0))
+
+
+def list_available_by_warehouse(db: Session, material_id: int) -> List[Tuple]:
+    """某物料各仓库的可用量（现存量 - 锁定量 > 0），按可用量倒序、仓库ID升序。
+
+    返回 `[(warehouse_id, quantity, available)]`，供销售订单确认时按仓库分配库存。
+    """
+    available_expr = models.InvBalance.quantity - models.InvBalance.locked_quantity
+    stmt = (
+        select(
+            models.InvBalance.warehouse_id,
+            models.InvBalance.quantity,
+            available_expr,
+        )
+        .where(
+            models.InvBalance.material_id == material_id,
+            available_expr > 0,
+        )
+        .order_by(available_expr.desc(), models.InvBalance.warehouse_id)
+    )
+    return list(db.execute(stmt).all())
 
 
 def stock_snapshot(

@@ -145,19 +145,6 @@ def _create_mps(db: Session, material_id: int, qty, end_date: date) -> int:
     return mps.id
 
 
-def _create_confirmed_demand(db: Session, material_id: int, qty, due_date: date) -> int:
-    demand = service.create_demand(
-        db,
-        source_type="MPS",
-        material_id=material_id,
-        quantity=Decimal(str(qty)),
-        due_date=due_date,
-    )
-    service.set_demand_status(db, demand.id, "CONFIRMED")
-    db.commit()
-    return demand.id
-
-
 def _results_of_run(db: Session, run_id: int):
     rows, _ = service.list_mrp_results(db, page=1, page_size=200, run_id=run_id)
     return {row.material_id: row for row in rows}
@@ -250,9 +237,9 @@ def test_available_stock_and_safety_stock_netting(db: Session) -> None:
     _add_stock(db, material_id, warehouse_id, 30)
 
     due_date = date.today() + timedelta(days=20)
-    demand_id = _create_confirmed_demand(db, material_id, 100, due_date)
+    mps_id = _create_mps(db, material_id, 100, due_date)
 
-    run = service.run_mrp(db, demand_ids=[demand_id])
+    run = service.run_mrp(db, mps_id=mps_id)
     db.commit()
     result = _results_of_run(db, run.id)[material_id]
 
@@ -271,9 +258,9 @@ def test_net_requirement_never_negative(db: Session) -> None:
     warehouse_id = _create_warehouse(db)
     _add_stock(db, material_id, warehouse_id, 500)
 
-    demand_id = _create_confirmed_demand(db, material_id, 5, date.today() + timedelta(days=7))
+    mps_id = _create_mps(db, material_id, 5, date.today() + timedelta(days=7))
 
-    run = service.run_mrp(db, demand_ids=[demand_id])
+    run = service.run_mrp(db, mps_id=mps_id)
     db.commit()
     result = _results_of_run(db, run.id)[material_id]
     assert result.gross_requirement == Decimal("5.0000")
@@ -748,7 +735,7 @@ def test_generate_dispatch_orders_without_routing_reports_error(db: Session) -> 
 
 
 def test_generate_requisitions_quantity_and_aggregation(db: Session) -> None:
-    """领料数量 = 子件用量 × 计划量 × (1+损耗)。
+    """领料数量 = 子件用量 × 计划量（不计算损耗率）。
 
     注：`sys_bom_item` 唯一键为 (bom_id, material_id)，同一子件在同一层 BOM 只会出现一行，
     故此处按两个子件断言；service 侧的按物料聚合是为多行场景预留的兜底。
@@ -783,9 +770,9 @@ def test_generate_requisitions_quantity_and_aggregation(db: Session) -> None:
 
     by_material = {item.material_id: item.required_qty for item in req.items}
     assert len(by_material) == 2
-    # 2×10×1.1 = 22
-    assert by_material[child_a] == Decimal("22.0000")
-    # 5×10×1 = 50
+    # 2×10 = 20（损耗率不参与计算）
+    assert by_material[child_a] == Decimal("20.0000")
+    # 5×10 = 50
     assert by_material[child_b] == Decimal("50.0000")
 
 
@@ -1274,7 +1261,7 @@ def test_import_demands_from_forecast_uses_month_end_as_due_date(db: Session) ->
     assert result["created_count"] == 1
     assert result["skipped_count"] == 0
     demand = service.get_demand(db, result["demand_ids"][0])
-    assert demand.source_type == "SALES"
+    assert demand.source_type == "FORECAST"
     assert demand.source_no == forecast_no
     assert demand.material_id == material_id
     assert demand.quantity == Decimal("120.0000")
@@ -1299,11 +1286,11 @@ def test_import_demands_from_forecast_is_idempotent(db: Session) -> None:
 
 
 def test_import_demands_from_forecast_dedupes_by_source_no(db: Session) -> None:
-    """预测导入：id 与订单需求重号时不被误判为已导入（去重键含来源单号）。"""
+    """预测导入：销售订单需求与预测行 id 相同时不会被误判为已导入。"""
     material_id, _ = _create_material(db, supply_type="MAKE", material_type="FINISHED")
     forecast_id, _ = _create_forecast(db, material_id, "2026-05", "60")
 
-    # 造一条 id 与预测行相同的销售订单需求（source_type 同为 SALES）
+    # 造一条 id 与预测行相同的销售订单需求（source_type=SALES，与 FORECAST 互不干扰）
     service.create_demand(
         db,
         source_type="SALES",
@@ -1349,3 +1336,181 @@ def test_import_demands_from_forecast_skips_draft_forecast(db: Session) -> None:
 
     assert result["created_count"] == 0
     assert repository.find_demand_by_source(db, "SALES", forecast_id, forecast_no) is None
+
+
+# ==================== 统一需求 → MPS → MRP 链路 ====================
+
+
+def _confirm_demand(db: Session, source_type: str, material_id: int, qty, due: date) -> int:
+    demand = service.create_demand(
+        db,
+        source_type=source_type,
+        material_id=material_id,
+        quantity=Decimal(str(qty)),
+        due_date=due,
+    )
+    service.set_demand_status(db, demand.id, "CONFIRMED")
+    db.commit()
+    return demand.id
+
+
+def test_mps_from_demands_aggregates_by_material_and_month(db: Session) -> None:
+    """销售 + 补库需求按「物料 + 需求月份」聚合为 MPS 行，并记录来源需求。"""
+    material_a, _ = _create_material(db, supply_type="MAKE", material_type="FINISHED")
+    material_b, _ = _create_material(db, supply_type="MAKE", material_type="FINISHED")
+
+    d1 = _confirm_demand(db, "SALES", material_a, "30", date(2026, 11, 5))
+    d2 = _confirm_demand(db, "SALES", material_a, "20", date(2026, 11, 18))
+    d3 = _confirm_demand(db, "STOCKFILL", material_a, "10", date(2026, 11, 25))
+    d4 = _confirm_demand(db, "SALES", material_a, "7", date(2026, 12, 3))
+    d5 = _confirm_demand(db, "SALES", material_b, "5", date(2026, 11, 9))
+
+    mps = service.create_mps_from_demands(
+        db,
+        schemas.MpsFromDemandsRequest(
+            start_date=date(2026, 11, 1), end_date=date(2026, 11, 30)
+        ),
+    )
+    db.commit()
+    mps = service.get_mps(db, mps.id)
+
+    assert mps.status == "DRAFT"
+    rows = {item.material_id: item for item in mps.items}
+    assert set(rows) == {material_a, material_b}
+
+    row_a = rows[material_a]
+    assert row_a.period_label == "2026-11"
+    assert row_a.planned_qty == Decimal("60.0000")
+    assert row_a.start_date == date(2026, 11, 1)
+    assert row_a.end_date == date(2026, 11, 30)
+    assert set(row_a.source_demand_ids.split(",")) == {str(d1), str(d2), str(d3)}
+    assert rows[material_b].planned_qty == Decimal("5.0000")
+
+    # 区间外的需求不参与汇总，仍保持 CONFIRMED；参与汇总的置 RELEASED
+    assert service.get_demand(db, d4).status == "CONFIRMED"
+    for demand_id in (d1, d2, d3, d5):
+        assert service.get_demand(db, demand_id).status == "RELEASED"
+
+
+def test_mps_from_demands_excludes_forecast_demands(db: Session) -> None:
+    """MPS 汇总只取销售订单 + 补库申请，销售预测（FORECAST）不进入 MPS。"""
+    material_id, _ = _create_material(db, supply_type="MAKE", material_type="FINISHED")
+
+    order_id = _confirm_demand(db, "SALES", material_id, "30", date(2026, 11, 5))
+    stockfill_id = _confirm_demand(db, "STOCKFILL", material_id, "10", date(2026, 11, 20))
+    forecast = service.create_demand(
+        db,
+        source_type="FORECAST",
+        material_id=material_id,
+        quantity=Decimal("99"),
+        due_date=date(2026, 11, 30),
+    )
+    service.set_demand_status(db, forecast.id, "CONFIRMED")
+    db.commit()
+
+    mps = service.create_mps_from_demands(
+        db,
+        schemas.MpsFromDemandsRequest(
+            start_date=date(2026, 11, 1), end_date=date(2026, 11, 30)
+        ),
+    )
+    db.commit()
+    mps = service.get_mps(db, mps.id)
+
+    row = mps.items[0]
+    assert row.planned_qty == Decimal("40.0000")
+    assert set(row.source_demand_ids.split(",")) == {str(order_id), str(stockfill_id)}
+    # 预测需求保持 CONFIRMED，不被 MPS 消费
+    assert service.get_demand(db, forecast.id).status == "CONFIRMED"
+
+
+def test_mps_from_demands_is_not_reusable_for_released_demands(db: Session) -> None:
+    """已汇总的需求置 RELEASED，同一期间再次生成 MPS 会因无可用需求而报 3000。"""
+    material_id, _ = _create_material(db, supply_type="MAKE", material_type="FINISHED")
+    _confirm_demand(db, "SALES", material_id, "12", date(2026, 10, 8))
+    payload = schemas.MpsFromDemandsRequest(
+        start_date=date(2026, 10, 1), end_date=date(2026, 10, 31)
+    )
+
+    service.create_mps_from_demands(db, payload)
+    db.commit()
+
+    with pytest.raises(BusinessException) as exc:
+        service.create_mps_from_demands(db, payload)
+    assert exc.value.code == 3000
+
+
+def test_mps_from_demands_only_takes_confirmed_demands(db: Session) -> None:
+    """草稿需求不参与汇总。"""
+    material_id, _ = _create_material(db, supply_type="MAKE", material_type="FINISHED")
+    service.create_demand(
+        db,
+        source_type="SALES",
+        material_id=material_id,
+        quantity=Decimal("40"),
+        due_date=date(2026, 9, 15),
+    )
+    db.commit()
+
+    with pytest.raises(BusinessException) as exc:
+        service.create_mps_from_demands(
+            db,
+            schemas.MpsFromDemandsRequest(
+                start_date=date(2026, 9, 1), end_date=date(2026, 9, 30)
+            ),
+        )
+    assert exc.value.code == 3000
+
+
+def test_mrp_runs_only_on_mps_level0(db: Session) -> None:
+    """MRP 第 0 层只取 MPS 行：MPS 由需求汇总生成后，展开结果与需求数量一致。"""
+    finished_id, _ = _create_material(db, supply_type="MAKE", material_type="FINISHED")
+    part_id, _ = _create_material(db, supply_type="BUY")
+    _create_bom(db, finished_id, [(part_id, 2, 0, 0)])
+
+    _confirm_demand(db, "SALES", finished_id, "40", date(2026, 11, 6))
+    _confirm_demand(db, "STOCKFILL", finished_id, "10", date(2026, 11, 20))
+
+    mps = service.create_mps_from_demands(
+        db,
+        schemas.MpsFromDemandsRequest(
+            start_date=date(2026, 11, 1), end_date=date(2026, 11, 30)
+        ),
+    )
+    db.commit()
+
+    run = service.run_mrp(db, mps_id=mps.id)
+    db.commit()
+    results = _results_of_run(db, run.id)
+
+    assert results[finished_id].gross_requirement == Decimal("50.0000")
+    assert results[part_id].gross_requirement == Decimal("100.0000")
+    assert results[part_id].bom_level == 1
+
+
+def test_make_order_qty_rounds_up_to_integer(db: Session) -> None:
+    """自制件建议下达量向上取整：安全库存带来小数时不出现小数件；损耗率不参与计算。"""
+    finished_id, _ = _create_material(db, supply_type="MAKE", material_type="FINISHED")
+    part_id, _ = _create_material(
+        db, supply_type="MAKE", safety_stock=Decimal("2.5")
+    )
+    # 单位用量 1、损耗率 3%（不参与计算），父件 10 件 → 子件毛需求 10，加安全库存 2.5
+    _create_bom(db, finished_id, [(part_id, 1, 0, 0.03)])
+
+    due_date = date.today() + timedelta(days=10)
+    mps_id = _create_mps(db, finished_id, 10, due_date)
+    run = service.run_mrp(db, mps_id=mps_id)
+    db.commit()
+    results = _results_of_run(db, run.id)
+
+    assert results[finished_id].order_qty == Decimal("10")
+    assert results[part_id].gross_requirement == Decimal("10.0000")
+    assert results[part_id].net_requirement == Decimal("12.5000")
+    assert results[part_id].order_qty == Decimal("13")
+
+    plan = service.create_production_plans_from_mrp(
+        db, [results[part_id].id]
+    )[0]
+    db.commit()
+    assert plan.planned_qty == Decimal("13")
+    assert plan.planned_qty == plan.planned_qty.to_integral_value()
