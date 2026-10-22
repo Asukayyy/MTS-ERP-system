@@ -282,7 +282,8 @@ onMounted(load)
         <el-table-column type="expand">
           <template #default="{ row }">
             <el-table class="nested-table" :data="row.items" border size="small">
-              <el-table-column label="物料ID" prop="material_id" width="90" align="right" />
+              <el-table-column label="物料编码" prop="material_code" min-width="130" />
+              <el-table-column label="物料名称" prop="material_name" min-width="130" />
               <el-table-column label="需求数量" prop="required_qty" width="110" align="right" />
               <el-table-column label="已发数量" prop="issued_qty" width="110" align="right" />
               <el-table-column label="备注" prop="remark" min-width="140" />
@@ -294,9 +295,9 @@ onMounted(load)
         <el-table-column label="来源" width="90">
           <template #default="{ row }"><StatusTag :status="row.source_type" /></template>
         </el-table-column>
-        <el-table-column label="作业计划ID" prop="plan_id" width="110" align="right" />
-        <el-table-column label="领料仓库ID" prop="warehouse_id" width="110" align="right">
-          <template #default="{ row }">{{ row.warehouse_id ?? '待指定' }}</template>
+        <el-table-column label="作业计划编号" prop="plan_no" min-width="150" />
+        <el-table-column label="领料仓库" prop="warehouse_name" width="130">
+          <template #default="{ row }">{{ row.warehouse_name ?? '待指定' }}</template>
         </el-table-column>
         <el-table-column label="领料日期" prop="req_date" width="110">
           <template #default="{ row }">{{ row.req_date || '待填写' }}</template>

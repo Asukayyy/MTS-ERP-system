@@ -14,9 +14,9 @@ import calendar
 import json
 from collections import Counter
 from datetime import date, datetime, timedelta
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import ROUND_CEILING, ROUND_HALF_UP, Decimal
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 from sqlalchemy.orm import Session
 
@@ -34,8 +34,46 @@ from app.modules.system.contract import (
     get_material,
     get_materials,
     get_personnel,
+    get_personnel_names,
     log_operation,
 )
+
+# ==================== 列表明细展示信息（编码 / 名称） ====================
+
+
+def _material_fields(db: Session, material_ids: Sequence[int]) -> Dict[int, Dict[str, Any]]:
+    """批量取物料，供列表展示编码与名称。"""
+    return get_materials(db, [m for m in material_ids if m])
+
+
+def _warehouse_fields(
+    db: Session, warehouse_ids: Sequence[Optional[int]]
+) -> Dict[int, Dict[str, str]]:
+    """批量取仓库编码与名称（`inventory.contract`，惰性导入避免循环依赖）。"""
+    try:
+        from app.modules.inventory.contract import get_warehouse_names  # type: ignore
+    except Exception:  # noqa: BLE001 - 库存模块未就绪时不阻断列表
+        return {}
+    return get_warehouse_names(db, [w for w in warehouse_ids if w])
+
+
+def _attach_material(
+    rows: Iterable[Any], materials: Dict[int, Dict[str, Any]], field: str = "material"
+) -> None:
+    """把 `material_code` / `material_name` 挂到 ORM 行上，供 Pydantic 直接读取。"""
+    for row in rows:
+        material_id = getattr(row, f"{field}_id", None)
+        info = materials.get(int(material_id)) if material_id else None
+        setattr(row, f"{field}_code", info["material_code"] if info else None)
+        setattr(row, f"{field}_name", info["material_name"] if info else None)
+
+
+def _attach_warehouse(rows: Iterable[Any], warehouses: Dict[int, Dict[str, str]]) -> None:
+    for row in rows:
+        warehouse_id = getattr(row, "warehouse_id", None)
+        info = warehouses.get(int(warehouse_id)) if warehouse_id else None
+        row.warehouse_code = info["warehouse_code"] if info else None
+        row.warehouse_name = info["warehouse_name"] if info else None
 
 # ==================== 错误码（3000~3999） ====================
 
@@ -249,12 +287,16 @@ def list_demands(
     source_type: Optional[str] = None,
     status: Optional[str] = None,
 ) -> Tuple[List[models.PlnDemand], int]:
-    """分页查询需求。"""
-    return repository.list_demands(db, page, page_size, source_type, status)
+    """分页查询需求（附带物料编码 / 名称）。"""
+    rows, total = repository.list_demands(db, page, page_size, source_type, status)
+    _attach_material(rows, _material_fields(db, [r.material_id for r in rows]))
+    return rows, total
 
 
 def get_demand(db: Session, demand_id: int) -> models.PlnDemand:
-    return _require_demand(db, demand_id)
+    demand = _require_demand(db, demand_id)
+    _attach_material([demand], _material_fields(db, [demand.material_id]))
+    return demand
 
 
 def create_demand(
@@ -270,8 +312,8 @@ def create_demand(
     remark: Optional[str] = None,
     operator_id: Optional[int] = None,
 ) -> models.PlnDemand:
-    """新增需求（默认 DRAFT）。`source_type` 限定 SALES/STOCKFILL/MPS。"""
-    _validate_status(source_type, {"SALES", "STOCKFILL", "MPS"}, "需求来源")
+    """新增需求（默认 DRAFT）。`source_type` 限定 SALES/FORECAST/STOCKFILL/MPS。"""
+    _validate_status(source_type, {"SALES", "FORECAST", "STOCKFILL", "MPS"}, "需求来源")
     qty = _as_decimal(quantity)
     if qty <= 0:
         raise BusinessException(CODE_PARAM_INVALID, "需求数量必须为正数")
@@ -335,30 +377,55 @@ def import_demands_from_sales(db: Session, operator_id: Optional[int] = None) ->
         raise BusinessException(CODE_CONTRACT_NOT_READY, "销售需求接口尚未就绪") from exc
 
     rows = get_open_order_demand(db) or []
-    created_ids: List[int] = []
-    skipped = 0
+    # 同一订单同一物料可能有多行，导入前先按「订单 + 物料」汇总，
+    # 去重键也随之带 material_id（与订单确认时的缺口需求保持一致）。
+    aggregated: Dict[Tuple[int, int], Dict[str, Any]] = {}
     for row in rows:
         material_id = int(row["material_id"])
         source_reference_id = row.get("order_id") or row.get("id") or row.get("source_reference_id")
-        due = _to_date(
-            row.get("due_date")
-            or row.get("required_date")
-            or row.get("delivery_date")
-            or row.get("order_date"),
-            date.today(),
-        )
-        if repository.find_demand_by_source(db, "SALES", source_reference_id):
+        if source_reference_id is None:
+            continue
+        key = (int(source_reference_id), material_id)
+        bucket = aggregated.get(key)
+        if bucket is None:
+            aggregated[key] = {
+                "source_reference_id": source_reference_id,
+                "material_id": material_id,
+                "quantity": _as_decimal(row.get("quantity") or row.get("order_qty")),
+                "due": _to_date(
+                    row.get("due_date")
+                    or row.get("required_date")
+                    or row.get("delivery_date")
+                    or row.get("order_date"),
+                    date.today(),
+                ),
+                "source_no": row.get("order_no") or row.get("source_no"),
+                "remark": row.get("remark"),
+            }
+        else:
+            bucket["quantity"] += _as_decimal(row.get("quantity") or row.get("order_qty"))
+
+    created_ids: List[int] = []
+    skipped = 0
+    for item in aggregated.values():
+        if repository.find_demand_by_source_material(
+            db,
+            "SALES",
+            item["source_reference_id"],
+            item["source_no"],
+            item["material_id"],
+        ):
             skipped += 1
             continue
         demand = create_demand(
             db,
             source_type="SALES",
-            material_id=material_id,
-            quantity=_as_decimal(row.get("quantity") or row.get("order_qty")),
-            due_date=due,
-            source_reference_id=source_reference_id,
-            source_no=row.get("order_no") or row.get("source_no"),
-            remark=row.get("remark"),
+            material_id=item["material_id"],
+            quantity=item["quantity"],
+            due_date=item["due"],
+            source_reference_id=item["source_reference_id"],
+            source_no=item["source_no"],
+            remark=item["remark"],
             operator_id=operator_id,
         )
         created_ids.append(demand.id)
@@ -371,7 +438,10 @@ def import_demands_from_forecast(
     month_to: Optional[str] = None,
     operator_id: Optional[int] = None,
 ) -> Dict[str, Any]:
-    """把已确认销售预测拉取为 `source_type=SALES` 的计划需求（已导入的跳过）。
+    """把已确认销售预测拉取为 `source_type=FORECAST` 的计划需求（已导入的跳过）。
+
+    预测与订单分属不同来源类型：MPS 汇总只取销售订单（`SALES`）与补库申请
+    （`STOCKFILL`），因此预测需求不会进入 MPS。
 
     - 预测契约（`sales.contract.get_confirmed_forecast_demand`，只含 CONFIRMED）
       **惰性导入**，可用 `month_from` / `month_to`（`YYYY-MM`，含端点）限定期间；
@@ -396,12 +466,12 @@ def import_demands_from_forecast(
         due = _forecast_due_date(month)
         if due is None:
             raise BusinessException(CODE_PARAM_INVALID, f"预测期间非法：{month}")
-        if repository.find_demand_by_source(db, "SALES", forecast_id, forecast_no):
+        if repository.find_demand_by_source(db, "FORECAST", forecast_id, forecast_no):
             skipped += 1
             continue
         demand = create_demand(
             db,
-            source_type="SALES",
+            source_type="FORECAST",
             material_id=int(row["material_id"]),
             quantity=_as_decimal(row.get("quantity") or row.get("forecast_qty")),
             due_date=due,
@@ -519,11 +589,41 @@ def list_mps(
     status: Optional[str] = None,
     year: Optional[int] = None,
 ) -> Tuple[List[models.PlnMps], int]:
-    return repository.list_mps(db, page, page_size, status, year)
+    rows, total = repository.list_mps(db, page, page_size, status, year)
+    _attach_mps_items_material(db, rows)
+    return rows, total
 
 
 def get_mps(db: Session, mps_id: int) -> models.PlnMps:
-    return _require_mps(db, mps_id)
+    mps = _require_mps(db, mps_id)
+    _attach_mps_items_material(db, [mps])
+    return mps
+
+
+def _attach_mps_items_material(db: Session, rows: Sequence[models.PlnMps]) -> None:
+    """MPS 行明细附带物料编码 / 名称与来源需求单号。"""
+    items = [item for mps in rows for item in mps.items]
+    if not items:
+        return
+    _attach_material(items, _material_fields(db, [i.material_id for i in items]))
+    demand_ids = [
+        int(demand_id)
+        for item in items
+        if item.source_demand_ids
+        for demand_id in str(item.source_demand_ids).split(",")
+        if demand_id.strip().isdigit()
+    ]
+    demand_map = repository.nos_by_ids(db, models.PlnDemand, demand_ids, "demand_no")
+    for item in items:
+        if not item.source_demand_ids:
+            item.source_demand_nos = None
+            continue
+        nos = [
+            demand_map.get(int(demand_id))
+            for demand_id in str(item.source_demand_ids).split(",")
+            if demand_id.strip().isdigit()
+        ]
+        item.source_demand_nos = ",".join(no for no in nos if no) or None
 
 
 def _create_mps_record(
@@ -577,6 +677,7 @@ def _create_mps_record(
                 end_date=item_end,
                 status="DRAFT",
                 remark=raw.get("remark"),
+                source_demand_ids=raw.get("source_demand_ids"),
             ),
         )
     return mps
@@ -605,6 +706,83 @@ def create_mps(db: Session, payload: Any, operator_id: Optional[int] = None) -> 
         target_id=mps.id,
         operator_id=operator_id,
         detail=f"新增 MPS {mps.mps_no}（{len(items)} 行）",
+    )
+    return mps
+
+
+def create_mps_from_demands(
+    db: Session, payload: Any, operator_id: Optional[int] = None
+) -> models.PlnMps:
+    """把统一需求（**销售订单 + 补库申请**）按「物料 + 需求月份」汇总生成 MPS。
+
+    只有状态为 `CONFIRMED` 的 `SALES`（销售订单）/ `STOCKFILL`（补库申请）需求
+    参与汇总，销售预测（`FORECAST`）按业务口径不进入 MPS；生成后这些
+    需求统一置为 `RELEASED`，避免同一需求被重复纳入多张 MPS，同时在 MPS 行上
+    记录来源需求 ID 便于追溯。MPS 本体仍为 `DRAFT`，需人工确认后才可触发 MRP。
+    """
+    start_date: date = payload.start_date
+    end_date: date = payload.end_date
+    if start_date > end_date:
+        raise BusinessException(CODE_PARAM_INVALID, "汇总期间开始日期不能晚于结束日期")
+
+    demands = repository.list_confirmed_demands_in_period(db, start_date, end_date)
+    if not demands:
+        raise BusinessException(
+            CODE_PARAM_INVALID, "所选期间没有已确认的销售订单 / 补库需求，无法生成 MPS"
+        )
+
+    buckets: Dict[Tuple[int, str], Dict[str, Any]] = {}
+    for demand in demands:
+        period_label = demand.due_date.strftime("%Y-%m")
+        key = (demand.material_id, period_label)
+        bucket = buckets.get(key)
+        if bucket is None:
+            bucket = {
+                "material_id": demand.material_id,
+                "period_label": period_label,
+                "planned_qty": Decimal("0"),
+                "start_date": demand.due_date.replace(day=1),
+                "end_date": _month_end(demand.due_date.year, demand.due_date.month),
+                "source_ids": [],
+            }
+            buckets[key] = bucket
+        bucket["planned_qty"] += _as_decimal(demand.quantity)
+        bucket["source_ids"].append(str(demand.id))
+
+    items = [
+        {
+            "material_id": bucket["material_id"],
+            "period_label": bucket["period_label"],
+            "planned_qty": bucket["planned_qty"],
+            "start_date": bucket["start_date"],
+            "end_date": bucket["end_date"],
+            "source_demand_ids": ",".join(bucket["source_ids"]),
+        }
+        for bucket in buckets.values()
+    ]
+    mps = _create_mps_record(
+        db,
+        mps_no=None,
+        mps_name=payload.mps_name or f"需求汇总 MPS {start_date}~{end_date}",
+        program_no=payload.program_no,
+        plan_year=start_date.year,
+        start_date=start_date,
+        end_date=end_date,
+        remark=payload.remark,
+        items=items,
+        operator_id=operator_id,
+    )
+    for demand in demands:
+        demand.status = "RELEASED"
+        demand.updated_by = operator_id
+    log_operation(
+        db,
+        module=MODULE,
+        action="CREATE",
+        target_type="pln_mps",
+        target_id=mps.id,
+        operator_id=operator_id,
+        detail=f"由 {len(demands)} 条需求汇总生成 MPS {mps.mps_no}（{len(items)} 行）",
     )
     return mps
 
@@ -888,6 +1066,14 @@ def _accumulate(
         entry["requirement_date"] = requirement_date
 
 
+def _ceil_units(value: Decimal) -> Decimal:
+    """把生产数量向上取整为整数件（离散制造不生产 0.02 件）。
+
+    损耗率与安全库存会带来小数，向下取整会缺料，因此一律向上取整。
+    """
+    return Decimal(value).to_integral_value(rounding=ROUND_CEILING)
+
+
 def _explode_level(
     db: Session,
     level_map: Dict[int, Dict[str, Any]],
@@ -909,9 +1095,8 @@ def _explode_level(
             if child_id == material_id or child_id in entry["ancestors"]:
                 raise BusinessException(CODE_BOM_CYCLE, "BOM 存在循环引用，无法展开")
             qty = _as_decimal(child["quantity"])
-            scrap = _as_decimal(child["scrap_rate"])
             offset = int(child["lead_time_offset"] or 0)
-            child_gross = order_qty * qty * (Decimal("1") + scrap)
+            child_gross = order_qty * qty
             child_date = _days_before(parent_date, offset)
             _accumulate(
                 next_map,
@@ -925,62 +1110,20 @@ def _explode_level(
     return next_map
 
 
-def _collect_level0(
-    db: Session,
-    mps_id: Optional[int],
-    demand_ids: Sequence[int],
-    include_sales_demand: bool,
-) -> Dict[int, Dict[str, Any]]:
-    """归集第 0 层毛需求：MPS + 计划需求 + （可选）销售订单需求。"""
+def _collect_level0(db: Session, mps_id: int) -> Dict[int, Dict[str, Any]]:
+    """归集第 0 层毛需求：只取 MPS 行。
+
+    MPS 由统一需求（销售订单 / 销售预测 / 库存补库）汇总生成，因此 MRP 不再
+    直接读取需求或销售订单，保证「需求 → MPS → MRP」链路唯一。
+    """
     level0: Dict[int, Dict[str, Any]] = {}
 
-    if mps_id is not None:
-        mps = _require_mps(db, mps_id)
-        for item in repository.get_mps_items(db, mps.id):
-            qty = _as_decimal(item.planned_qty)
-            if qty <= 0:
-                continue
-            _accumulate(
-                level0, item.material_id, qty, 0, None, item.end_date, set()
-            )
-
-    if demand_ids:
-        demands = repository.get_demands_by_ids(db, demand_ids)
-        found = {d.id for d in demands}
-        missing = [i for i in demand_ids if i not in found]
-        if missing:
-            raise BusinessException(CODE_NOT_FOUND, f"需求不存在：{missing}")
-        for demand in demands:
-            if demand.status not in {"CONFIRMED", "RELEASED"}:
-                continue
-            _accumulate(
-                level0,
-                demand.material_id,
-                _as_decimal(demand.quantity),
-                0,
-                None,
-                demand.due_date,
-                set(),
-            )
-
-    if include_sales_demand:
-        try:
-            from app.modules.sales.contract import get_open_order_demand  # type: ignore
-        except Exception as exc:  # noqa: BLE001 - 契约尚未就绪
-            raise BusinessException(CODE_CONTRACT_NOT_READY, "销售需求接口尚未就绪") from exc
-        for row in get_open_order_demand(db) or []:
-            material_id = int(row["material_id"])
-            qty = _as_decimal(row.get("quantity") or row.get("order_qty"))
-            if qty <= 0:
-                continue
-            due = _to_date(
-                row.get("due_date")
-                or row.get("required_date")
-                or row.get("delivery_date")
-                or row.get("order_date"),
-                date.today(),
-            )
-            _accumulate(level0, material_id, qty, 0, None, due, set())
+    mps = _require_mps(db, mps_id)
+    for item in repository.get_mps_items(db, mps.id):
+        qty = _as_decimal(item.planned_qty)
+        if qty <= 0:
+            continue
+        _accumulate(level0, item.material_id, qty, 0, None, item.end_date, set())
 
     return level0
 
@@ -988,9 +1131,7 @@ def _collect_level0(
 def run_mrp(
     db: Session,
     *,
-    mps_id: Optional[int] = None,
-    demand_ids: Optional[Sequence[int]] = None,
-    include_sales_demand: bool = False,
+    mps_id: int,
     remark: Optional[str] = None,
     operator_id: Optional[int] = None,
 ) -> models.PlnMrpRun:
@@ -998,8 +1139,8 @@ def run_mrp(
 
     算法（规格 §13 / §17）：
 
-    1. **第 0 层毛需求**来自 MPS 行（`planned_qty` / `end_date`）、
-       指定 `pln_demand`（状态 CONFIRMED/RELEASED）与（可选）销售订单需求。
+    1. **第 0 层毛需求**只来自指定 MPS 的行（`planned_qty` / `end_date`）。
+       需求必须先汇总为 MPS，MRP 不接受需求 ID 或销售订单直算。
     2. **逐层展开（广度优先）**：对每层物料先做净算，再用**父件的净需求**
        （而非毛需求）展开下一层：`子件毛需求 = 父件净需求 × 用量 × (1 + 损耗率)`，
        `子件需求日期 = 父件需求日期 − lead_time_offset`。无生效 BOM 的物料为叶子，停止展开。
@@ -1014,13 +1155,7 @@ def run_mrp(
        因此同一物料出现两次不会被重复抵扣库存。
     5. 落库：写入一个 `pln_mrp_run`（IN_PROGRESS → COMPLETED）与其全部结果行。
     """
-    demand_ids = list(demand_ids or [])
-    if mps_id is None and not demand_ids and not include_sales_demand:
-        raise BusinessException(
-            CODE_PARAM_INVALID, "MRP 运算至少需要提供 mps_id / demand_ids / include_sales_demand"
-        )
-
-    level_map = _collect_level0(db, mps_id, demand_ids, include_sales_demand)
+    level_map = _collect_level0(db, mps_id)
 
     run = models.PlnMrpRun(
         run_no=_unique_no(db, models.PlnMrpRun, "run_no", None, "MRP"),
@@ -1057,6 +1192,9 @@ def run_mrp(
             net = gross + safety - usable
             if net < 0:
                 net = Decimal("0")
+            supply_type = material.get("supply_type") or "BUY"
+            # 自制件要下达生产作业计划，数量必须是整数件（损耗率 / 安全库存会带小数）
+            order_qty = _ceil_units(net) if supply_type == "MAKE" else net
             # 本行消耗的可用库存；剩余额度保留给本批次后续出现的同一物料
             consumed = usable if usable < gross + safety else gross + safety
             remaining_available[material_id] = usable - consumed
@@ -1073,8 +1211,8 @@ def run_mrp(
                     available_quantity=usable,
                     safety_stock=safety,
                     net_requirement=net,
-                    order_qty=net,
-                    supply_type=material.get("supply_type") or "BUY",
+                    order_qty=order_qty,
+                    supply_type=supply_type,
                     lead_time_days=lead_time,
                     requirement_date=requirement_date,
                     planned_release_date=_days_before(requirement_date, lead_time),
@@ -1082,8 +1220,8 @@ def run_mrp(
                     created_by=operator_id,
                 )
             )
-            # 记录净需求，供下一层展开使用（子件毛需求来源于父件净需求）
-            entry["order_qty"] = net
+            # 记录取整后的下达量，供下一层展开使用（子件毛需求来源于父件下达量）
+            entry["order_qty"] = order_qty
             touched.add(material_id)
         level_map = _explode_level(db, level_map)
 
@@ -1106,11 +1244,39 @@ def run_mrp(
 def list_mrp_runs(
     db: Session, page: int = 1, page_size: int = 20
 ) -> Tuple[List[models.PlnMrpRun], int]:
-    return repository.list_mrp_runs(db, page, page_size)
+    rows, total = repository.list_mrp_runs(db, page, page_size)
+    _attach_mrp_run_refs(db, rows)
+    return rows, total
 
 
 def get_mrp_run(db: Session, run_id: int) -> models.PlnMrpRun:
-    return _require_run(db, run_id)
+    run = _require_run(db, run_id)
+    _attach_mrp_run_refs(db, [run])
+    _attach_mrp_results_material(db, list(run.results))
+    return run
+
+
+def _attach_mrp_run_refs(db: Session, rows: Sequence[models.PlnMrpRun]) -> None:
+    """MRP 批次附带 MPS 编号。"""
+    mps_ids = [run.mps_id for run in rows if run.mps_id]
+    mps_map = repository.nos_by_ids(db, models.PlnMps, mps_ids, "mps_no")
+    for run in rows:
+        run.mps_no = mps_map.get(run.mps_id) if run.mps_id else None
+
+
+def _attach_mrp_results_material(
+    db: Session, rows: Sequence[models.PlnMrpResult]
+) -> None:
+    """MRP 结果附带物料与父件物料的编码 / 名称。"""
+    if not rows:
+        return
+    materials = _material_fields(
+        db,
+        [r.material_id for r in rows]
+        + [r.parent_material_id for r in rows if r.parent_material_id],
+    )
+    _attach_material(rows, materials)
+    _attach_material(rows, materials, field="parent_material")
 
 
 def list_mrp_results(
@@ -1121,7 +1287,9 @@ def list_mrp_results(
     supply_type: Optional[str] = None,
     status: Optional[str] = None,
 ) -> Tuple[List[models.PlnMrpResult], int]:
-    return repository.list_mrp_results(db, page, page_size, run_id, supply_type, status)
+    rows, total = repository.list_mrp_results(db, page, page_size, run_id, supply_type, status)
+    _attach_mrp_results_material(db, rows)
+    return rows, total
 
 
 def explain_mrp_result(db: Session, run_id: int, material_id: int) -> Dict[str, Any]:
@@ -1258,11 +1426,15 @@ def list_production_plans(
     status: Optional[str] = None,
     material_id: Optional[int] = None,
 ) -> Tuple[List[models.PlnProductionPlan], int]:
-    return repository.list_production_plans(db, page, page_size, status, material_id)
+    rows, total = repository.list_production_plans(db, page, page_size, status, material_id)
+    _attach_material(rows, _material_fields(db, [r.material_id for r in rows]))
+    return rows, total
 
 
 def get_production_plan(db: Session, plan_id: int) -> models.PlnProductionPlan:
-    return _require_plan(db, plan_id)
+    plan = _require_plan(db, plan_id)
+    _attach_material([plan], _material_fields(db, [plan.material_id]))
+    return plan
 
 
 def _create_plan_from_mrp_result(
@@ -1276,7 +1448,7 @@ def _create_plan_from_mrp_result(
         source_type="MRP",
         source_reference_id=result.run_id,
         material_id=result.material_id,
-        planned_qty=_as_decimal(result.order_qty),
+        planned_qty=_ceil_units(_as_decimal(result.order_qty)),
         completed_qty=Decimal("0"),
         plan_date=release_date,
         start_date=release_date,
@@ -1469,11 +1641,28 @@ def list_dispatch_orders(
     status: Optional[str] = None,
     plan_id: Optional[int] = None,
 ) -> Tuple[List[models.PlnDispatchOrder], int]:
-    return repository.list_dispatch_orders(db, page, page_size, status, plan_id)
+    rows, total = repository.list_dispatch_orders(db, page, page_size, status, plan_id)
+    _attach_dispatch_refs(db, rows)
+    return rows, total
 
 
 def get_dispatch_order(db: Session, dispatch_id: int) -> models.PlnDispatchOrder:
-    return _require_dispatch(db, dispatch_id)
+    dispatch = _require_dispatch(db, dispatch_id)
+    _attach_dispatch_refs(db, [dispatch])
+    return dispatch
+
+
+def _attach_dispatch_refs(db: Session, rows: Sequence[models.PlnDispatchOrder]) -> None:
+    """派工单附带作业计划编号与作业人员姓名。"""
+    if not rows:
+        return
+    plan_map = repository.nos_by_ids(
+        db, models.PlnProductionPlan, [r.plan_id for r in rows if r.plan_id], "plan_no"
+    )
+    workers = get_personnel_names(db, [r.worker_id for r in rows if r.worker_id])
+    for row in rows:
+        row.plan_no = plan_map.get(row.plan_id) if row.plan_id else None
+        row.worker_name = workers.get(row.worker_id) if row.worker_id else None
 
 
 def create_dispatch_order(
@@ -1758,11 +1947,33 @@ def list_requisitions(
     status: Optional[str] = None,
     plan_id: Optional[int] = None,
 ) -> Tuple[List[models.PlnMaterialRequisition], int]:
-    return repository.list_requisitions(db, page, page_size, status, plan_id)
+    rows, total = repository.list_requisitions(db, page, page_size, status, plan_id)
+    _attach_requisition_refs(db, rows)
+    return rows, total
 
 
 def get_requisition(db: Session, req_id: int) -> models.PlnMaterialRequisition:
-    return _require_requisition(db, req_id)
+    requisition = _require_requisition(db, req_id)
+    _attach_requisition_refs(db, [requisition])
+    return requisition
+
+
+def _attach_requisition_refs(
+    db: Session, rows: Sequence[models.PlnMaterialRequisition]
+) -> None:
+    """领料单附带作业计划编号、仓库编码 / 名称与行物料编码 / 名称。"""
+    if not rows:
+        return
+    plan_map = repository.nos_by_ids(
+        db, models.PlnProductionPlan, [r.plan_id for r in rows if r.plan_id], "plan_no"
+    )
+    warehouses = _warehouse_fields(db, [r.warehouse_id for r in rows])
+    items = [item for row in rows for item in row.items]
+    materials = _material_fields(db, [i.material_id for i in items])
+    for row in rows:
+        row.plan_no = plan_map.get(row.plan_id) if row.plan_id else None
+    _attach_warehouse(rows, warehouses)
+    _attach_material(items, materials)
 
 
 def create_requisition(
@@ -1948,11 +2159,7 @@ def create_requisitions_from_plans(
         totals: Dict[int, Decimal] = {}
         for child in children:
             child_id = int(child["child_material_id"])
-            amount = (
-                _as_decimal(child["quantity"])
-                * planned_qty
-                * (Decimal("1") + _as_decimal(child["scrap_rate"]))
-            )
+            amount = _as_decimal(child["quantity"]) * planned_qty
             totals[child_id] = totals.get(child_id, Decimal("0")) + amount
 
         req = models.PlnMaterialRequisition(
@@ -2104,11 +2311,36 @@ def list_completion_reports(
     status: Optional[str] = None,
     plan_id: Optional[int] = None,
 ) -> Tuple[List[models.PlnCompletionReport], int]:
-    return repository.list_completion_reports(db, page, page_size, status, plan_id)
+    rows, total = repository.list_completion_reports(db, page, page_size, status, plan_id)
+    _attach_completion_refs(db, rows)
+    return rows, total
 
 
 def get_completion_report(db: Session, report_id: int) -> models.PlnCompletionReport:
-    return _require_completion(db, report_id)
+    report = _require_completion(db, report_id)
+    _attach_completion_refs(db, [report])
+    return report
+
+
+def _attach_completion_refs(
+    db: Session, rows: Sequence[models.PlnCompletionReport]
+) -> None:
+    """完工报告附带作业计划编号、派工单号、物料与入库仓库编码 / 名称。"""
+    if not rows:
+        return
+    plan_map = repository.nos_by_ids(
+        db, models.PlnProductionPlan, [r.plan_id for r in rows if r.plan_id], "plan_no"
+    )
+    dispatch_map = repository.nos_by_ids(
+        db, models.PlnDispatchOrder, [r.dispatch_id for r in rows if r.dispatch_id], "dispatch_no"
+    )
+    warehouses = _warehouse_fields(db, [r.warehouse_id for r in rows])
+    materials = _material_fields(db, [r.material_id for r in rows])
+    for row in rows:
+        row.plan_no = plan_map.get(row.plan_id) if row.plan_id else None
+        row.dispatch_no = dispatch_map.get(row.dispatch_id) if row.dispatch_id else None
+    _attach_warehouse(rows, warehouses)
+    _attach_material(rows, materials)
 
 
 def create_completion_report(

@@ -173,10 +173,34 @@ async function submit(): Promise<void> {
   }
 }
 
+/** 展示订单确认后的「库存发货 / 缺口转计划」分流结果 */
+async function showAllocationResult(order: Order): Promise<void> {
+  const allocation = order.allocation
+  if (!allocation) return
+  const lines = allocation.items.map(
+    (item) =>
+      `${item.material_code ?? item.material_id}${item.material_name ? ` ${item.material_name}` : ''}：需求 ${item.required_qty}，库存 ${item.stock_qty}，缺口 ${item.shortage_qty}`,
+  )
+  const summary = [
+    allocation.shipment_no
+      ? `已生成发货草稿 ${allocation.shipment_no}（库存发货 ${allocation.stock_qty}）`
+      : '本次没有可用库存，未生成发货单',
+    Number(allocation.shortage_qty) > 0
+      ? `缺口 ${allocation.shortage_qty} 已转计划需求：${allocation.demand_nos.join('、')}`
+      : '无缺口，无需转计划生产',
+    ...lines,
+  ]
+  await ElMessageBox.alert(summary.join('；'), '库存分流结果', { type: 'success' }).catch(() => undefined)
+}
+
 async function changeStatus(row: Order, status: string): Promise<void> {
   try {
-    await setOrderStatus(row.id, status)
-    ElMessage.success('订单状态已更新')
+    const updated = await setOrderStatus(row.id, status)
+    if (status === 'CONFIRMED' && updated.allocation) {
+      await showAllocationResult(updated)
+    } else {
+      ElMessage.success('订单状态已更新')
+    }
     await load()
   } catch (error) {
     ElMessage.error((error as Error).message)

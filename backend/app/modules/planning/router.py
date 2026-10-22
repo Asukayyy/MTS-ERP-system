@@ -43,7 +43,7 @@ def health() -> schemas.HealthResponse:
 )
 def list_demands(
     params: PageParams = Depends(PageParams.as_dependency),
-    source_type: Optional[str] = Query(default=None, description="需求来源 SALES/STOCKFILL/MPS"),
+    source_type: Optional[str] = Query(default=None, description="需求来源 SALES/FORECAST/STOCKFILL/MPS"),
     status: Optional[str] = Query(default=None, description="状态"),
     db: Session = Depends(get_db),
 ) -> ApiResponse[PageData[schemas.DemandOut]]:
@@ -125,9 +125,10 @@ def import_demands_from_forecast(
     month_to: Optional[str] = Query(default=None, description="预测结束月份 YYYY-MM（含）"),
     db: Session = Depends(get_db),
 ) -> ApiResponse[schemas.DemandImportResult]:
-    """把已确认销售预测拉取为 `source_type=SALES` 的计划需求（已导入的跳过）。
+    """把已确认销售预测拉取为 `source_type=FORECAST` 的计划需求（已导入的跳过）。
 
     需求日期取预测月份的最后一天；`month_from` / `month_to` 可限定预测期间。
+    预测需求不参与 MPS 汇总（MPS 只汇总销售订单与补库申请）。
     """
     result = service.import_demands_from_forecast(db, month_from, month_to)
     db.commit()
@@ -217,6 +218,23 @@ def confirm_mps_import(
     return success(mps)
 
 
+@router.post(
+    "/mps/from-demands",
+    response_model=ApiResponse[schemas.MpsOut],
+    summary="从统一需求汇总生成 MPS",
+)
+def create_mps_from_demands(
+    payload: schemas.MpsFromDemandsRequest, db: Session = Depends(get_db)
+) -> ApiResponse[schemas.MpsOut]:
+    """把汇总期间内已确认的销售 / 补库需求按「物料 + 需求月份」聚合为 MPS（DRAFT）。
+
+    被聚合的需求会置为 `RELEASED`，不会重复参与后续 MPS 生成。
+    """
+    mps = service.create_mps_from_demands(db, payload)
+    db.commit()
+    return success(mps)
+
+
 @router.get("/mps/{mps_id}", response_model=ApiResponse[schemas.MpsOut], summary="MPS 详情")
 def get_mps(mps_id: int, db: Session = Depends(get_db)) -> ApiResponse[schemas.MpsOut]:
     """按 ID 查询 MPS（含行明细）。"""
@@ -266,8 +284,6 @@ def run_mrp(
     run = service.run_mrp(
         db,
         mps_id=payload.mps_id,
-        demand_ids=payload.demand_ids,
-        include_sales_demand=payload.include_sales_demand,
         remark=payload.remark,
     )
     db.commit()

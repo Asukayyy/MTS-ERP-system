@@ -6,6 +6,7 @@ import type { FormInstance, FormRules } from 'element-plus'
 import {
   confirmMpsImport,
   createMps,
+  createMpsFromDemands,
   deleteMps,
   listMps,
   previewMpsImport,
@@ -220,6 +221,59 @@ function openImport(): void {
   importVisible.value = true
 }
 
+// ---------------- 从统一需求汇总生成 MPS ----------------
+const fromDemandVisible = ref(false)
+const fromDemandSubmitting = ref(false)
+const fromDemandForm = reactive({
+  start_date: '',
+  end_date: '',
+  mps_name: '',
+  program_no: '',
+  remark: '',
+})
+
+function openFromDemands(): void {
+  const today = new Date()
+  const first = new Date(today.getFullYear(), today.getMonth(), 1)
+  const last = new Date(today.getFullYear(), today.getMonth() + 1, 0)
+  const fmt = (d: Date): string =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  Object.assign(fromDemandForm, {
+    start_date: fmt(first),
+    end_date: fmt(last),
+    mps_name: '',
+    program_no: '',
+    remark: '',
+  })
+  fromDemandVisible.value = true
+}
+
+async function submitFromDemands(): Promise<void> {
+  if (!fromDemandForm.start_date || !fromDemandForm.end_date) {
+    ElMessage.warning('请选择汇总期间')
+    return
+  }
+  fromDemandSubmitting.value = true
+  try {
+    const created = await createMpsFromDemands({
+      start_date: fromDemandForm.start_date,
+      end_date: fromDemandForm.end_date,
+      mps_name: fromDemandForm.mps_name || null,
+      program_no: fromDemandForm.program_no || null,
+      remark: fromDemandForm.remark || null,
+    })
+    ElMessage.success(
+      `已生成 MPS：${created.mps_no}，共 ${created.items.length} 行（草稿待确认）`,
+    )
+    fromDemandVisible.value = false
+    await load()
+  } catch (error) {
+    ElMessage.error((error as Error).message)
+  } finally {
+    fromDemandSubmitting.value = false
+  }
+}
+
 onMounted(load)
 </script>
 
@@ -231,7 +285,8 @@ onMounted(load)
           <span class="page-title">主生产计划 MPS</span>
           <span class="table-toolbar__spacer" />
           <el-button @click="openImport">课程案例导入</el-button>
-          <el-button type="primary" @click="openCreate">新增 MPS</el-button>
+          <el-button type="primary" @click="openFromDemands">从需求生成 MPS</el-button>
+          <el-button @click="openCreate">新增 MPS</el-button>
         </div>
       </template>
 
@@ -259,7 +314,8 @@ onMounted(load)
         <el-table-column type="expand">
           <template #default="{ row }">
             <el-table :data="row.items" size="small" border class="nested-table">
-              <el-table-column label="物料ID" prop="material_id" width="100" align="right" />
+              <el-table-column label="物料编码" prop="material_code" min-width="130" />
+              <el-table-column label="物料名称" prop="material_name" min-width="130" />
               <el-table-column label="期间" prop="period_label" width="110" />
               <el-table-column label="计划数量" prop="planned_qty" width="110" align="right" />
               <el-table-column label="已完工" prop="finished_qty" width="100" align="right" />
@@ -268,6 +324,7 @@ onMounted(load)
               <el-table-column label="状态" width="90">
                 <template #default="{ row: item }"><StatusTag :status="item.status" /></template>
               </el-table-column>
+              <el-table-column label="来源需求单号" prop="source_demand_nos" min-width="180" />
             </el-table>
           </template>
         </el-table-column>
@@ -392,6 +449,51 @@ onMounted(load)
       <template #footer>
         <el-button @click="dialogVisible = false">取消</el-button>
         <el-button type="primary" :loading="submitting" @click="submit">保存</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 从统一需求汇总生成 MPS -->
+    <el-dialog v-model="fromDemandVisible" title="从需求生成 MPS" width="640px">
+      <el-alert
+        type="info"
+        :closable="false"
+        show-icon
+        title="按「物料 + 需求月份」汇总所选期间内已确认的销售订单 / 补库申请需求"
+        description="生成后 MPS 为草稿状态，被汇总的需求会置为已下达（RELEASED），不会重复参与生成。"
+      />
+      <el-form :model="fromDemandForm" label-width="100px" style="margin-top: 16px">
+        <el-form-item label="汇总期间" required>
+          <el-date-picker
+            v-model="fromDemandForm.start_date"
+            type="date"
+            value-format="YYYY-MM-DD"
+            placeholder="开始日期"
+            style="width: 45%"
+          />
+          <span style="margin: 0 8px">至</span>
+          <el-date-picker
+            v-model="fromDemandForm.end_date"
+            type="date"
+            value-format="YYYY-MM-DD"
+            placeholder="结束日期"
+            style="width: 45%"
+          />
+        </el-form-item>
+        <el-form-item label="计划名称">
+          <el-input v-model="fromDemandForm.mps_name" placeholder="留空自动生成" />
+        </el-form-item>
+        <el-form-item label="项目号">
+          <el-input v-model="fromDemandForm.program_no" />
+        </el-form-item>
+        <el-form-item label="备注">
+          <el-input v-model="fromDemandForm.remark" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="fromDemandVisible = false">取消</el-button>
+        <el-button type="primary" :loading="fromDemandSubmitting" @click="submitFromDemands">
+          汇总生成
+        </el-button>
       </template>
     </el-dialog>
 

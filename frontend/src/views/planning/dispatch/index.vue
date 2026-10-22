@@ -242,12 +242,12 @@ onMounted(load)
         <el-table-column label="来源" width="90">
           <template #default="{ row }"><StatusTag :status="row.source_type" /></template>
         </el-table-column>
-        <el-table-column label="作业计划ID" prop="plan_id" width="110" align="right" />
+        <el-table-column label="作业计划编号" prop="plan_no" min-width="150" />
         <el-table-column label="工序" prop="operation" min-width="130" />
         <el-table-column label="派工数量" prop="planned_qty" width="110" align="right" />
         <el-table-column label="已完工" prop="completed_qty" width="100" align="right" />
-        <el-table-column label="作业人员ID" prop="worker_id" width="110" align="right">
-          <template #default="{ row }">{{ row.worker_id ?? '待指派' }}</template>
+        <el-table-column label="作业人员" prop="worker_name" width="120">
+          <template #default="{ row }">{{ row.worker_name ?? '待指派' }}</template>
         </el-table-column>
         <el-table-column label="计划开始" prop="planned_start" width="110">
           <template #default="{ row }">{{ row.planned_start || '待填写' }}</template>
