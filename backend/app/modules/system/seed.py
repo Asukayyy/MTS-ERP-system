@@ -9,8 +9,9 @@
 - 质检、财务没有独立业务模块，权限按业务域挂靠：
   - QC（质检人员）：`procurement:qc`（到货质检）、`planning:qc`（完工质检）；
   - FINANCE（财务）：各业务模块单据、计划结果与库存流水**只读查看**，不授予系统管理能力；
-- 种子函数幂等：按 `role_code` / `perm_code` 唯一编码判断是否已存在，存在即跳过，
-  只补缺失的绑定关系，不会覆盖运营期的人工调整。
+- 角色与权限按 `role_code` / `perm_code` 存在即跳过，不覆盖运营期的人工调整；
+- 角色-权限绑定以本文件为唯一事实来源：每次启动按角色同步（补缺失、删多余），
+  角色管理页的手工调整会被覆盖。
 """
 
 from typing import Any
@@ -64,7 +65,7 @@ ROLE_SEEDS: list[dict[str, Any]] = [
         "role_code": "PLAN",
         "role_name": "计划管理人员",
         "status": "ACTIVE",
-        "description": "编制 MPS/MRP/作业计划并派工，查看 BOM/物料/库存/销售需求（数据范围：全部）",
+        "description": "拥有计划管理全部权限，维护物料/BOM/工艺路线，查看销售订单、采购计划与补货需求（数据范围：全部）",
     },
     {
         "role_code": "QC",
@@ -82,7 +83,7 @@ ROLE_SEEDS: list[dict[str, Any]] = [
         "role_code": "DEPT_HEAD",
         "role_name": "部长",
         "status": "ACTIVE",
-        "description": "部门负责人：查看各业务单据与计划结果，维护本部门人员与基础信息（数据范围：全部）",
+        "description": "部门负责人：拥有五个业务模块与基础信息的全部权限，不含账号/角色/权限/日志管理（数据范围：全部）",
     },
     {
         "role_code": "WORKER",
@@ -286,12 +287,17 @@ ROLE_PERMISSION_BINDINGS: dict[str, list[str]] = {
         "procurement", "procurement:arrival",
         "system:material",
     ],
+    # 计划管理员：计划管理全部 + 基础信息全部（物料/BOM/工艺路线）+ 销售订单
+    #             + 采购计划 + 补货需求
     "PLAN": [
-        "planning", "planning:mps", "planning:mrp", "planning:schedule", "planning:demand",
-        "planning:dispatch", "planning:picking", "planning:finish",
-        "system:bom", "system:material",
-        "inventory:stock",
-        "sales:demand",
+        "planning", "planning:demand", "planning:mps", "planning:mrp",
+        "planning:schedule", "planning:dispatch", "planning:picking",
+        "planning:finish", "planning:qc",
+        "system", "system:material", "system:bom", "system:routing",
+        "system:material:manage", "system:bom:manage", "system:routing:manage",
+        "sales", "sales:order",
+        "procurement", "procurement:plan",
+        "inventory", "inventory:replenishment",
     ],
     "QC": [
         "procurement:qc", "procurement:arrival",
@@ -305,21 +311,30 @@ ROLE_PERMISSION_BINDINGS: dict[str, list[str]] = {
         "inventory:stock", "inventory:inbound", "inventory:outbound", "inventory:ledger",
         "system:material",
     ],
+    # 部长：五个业务模块 + 基础信息的全部权限（不含账号/角色/权限/日志管理）
     "DEPT_HEAD": [
-        "system", "system:material", "system:bom", "system:routing",
-        "system:org", "system:dictionary", "system:personnel", "system:personnel:manage",
-        "sales", "sales:order", "sales:demand", "sales:shipping", "sales:stock",
-        "sales:customer", "sales:return",
-        "planning", "planning:mps", "planning:mrp", "planning:schedule",
-        "planning:demand",
-        "planning:dispatch", "planning:picking", "planning:finish",
-        "procurement", "procurement:plan", "procurement:demand",
-        "procurement:order", "procurement:arrival",
-        "procurement:supplier", "procurement:supplier-material",
-        "procurement:evaluation", "procurement:report",
-        "inventory", "inventory:stock", "inventory:inbound",
-        "inventory:outbound", "inventory:ledger",
-        "inventory:transfer", "inventory:stocktake",
+        # 基础信息：物料 / BOM / 工艺路线 / 组织人员 / 字典
+        "system", "system:material", "system:material:manage",
+        "system:bom", "system:bom:manage",
+        "system:routing", "system:routing:manage",
+        "system:org", "system:org:manage",
+        "system:personnel", "system:personnel:manage",
+        "system:dictionary", "system:dictionary:manage",
+        # 销售管理：全部
+        "sales", "sales:customer", "sales:demand", "sales:order",
+        "sales:shipping", "sales:stock", "sales:return",
+        # 计划管理：全部
+        "planning", "planning:demand", "planning:mps", "planning:mrp",
+        "planning:schedule", "planning:dispatch", "planning:picking",
+        "planning:finish", "planning:qc",
+        # 采购管理：全部
+        "procurement", "procurement:supplier", "procurement:supplier-material",
+        "procurement:plan", "procurement:demand", "procurement:order",
+        "procurement:arrival", "procurement:qc", "procurement:evaluation",
+        "procurement:report",
+        # 库存管理：全部
+        "inventory", "inventory:stock", "inventory:inbound", "inventory:outbound",
+        "inventory:ledger", "inventory:transfer", "inventory:stocktake",
         "inventory:reorder", "inventory:replenishment",
     ],
     "WORKER": [
@@ -352,10 +367,11 @@ ROLE_PERMISSION_BINDINGS: dict[str, list[str]] = {
 
 
 def seed_roles_and_permissions(db: Session) -> None:
-    """幂等写入十三种身份角色、权限资源树与角色-权限绑定。
+    """写入十三种身份角色、权限资源树，并把角色-权限绑定同步为代码定义。
 
-    按 `role_code` / `perm_code` 存在即跳过，只补缺失的绑定，
-    不会覆盖运营期的人工调整。由应用启动时调用。
+    - 角色、权限：按 `role_code` / `perm_code` 存在即跳过，不覆盖人工调整；
+    - 角色-权限绑定：按角色对齐到 `ROLE_PERMISSION_BINDINGS`（补缺失、删多余），
+      因此角色管理页的手工授权会在下次启动时被覆盖。由应用启动时调用。
     """
     # 1. 角色：按编码存在即跳过，不覆盖人工调整
     role_map: dict[str, models.SysRole] = {}
@@ -397,18 +413,25 @@ def seed_roles_and_permissions(db: Session) -> None:
         db.flush()
         perm_map[code] = perm
 
-    # 3. 绑定：只补缺失的关联，不删除已存在的人工调整
-    existing_pairs = {
-        (row.role_id, row.permission_id)
-        for row in db.query(models.SysRolePermission).all()
-    }
+    # 3. 绑定：按角色同步——补缺失、删多余，使本文件的定义成为唯一事实来源
     for role_code, perm_codes in ROLE_PERMISSION_BINDINGS.items():
         role = role_map[role_code]
+        desired_ids: set[int] = set()
         for perm_code in perm_codes:
             if perm_code not in perm_map:
                 raise ValueError(f"角色 {role_code} 引用了未定义的权限编码：{perm_code}")
-            perm = perm_map[perm_code]
-            if (role.id, perm.id) not in existing_pairs:
-                db.add(models.SysRolePermission(role_id=role.id, permission_id=perm.id))
+            desired_ids.add(perm_map[perm_code].id)
+
+        existing = db.query(models.SysRolePermission).filter(
+            models.SysRolePermission.role_id == role.id
+        ).all()
+        existing_ids = {row.permission_id for row in existing}
+
+        # 先删多余，再补缺失，避免同一 (role_id, permission_id) 重复插入
+        for row in existing:
+            if row.permission_id not in desired_ids:
+                db.delete(row)
+        for permission_id in desired_ids - existing_ids:
+            db.add(models.SysRolePermission(role_id=role.id, permission_id=permission_id))
 
     db.commit()
