@@ -258,6 +258,142 @@ def test_confirm_order_rejects_non_finished_material(
     assert detail["status"] == "DRAFT"
 
 
+def test_confirm_order_allocates_stock_and_creates_shipment(
+    client: TestClient, db: Session
+) -> None:
+    """库存充足：确认订单自动生成发货草稿，且不产生计划需求。"""
+    material_id = _create_material(db)
+    warehouse_id = _create_warehouse(client)
+    _set_stock(db, material_id, warehouse_id, "50")
+    customer = _create_customer(client)
+
+    order = _create_confirmed_order(client, customer["id"], material_id, quantity="30")
+    allocation = order["allocation"]
+    assert allocation is not None
+    assert Decimal(str(allocation["stock_qty"])) == Decimal("30")
+    assert Decimal(str(allocation["shortage_qty"])) == Decimal("0")
+    assert allocation["demand_nos"] == []
+
+    shipment = client.get(f"{SALES}/shipments/{allocation['shipment_id']}").json()["data"]
+    assert shipment["status"] == "DRAFT"
+    assert Decimal(str(shipment["items"][0]["quantity"])) == Decimal("30")
+    assert shipment["items"][0]["warehouse_id"] == warehouse_id
+
+    _refresh(db)
+    demand_count = db.execute(
+        text(
+            "SELECT COUNT(*) FROM pln_demand "
+            "WHERE source_type='SALES' AND source_reference_id=:o"
+        ),
+        {"o": order["id"]},
+    ).scalar()
+    assert int(demand_count) == 0
+
+
+def test_confirm_order_sends_available_stock_and_converts_shortage(
+    client: TestClient, db: Session
+) -> None:
+    """库存不足：可用部分生成发货草稿，缺口转计划需求（CONFIRMED）。"""
+    material_id = _create_material(db)
+    warehouse_id = _create_warehouse(client)
+    _set_stock(db, material_id, warehouse_id, "20")
+    customer = _create_customer(client)
+
+    order = _create_confirmed_order(client, customer["id"], material_id, quantity="50")
+    allocation = order["allocation"]
+    assert allocation is not None
+    assert Decimal(str(allocation["stock_qty"])) == Decimal("20")
+    assert Decimal(str(allocation["shortage_qty"])) == Decimal("30")
+    assert allocation["shipment_no"].startswith("SH")
+    assert len(allocation["demand_nos"]) == 1
+
+    shipment = client.get(f"{SALES}/shipments/{allocation['shipment_id']}").json()["data"]
+    assert Decimal(str(shipment["items"][0]["quantity"])) == Decimal("20")
+
+    _refresh(db)
+    row = db.execute(
+        text(
+            "SELECT quantity, status FROM pln_demand "
+            "WHERE source_type='SALES' AND source_reference_id=:o AND material_id=:m"
+        ),
+        {"o": order["id"], "m": material_id},
+    ).one()
+    assert Decimal(str(row[0])) == Decimal("30")
+    assert row[1] == "CONFIRMED"
+
+
+def test_contract_open_order_demand_excludes_stock_allocated(
+    client: TestClient, db: Session
+) -> None:
+    """已分配库存的发货草稿不再计入未交付需求，只剩缺口部分。"""
+    material_id = _create_material(db)
+    warehouse_id = _create_warehouse(client)
+    _set_stock(db, material_id, warehouse_id, "20")
+    customer = _create_customer(client)
+    order = _create_confirmed_order(client, customer["id"], material_id, quantity="50")
+
+    _refresh(db)
+    rows = [
+        row
+        for row in sales_contract.get_open_order_demand(db)
+        if row["order_id"] == order["id"]
+    ]
+    assert len(rows) == 1
+    assert Decimal(str(rows[0]["quantity"])) == Decimal("30")
+
+
+def test_confirm_order_does_not_double_allocate_stock(
+    client: TestClient, db: Session
+) -> None:
+    """两张订单先后确认：草稿发货占用的库存不会被第二张订单重复分配。"""
+    material_id = _create_material(db)
+    warehouse_id = _create_warehouse(client)
+    _set_stock(db, material_id, warehouse_id, "30")
+    customer = _create_customer(client)
+
+    first = _create_confirmed_order(client, customer["id"], material_id, quantity="20")
+    assert Decimal(str(first["allocation"]["stock_qty"])) == Decimal("20")
+
+    second = _create_confirmed_order(client, customer["id"], material_id, quantity="20")
+    assert Decimal(str(second["allocation"]["stock_qty"])) == Decimal("10")
+    assert Decimal(str(second["allocation"]["shortage_qty"])) == Decimal("10")
+
+
+def test_cancel_order_releases_auto_shipment_and_demand(
+    client: TestClient, db: Session
+) -> None:
+    """订单取消：自动发货草稿取消、未进入 MPS 的缺口需求作废，库存释放。"""
+    material_id = _create_material(db)
+    warehouse_id = _create_warehouse(client)
+    _set_stock(db, material_id, warehouse_id, "20")
+    customer = _create_customer(client)
+    order = _create_confirmed_order(client, customer["id"], material_id, quantity="50")
+
+    cancelled = client.patch(
+        f"{SALES}/orders/{order['id']}/status", json={"status": "CANCELLED"}
+    )
+    assert cancelled.json()["code"] == 0, cancelled.json()
+
+    shipment = client.get(
+        f"{SALES}/shipments/{order['allocation']['shipment_id']}"
+    ).json()["data"]
+    assert shipment["status"] == "CANCELLED"
+
+    _refresh(db)
+    demand_status = db.execute(
+        text(
+            "SELECT status FROM pln_demand "
+            "WHERE source_type='SALES' AND source_reference_id=:o"
+        ),
+        {"o": order["id"]},
+    ).scalar()
+    assert demand_status == "CANCELLED"
+
+    # 库存释放：后续订单可以重新分配这 20 个
+    again = _create_confirmed_order(client, customer["id"], material_id, quantity="20")
+    assert Decimal(str(again["allocation"]["stock_qty"])) == Decimal("20")
+
+
 # ==================== 发货 ====================
 
 

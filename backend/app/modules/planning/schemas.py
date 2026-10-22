@@ -36,7 +36,7 @@ class _IdOut(_OrmBase):
 class DemandCreate(BaseModel):
     """需求新增入参。"""
 
-    source_type: str = Field(description="需求来源 SALES/STOCKFILL/MPS")
+    source_type: str = Field(description="需求来源 SALES/FORECAST/STOCKFILL/MPS")
     material_id: int = Field(description="物料ID")
     quantity: Decimal = Field(gt=0, description="需求数量")
     due_date: date = Field(description="需求日期")
@@ -51,6 +51,8 @@ class DemandOut(_IdOut):
     source_reference_id: Optional[int] = None
     source_no: Optional[str] = None
     material_id: int
+    material_code: Optional[str] = Field(default=None, description="物料编码（列表展示）")
+    material_name: Optional[str] = Field(default=None, description="物料名称（列表展示）")
     quantity: Decimal
     due_date: date
     status: str
@@ -85,12 +87,30 @@ class MpsCreate(BaseModel):
 class MpsItemOut(_IdOut):
     mps_id: int
     material_id: int
+    material_code: Optional[str] = Field(default=None, description="物料编码（列表展示）")
+    material_name: Optional[str] = Field(default=None, description="物料名称（列表展示）")
     period_label: Optional[str] = None
     planned_qty: Decimal
     finished_qty: Decimal
     start_date: date
     end_date: date
     status: str
+    remark: Optional[str] = None
+    source_demand_ids: Optional[str] = Field(
+        default=None, description="来源需求ID（逗号分隔，由需求汇总生成时写入）"
+    )
+    source_demand_nos: Optional[str] = Field(
+        default=None, description="来源需求单号（逗号分隔，列表展示）"
+    )
+
+
+class MpsFromDemandsRequest(BaseModel):
+    """从统一需求汇总生成 MPS 的入参。"""
+
+    start_date: date = Field(description="汇总期间开始日期（含）")
+    end_date: date = Field(description="汇总期间结束日期（含）")
+    mps_name: Optional[str] = Field(default=None, description="计划名称，留空自动生成")
+    program_no: Optional[str] = None
     remark: Optional[str] = None
 
 
@@ -108,18 +128,20 @@ class MpsOut(_IdOut):
 
 # ---------------- MRP ----------------
 class MrpRunCreate(BaseModel):
-    """MRP 运算发起入参。"""
+    """MRP 运算发起入参：MRP 只由 MPS 触发，不再接受需求直算。"""
 
-    mps_id: Optional[int] = Field(default=None, description="要展开的 MPS 头ID")
-    demand_ids: List[int] = Field(default_factory=list, description="参与运算的需求ID列表")
-    include_sales_demand: bool = Field(default=False, description="是否纳入已确认销售订单需求")
+    mps_id: int = Field(description="要展开的 MPS 头ID")
     remark: Optional[str] = None
 
 
 class MrpResultOut(_IdOut):
     run_id: int
     material_id: int
+    material_code: Optional[str] = Field(default=None, description="物料编码（列表展示）")
+    material_name: Optional[str] = Field(default=None, description="物料名称（列表展示）")
     parent_material_id: Optional[int] = None
+    parent_material_code: Optional[str] = Field(default=None, description="父件物料编码（列表展示）")
+    parent_material_name: Optional[str] = Field(default=None, description="父件物料名称（列表展示）")
     bom_level: int
     gross_requirement: Decimal
     on_hand: Decimal
@@ -138,6 +160,7 @@ class MrpResultOut(_IdOut):
 class MrpRunOut(_IdOut):
     run_no: str
     mps_id: Optional[int] = None
+    mps_no: Optional[str] = Field(default=None, description="MPS 编号（列表展示）")
     run_at: datetime
     status: str
     material_count: int
@@ -169,6 +192,8 @@ class ProductionPlanOut(_IdOut):
     source_type: str
     source_reference_id: Optional[int] = None
     material_id: int
+    material_code: Optional[str] = Field(default=None, description="物料编码（列表展示）")
+    material_name: Optional[str] = Field(default=None, description="物料名称（列表展示）")
     planned_qty: Decimal
     completed_qty: Decimal
     plan_date: date
@@ -201,10 +226,12 @@ class DispatchOrderOut(_IdOut):
     source_type: str
     source_reference_id: Optional[int] = None
     plan_id: Optional[int] = None
+    plan_no: Optional[str] = Field(default=None, description="生产作业计划编号（列表展示）")
     operation: Optional[str] = None
     planned_qty: Decimal
     completed_qty: Decimal
     worker_id: Optional[int] = None
+    worker_name: Optional[str] = Field(default=None, description="作业人员姓名（列表展示）")
     planned_start: Optional[date] = None
     planned_end: Optional[date] = None
     status: str
@@ -247,6 +274,8 @@ class RequisitionCreate(BaseModel):
 class RequisitionItemOut(_IdOut):
     requisition_id: int
     material_id: int
+    material_code: Optional[str] = Field(default=None, description="物料编码（列表展示）")
+    material_name: Optional[str] = Field(default=None, description="物料名称（列表展示）")
     required_qty: Decimal
     issued_qty: Decimal
     remark: Optional[str] = None
@@ -257,7 +286,10 @@ class RequisitionOut(_IdOut):
     source_type: str
     source_reference_id: Optional[int] = None
     plan_id: Optional[int] = None
+    plan_no: Optional[str] = Field(default=None, description="生产作业计划编号（列表展示）")
     warehouse_id: Optional[int] = None
+    warehouse_code: Optional[str] = Field(default=None, description="领料仓库编码（列表展示）")
+    warehouse_name: Optional[str] = Field(default=None, description="领料仓库名称（列表展示）")
     req_date: Optional[date] = None
     status: str
     remark: Optional[str] = None
@@ -354,12 +386,18 @@ class CompletionReportCreate(BaseModel):
 class CompletionReportOut(_IdOut):
     report_no: str
     plan_id: Optional[int] = None
+    plan_no: Optional[str] = Field(default=None, description="生产作业计划编号（列表展示）")
     dispatch_id: Optional[int] = None
+    dispatch_no: Optional[str] = Field(default=None, description="派工单号（列表展示）")
     material_id: int
+    material_code: Optional[str] = Field(default=None, description="物料编码（列表展示）")
+    material_name: Optional[str] = Field(default=None, description="物料名称（列表展示）")
     completed_qty: Decimal
     qualified_qty: Decimal
     scrap_qty: Decimal
     warehouse_id: Optional[int] = None
+    warehouse_code: Optional[str] = Field(default=None, description="入库仓库编码（列表展示）")
+    warehouse_name: Optional[str] = Field(default=None, description="入库仓库名称（列表展示）")
     report_date: Optional[date] = None
     status: str
     remark: Optional[str] = None

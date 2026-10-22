@@ -343,9 +343,20 @@ async function removeVersion(row: Bom): Promise<void> {
   }
 }
 
-onMounted(() => {
-  // 首次进入不自动加载，等待用户选择根物料
-})
+/** 进入页面自动展开「大众自动钳」的 BOM，避免空白等待用户手选根物料 */
+async function loadDefaultTree(): Promise<void> {
+  try {
+    const data = await listMaterials({ keyword: 'FG-CLAMP-001', page: 1, page_size: 20 })
+    const target = data.items.find((item) => item.material_code === 'FG-CLAMP-001')
+    if (!target) return
+    rootMaterialId.value = target.id
+    await loadTree()
+  } catch (error) {
+    ElMessage.error((error as Error).message)
+  }
+}
+
+onMounted(loadDefaultTree)
 </script>
 
 <template>

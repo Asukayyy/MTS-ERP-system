@@ -107,6 +107,7 @@ class ReplenishmentSource(str, Enum):
 class MrpSourceType(str, Enum):
     """MRP / 计划需求的来源类型。"""
 
-    SALES = "SALES"  # 销售订单 / 预测
+    SALES = "SALES"  # 销售订单
+    FORECAST = "FORECAST"  # 销售预测（不参与 MPS 汇总）
     STOCKFILL = "STOCKFILL"  # 库存补库需求
     MPS = "MPS"  # 主生产计划
