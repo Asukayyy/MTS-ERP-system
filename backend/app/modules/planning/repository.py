@@ -6,7 +6,7 @@
 """
 
 from decimal import Decimal
-from typing import List, Optional, Sequence
+from typing import Dict, List, Optional, Sequence
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -62,12 +62,40 @@ def add_demand(db: Session, demand: models.PlnDemand) -> models.PlnDemand:
     return demand
 
 
-def get_demands_by_ids(db: Session, demand_ids: Sequence[int]) -> List[models.PlnDemand]:
-    if not demand_ids:
-        return []
-    return list(
-        db.scalars(select(models.PlnDemand).where(models.PlnDemand.id.in_(list(demand_ids))))
-    )
+def nos_by_ids(
+    db: Session, model, ids: Sequence[int], field: str
+) -> Dict[int, str]:
+    """批量取单据编号（`{id: 单号}`），用于列表展示关联单据编号。"""
+    unique_ids = [int(i) for i in set(ids) if i]
+    if not unique_ids:
+        return {}
+    column = getattr(model, field)
+    rows = db.execute(select(model.id, column).where(model.id.in_(unique_ids))).all()
+    return {int(row[0]): row[1] for row in rows}
+
+
+def find_demand_by_source_material(
+    db: Session,
+    source_type: str,
+    source_reference_id: Optional[int],
+    source_no: Optional[str],
+    material_id: int,
+):
+    """按「来源单据 + 物料」查找需求。
+
+    销售订单按物料汇总导入（同一订单同一物料只生成一条需求），因此去重键
+    需要带 `material_id`，否则同一订单第二个物料会被误判为已导入。
+    """
+    if source_reference_id is None:
+        return None
+    conditions = [
+        models.PlnDemand.source_type == source_type,
+        models.PlnDemand.source_reference_id == source_reference_id,
+        models.PlnDemand.material_id == material_id,
+    ]
+    if source_no:
+        conditions.append(models.PlnDemand.source_no == source_no)
+    return db.scalar(select(models.PlnDemand).where(*conditions))
 
 
 def find_demand_by_source(
@@ -91,6 +119,41 @@ def find_demand_by_source(
     if source_no:
         conditions.append(models.PlnDemand.source_no == source_no)
     return db.scalar(select(models.PlnDemand).where(*conditions))
+
+
+def list_open_sales_demands_by_order(
+    db: Session, order_id: int, statuses: Sequence[str] = ("DRAFT", "CONFIRMED")
+) -> List[models.PlnDemand]:
+    """某销售订单下尚未进入 MPS 的缺口需求（用于订单取消时回收）。"""
+    stmt = select(models.PlnDemand).where(
+        models.PlnDemand.source_type == "SALES",
+        models.PlnDemand.source_reference_id == order_id,
+        models.PlnDemand.status.in_(list(statuses)),
+    )
+    return list(db.scalars(stmt).all())
+
+
+def list_confirmed_demands_in_period(
+    db: Session,
+    start_date,
+    end_date,
+    source_types: Sequence[str] = ("SALES", "STOCKFILL"),
+) -> List[models.PlnDemand]:
+    """取汇总期间的已确认需求（**销售订单 SALES + 补库申请 STOCKFILL**）。
+
+    销售预测（`FORECAST`）不参与 MPS 汇总，故不在默认取值范围内。
+    """
+    stmt = (
+        select(models.PlnDemand)
+        .where(
+            models.PlnDemand.status == "CONFIRMED",
+            models.PlnDemand.source_type.in_(list(source_types)),
+            models.PlnDemand.due_date >= start_date,
+            models.PlnDemand.due_date <= end_date,
+        )
+        .order_by(models.PlnDemand.due_date, models.PlnDemand.id)
+    )
+    return list(db.scalars(stmt))
 
 
 # ==================== MPS ====================

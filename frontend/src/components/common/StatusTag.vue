@@ -35,7 +35,8 @@ const LABELS: Record<string, string> = {
   TRANSFER_OUT: '移库出库',
   ADJUST: '盘点调整',
   // 来源类型
-  SALES: '销售',
+  SALES: '销售订单',
+  FORECAST: '销售预测',
   STOCKFILL: '补库',
   MPS: 'MPS',
   MRP: 'MRP',

@@ -6,7 +6,6 @@ import {
   createProductionPlansFromRun,
   createPurchasePlanFromRun,
   explainMrpResult,
-  listDemands,
   listMps,
   listMrpResults,
   listMrpRuns,
@@ -27,40 +26,23 @@ async function loadMpsOptions(keyword: string): Promise<RemoteOption[]> {
 
 const runForm = reactive<{
   mps_id: number | undefined
-  include_sales_demand: boolean
-  include_stockfill_demand: boolean
   remark: string
 }>({
   mps_id: undefined,
-  include_sales_demand: false,
-  include_stockfill_demand: false,
   remark: '',
 })
 
 const running = ref(false)
 
 async function doRunMrp(): Promise<void> {
-  if (
-    runForm.mps_id === undefined &&
-    !runForm.include_sales_demand &&
-    !runForm.include_stockfill_demand
-  ) {
-    ElMessage.warning('请选择 MPS 或勾选「纳入销售订单/补货需求」后再执行运算')
+  if (runForm.mps_id === undefined) {
+    ElMessage.warning('请先选择要展开的 MPS 后再执行运算')
     return
   }
   running.value = true
   try {
-    let demandIds: number[] = []
-    if (runForm.include_stockfill_demand) {
-      demandIds = await fetchConfirmedStockfillDemandIds()
-      if (!demandIds.length) {
-        ElMessage.warning('当前没有已确认/已下达的补货需求，按空需求执行')
-      }
-    }
     const run = await runMrp({
-      mps_id: runForm.mps_id ?? null,
-      demand_ids: demandIds,
-      include_sales_demand: runForm.include_sales_demand,
+      mps_id: runForm.mps_id,
       remark: runForm.remark || null,
     })
     ElMessage.success(`MRP 运算完成：${run.run_no}，共 ${run.material_count} 条结果`)
@@ -72,22 +54,6 @@ async function doRunMrp(): Promise<void> {
   } finally {
     running.value = false
   }
-}
-
-/** 拉取全部已确认/已下达的补货（STOCKFILL）需求 ID */
-async function fetchConfirmedStockfillDemandIds(): Promise<number[]> {
-  const ids: number[] = []
-  let page = 1
-  const pageSize = 200
-  for (;;) {
-    const data = await listDemands({ source_type: 'STOCKFILL', status: '', page, page_size: pageSize })
-    for (const item of data.items) {
-      if (item.status === 'CONFIRMED' || item.status === 'RELEASED') ids.push(item.id)
-    }
-    if (data.items.length < pageSize || data.total <= page * pageSize) break
-    page += 1
-  }
-  return ids
 }
 
 // ---------------- 批次历史 ----------------
@@ -203,10 +169,6 @@ onMounted(async () => {
         <el-form-item label="主生产计划 MPS">
           <RemoteSelect v-model="runForm.mps_id" :loader="loadMpsOptions" placeholder="选择要展开的 MPS" style="width: 260px" />
         </el-form-item>
-        <el-form-item label="运算基准">
-          <el-checkbox v-model="runForm.include_sales_demand">纳入已确认销售订单需求</el-checkbox>
-          <el-checkbox v-model="runForm.include_stockfill_demand">纳入已确认补货需求</el-checkbox>
-        </el-form-item>
         <el-form-item label="备注">
           <el-input v-model="runForm.remark" placeholder="可选" style="width: 200px" />
         </el-form-item>
@@ -215,7 +177,7 @@ onMounted(async () => {
         </el-form-item>
       </el-form>
       <p class="form-tip">
-        运算按多层 BOM 展开，逐层计算毛需求、可用量、安全库存与净需求，并给出建议下达日期与 MAKE/BUY 分流。
+        需求先汇总为 MPS，再由 MPS 触发 MRP。运算按多层 BOM 展开，逐层计算毛需求、可用量、安全库存与净需求，并给出建议下达日期与 MAKE/BUY 分流。
       </p>
     </el-card>
 
@@ -234,7 +196,7 @@ onMounted(async () => {
         @row-click="onRunRowClick"
       >
         <el-table-column label="批次号" prop="run_no" min-width="160" />
-        <el-table-column label="MPS ID" prop="mps_id" width="100" align="right" />
+        <el-table-column label="MPS 编号" prop="mps_no" min-width="150" />
         <el-table-column label="运算时间" prop="run_at" min-width="180" />
         <el-table-column label="结果条数" prop="material_count" width="110" align="right" />
         <el-table-column label="状态" width="90">
@@ -284,7 +246,9 @@ onMounted(async () => {
 
       <el-table v-loading="loading" :data="rows" border size="small">
         <el-table-column label="层级" prop="bom_level" width="70" align="right" />
-        <el-table-column label="物料ID" prop="material_id" width="100" align="right" />
+        <el-table-column label="物料编码" prop="material_code" min-width="140" />
+        <el-table-column label="物料名称" prop="material_name" min-width="140" />
+        <el-table-column label="父件编码" prop="parent_material_code" min-width="140" />
         <el-table-column label="毛需求" prop="gross_requirement" width="110" align="right" />
         <el-table-column label="现有库存" prop="on_hand" width="110" align="right" />
         <el-table-column label="可用量" prop="available_quantity" width="110" align="right" />

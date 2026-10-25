@@ -7,7 +7,7 @@
 > - 入参/出参模型：`backend/app/modules/<module>/schemas.py`
 > - 响应包装：`backend/app/common/response.py`；分页：`backend/app/common/pagination.py`；
 >   错误码：`backend/app/common/exceptions.py`
-> - 实测规模：**167 个路径 / 223 个操作**
+> - 实测规模：**168 个路径 / 227 个操作**
 
 ## 一、基础约定
 
@@ -230,7 +230,7 @@
 | `POST` | `/api/v1/sales/shipments/{shipment_id}/confirm` | 确认发货（调用库存出库） | `shipment_id` | `operator_id` | — |
 | `GET` | `/api/v1/sales/stats` | 销售统计 | — | — | — |
 
-### 2.3 计划与生产管理（`planning`，前缀 `/api/v1/planning`）—— 60 个操作
+### 2.3 计划与生产管理（`planning`，前缀 `/api/v1/planning`）—— 62 个操作
 
 | 方法 | 路径 | 说明 | 路径参数 | 查询参数 | 请求体 |
 | --- | --- | --- | --- | --- | --- |
@@ -248,7 +248,7 @@
 | `POST` | `/api/v1/planning/demands/from-replenishment` | 从库存补库需求生成需求 | — | — | `DemandFromReplenishmentRequest` |
 | `POST` | `/api/v1/planning/demands/from-replenishment/import` | 从库存补库需求批量导入需求（仅转计划 `PRODUCTION`） | — | — | — |
 | `POST` | `/api/v1/planning/demands/from-sales` | 从销售订单导入需求 | — | — | — |
-| `POST` | `/api/v1/planning/demands/from-forecast` | 从销售预测导入需求 | — | `month_from`、`month_to` | — |
+| `POST` | `/api/v1/planning/demands/from-forecast` | 从销售预测导入需求（记 `FORECAST`，不参与 MPS 汇总） | — | `month_from`、`month_to` | — |
 | `GET` | `/api/v1/planning/demands/{demand_id}` | 需求详情 | `demand_id` | — | — |
 | `PATCH` | `/api/v1/planning/demands/{demand_id}/status` | 需求状态流转 | `demand_id` | — | `DemandStatusUpdate` |
 | `GET` | `/api/v1/planning/dispatch-orders` | 派工单列表 | — | `status`、`plan_id`、`page`、`page_size` | — |
@@ -261,7 +261,8 @@
 | `PATCH` | `/api/v1/planning/dispatch-orders/{dispatch_id}/status` | 派工单状态流转 | `dispatch_id` | — | `app__modules__planning__schemas__StatusUpdate` |
 | `GET` | `/api/v1/planning/health` | planning 模块健康检查（占位） | — | — | — |
 | `GET` | `/api/v1/planning/mps` | MPS 列表 | — | `status`、`year`、`page`、`page_size` | — |
-| `POST` | `/api/v1/planning/mps` | 新增 MPS | — | — | `MpsCreate` |
+| `POST` | `/api/v1/planning/mps` | 新增 MPS（手工录入） | — | — | `MpsCreate` |
+| `POST` | `/api/v1/planning/mps/from-demands` | 由统一需求汇总生成 MPS（聚合销售订单 `SALES` + 补库申请 `STOCKFILL`，需求置 RELEASED） | — | — | `MpsFromDemandsRequest` |
 | `POST` | `/api/v1/planning/mps/import/confirm` | MPS 导入确认 | — | — | `MpsImportRequest` |
 | `POST` | `/api/v1/planning/mps/import/preview` | MPS 导入预览（不落库） | — | — | `MpsImportRequest` |
 | `DELETE` | `/api/v1/planning/mps/{mps_id}` | 删除 MPS | `mps_id` | — | — |
@@ -270,7 +271,7 @@
 | `PATCH` | `/api/v1/planning/mps/{mps_id}/status` | MPS 状态流转 | `mps_id` | — | `app__modules__planning__schemas__StatusUpdate` |
 | `GET` | `/api/v1/planning/mrp/results` | MRP 结果（跨批次分页） | — | `run_id`、`supply_type`、`status`、`page`、`page_size` | — |
 | `PATCH` | `/api/v1/planning/mrp/results/{result_id}/status` | MRP 结果状态流转 | `result_id` | — | `MrpResultStatusUpdate` |
-| `POST` | `/api/v1/planning/mrp/run` | 执行 MRP 运算 | — | — | `MrpRunCreate` |
+| `POST` | `/api/v1/planning/mrp/run` | 执行 MRP 运算（仅接受 `mps_id`，需求须先汇总为 MPS） | — | — | `MrpRunCreate` |
 | `GET` | `/api/v1/planning/mrp/runs` | MRP 批次列表 | — | `page`、`page_size` | — |
 | `GET` | `/api/v1/planning/mrp/runs/{run_id}` | MRP 批次详情（含结果） | `run_id` | — | — |
 | `POST` | `/api/v1/planning/mrp/runs/{run_id}/create-production-plans` | 由 MRP 批次生成生产作业计划 | `run_id` | — | — |
@@ -437,6 +438,7 @@
 | `POST /api/v1/planning/completion-reports/{report_id}/confirm` | `increase_stock`（`source_type=PRODUCTION_COMPLETION`） |
 | `POST /api/v1/sales/shipments/{shipment_id}/confirm` | `decrease_stock`（`source_type=SALES_SHIPMENT`） |
 | `POST /api/v1/sales/returns/{return_id}/confirm` | `increase_stock`（`source_type=SALES_RETURN`） |
+| `PATCH /api/v1/sales/orders/{order_id}/status`（`CONFIRMED`） | `get_available_by_warehouse` 查可用量 → 库存够的自动建 `DRAFT` 发货单；缺口经 `planning.contract.create_sales_demand_from_shortage` 登记 `SALES` 需求 |
 | `POST /api/v1/inventory/transfers/{transfer_id}/confirm` | `TRANSFER_OUT` + `TRANSFER_IN` |
 | `POST /api/v1/inventory/stocktakes/{stocktake_id}/confirm` | `ADJUST`（差异调整） |
 | `POST /api/v1/inventory/replenishment-requests/{request_id}/confirm` | `REORDER` → `procurement.contract`；`PRODUCTION` → `planning.contract` |

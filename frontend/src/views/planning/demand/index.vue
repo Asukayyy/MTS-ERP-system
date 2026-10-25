@@ -148,7 +148,8 @@ onMounted(load)
       <el-form class="filter-bar" :inline="true" @submit.prevent>
         <el-form-item label="需求来源">
           <el-select v-model="query.source_type" clearable placeholder="全部" style="width: 140px">
-            <el-option label="销售" value="SALES" />
+            <el-option label="销售订单" value="SALES" />
+            <el-option label="销售预测" value="FORECAST" />
             <el-option label="补库" value="STOCKFILL" />
             <el-option label="MPS" value="MPS" />
           </el-select>
@@ -174,7 +175,8 @@ onMounted(load)
           <template #default="{ row }"><StatusTag :status="row.source_type" /></template>
         </el-table-column>
         <el-table-column label="来源单号" prop="source_no" min-width="150" />
-        <el-table-column label="物料ID" prop="material_id" width="100" align="right" />
+        <el-table-column label="物料编码" prop="material_code" min-width="140" />
+        <el-table-column label="物料名称" prop="material_name" min-width="140" />
         <el-table-column label="需求数量" prop="quantity" width="110" align="right" />
         <el-table-column label="需求日期" prop="due_date" width="110" />
         <el-table-column label="状态" width="90">
@@ -231,7 +233,8 @@ onMounted(load)
       <el-form ref="formRef" :model="form" :rules="rules" label-width="100px">
         <el-form-item label="需求来源" prop="source_type">
           <el-select v-model="form.source_type" style="width: 100%">
-            <el-option label="销售 SALES" value="SALES" />
+            <el-option label="销售订单 SALES" value="SALES" />
+            <el-option label="销售预测 FORECAST" value="FORECAST" />
             <el-option label="补库 STOCKFILL" value="STOCKFILL" />
             <el-option label="MPS" value="MPS" />
           </el-select>

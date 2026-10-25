@@ -77,6 +77,10 @@ export function createMps(payload: Record<string, unknown>): Promise<Mps> {
   return post<Mps>('/planning/mps', payload)
 }
 
+export function createMpsFromDemands(payload: Record<string, unknown>): Promise<Mps> {
+  return post<Mps>('/planning/mps/from-demands', payload)
+}
+
 export function updateMps(id: number, payload: Record<string, unknown>): Promise<Mps> {
   return put<Mps>(`/planning/mps/${id}`, payload)
 }

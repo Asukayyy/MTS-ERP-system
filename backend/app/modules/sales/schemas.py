@@ -187,6 +187,28 @@ class OrderItemOut(_IdOut):
     remark: Optional[str] = None
 
 
+class StockAllocationItemOut(BaseModel):
+    """单个物料的库存分流结果。"""
+
+    material_id: int
+    material_code: Optional[str] = None
+    material_name: Optional[str] = None
+    required_qty: Decimal
+    stock_qty: Decimal
+    shortage_qty: Decimal
+
+
+class StockAllocationOut(BaseModel):
+    """订单确认时的库存分流快照（仅确认动作返回）。"""
+
+    shipment_id: Optional[int] = None
+    shipment_no: Optional[str] = None
+    stock_qty: Decimal
+    shortage_qty: Decimal
+    demand_nos: List[str] = Field(default_factory=list)
+    items: List[StockAllocationItemOut] = Field(default_factory=list)
+
+
 class OrderOut(_IdOut):
     order_no: str
     customer_id: int
@@ -199,6 +221,9 @@ class OrderOut(_IdOut):
     status: str
     remark: Optional[str] = None
     items: List[OrderItemOut] = Field(default_factory=list)
+    allocation: Optional[StockAllocationOut] = Field(
+        default=None, description="确认订单时的库存分流结果（其他操作返回空）"
+    )
 
 
 # ==================== 销售发货 ====================

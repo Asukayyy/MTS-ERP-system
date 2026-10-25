@@ -281,16 +281,17 @@ onMounted(load)
       >
         <el-table-column type="selection" width="44" :selectable="isDeletable" />
         <el-table-column label="报告单号" prop="report_no" min-width="150" />
-        <el-table-column label="作业计划ID" prop="plan_id" width="110" align="right" />
-        <el-table-column label="派工单ID" prop="dispatch_id" width="110" align="right">
-          <template #default="{ row }">{{ row.dispatch_id ?? '-' }}</template>
+        <el-table-column label="作业计划编号" prop="plan_no" min-width="150" />
+        <el-table-column label="派工单号" prop="dispatch_no" min-width="150">
+          <template #default="{ row }">{{ row.dispatch_no ?? '-' }}</template>
         </el-table-column>
-        <el-table-column label="产出物料ID" prop="material_id" width="110" align="right" />
+        <el-table-column label="产出物料编码" prop="material_code" min-width="140" />
+        <el-table-column label="产出物料名称" prop="material_name" min-width="140" />
         <el-table-column label="完工数量" prop="completed_qty" width="110" align="right" />
         <el-table-column label="合格数量" prop="qualified_qty" width="110" align="right" />
         <el-table-column label="报废数量" prop="scrap_qty" width="100" align="right" />
-        <el-table-column label="入库仓库ID" prop="warehouse_id" width="110" align="right">
-          <template #default="{ row }">{{ row.warehouse_id ?? '待指定' }}</template>
+        <el-table-column label="入库仓库" prop="warehouse_name" width="130">
+          <template #default="{ row }">{{ row.warehouse_name ?? '待指定' }}</template>
         </el-table-column>
         <el-table-column label="报工日期" prop="report_date" width="110">
           <template #default="{ row }">{{ row.report_date || '待填写' }}</template>
