@@ -11,12 +11,21 @@ import type { Material } from '@/types/erp'
 const { loading, rows, total, page, pageSize, query, load, search, reset, changePage, changeSize } =
   usePagedTable<
     Material,
-    { keyword: string; material_type: string; supply_type: string; status: string }
+    {
+      keyword: string
+      material_type: string
+      supply_type: string
+      status: string
+      abc_class: string
+      sales_category: string
+    }
   >((params) => listMaterials(params), {
     keyword: '',
     material_type: '',
     supply_type: '',
     status: '',
+    abc_class: '',
+    sales_category: '',
   })
 
 const MATERIAL_TYPES = [
@@ -25,6 +34,24 @@ const MATERIAL_TYPES = [
   { value: 'SEMI', label: '半成品' },
   { value: 'FINISHED', label: '成品' },
 ]
+
+/** 经典 ABC 分类：A 高价值、B 中等、C 低值 */
+const ABC_CLASSES = [
+  { value: 'A', label: 'A 类（高价值）' },
+  { value: 'B', label: 'B 类（中等）' },
+  { value: 'C', label: 'C 类（低值）' },
+]
+
+/** 销售类别：整机 / 可单独售卖备件 / 内部件 */
+const SALES_CATEGORIES = [
+  { value: 'MACHINE', label: '整机' },
+  { value: 'SPARE', label: '可售备件' },
+  { value: 'INTERNAL', label: '内部件' },
+]
+
+function salesCategoryLabel(value?: string | null): string {
+  return SALES_CATEGORIES.find((item) => item.value === value)?.label ?? '内部件'
+}
 
 const dialogVisible = ref(false)
 const submitting = ref(false)
@@ -38,6 +65,8 @@ const form = reactive({
   unit_code: 'PCS',
   specification: '',
   material_group: '',
+  abc_class: '',
+  sales_category: 'INTERNAL',
   lead_time_days: 0,
   safety_stock: 0,
   standard_cost: 0,
@@ -62,6 +91,8 @@ function resetForm(): void {
     unit_code: 'PCS',
     specification: '',
     material_group: '',
+    abc_class: '',
+    sales_category: 'INTERNAL',
     lead_time_days: 0,
     safety_stock: 0,
     standard_cost: 0,
@@ -86,6 +117,8 @@ function openEdit(row: Material): void {
     unit_code: row.unit_code,
     specification: row.specification ?? '',
     material_group: row.material_group ?? '',
+    abc_class: row.abc_class ?? '',
+    sales_category: row.sales_category ?? 'INTERNAL',
     lead_time_days: row.lead_time_days,
     safety_stock: Number(row.safety_stock),
     standard_cost: Number(row.standard_cost),
@@ -99,13 +132,15 @@ async function submit(): Promise<void> {
   const valid = await formRef.value?.validate().catch(() => false)
   if (!valid) return
   submitting.value = true
+  const { abc_class, ...rest } = form
+  const payload = { ...rest, abc_class: abc_class || null }
   try {
     if (editingId.value === null) {
-      await createMaterial({ ...form })
+      await createMaterial(payload)
       ElMessage.success('物料已新增')
     } else {
-      const { material_code: _code, ...payload } = form
-      await updateMaterial(editingId.value, payload)
+      const { material_code: _code, ...editable } = payload
+      await updateMaterial(editingId.value, editable)
       ElMessage.success('物料已修改')
     }
     dialogVisible.value = false
@@ -157,6 +192,16 @@ onMounted(load)
             <el-option label="采购" value="BUY" />
           </el-select>
         </el-form-item>
+        <el-form-item label="销售类别">
+          <el-select v-model="query.sales_category" clearable placeholder="全部" style="width: 130px">
+            <el-option v-for="item in SALES_CATEGORIES" :key="item.value" :label="item.label" :value="item.value" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="ABC">
+          <el-select v-model="query.abc_class" clearable placeholder="全部" style="width: 110px">
+            <el-option v-for="item in ABC_CLASSES" :key="item.value" :label="item.label" :value="item.value" />
+          </el-select>
+        </el-form-item>
         <el-form-item label="状态">
           <el-select v-model="query.status" clearable placeholder="全部" style="width: 120px">
             <el-option label="启用" value="ACTIVE" />
@@ -177,6 +222,17 @@ onMounted(load)
         </el-table-column>
         <el-table-column label="供应" width="90">
           <template #default="{ row }"><StatusTag :status="row.supply_type" /></template>
+        </el-table-column>
+        <el-table-column label="销售类别" width="100">
+          <template #default="{ row }">{{ salesCategoryLabel(row.sales_category) }}</template>
+        </el-table-column>
+        <el-table-column label="ABC" width="80" align="center">
+          <template #default="{ row }">
+            <el-tag v-if="row.abc_class" :type="row.abc_class === 'A' ? 'danger' : row.abc_class === 'B' ? 'warning' : 'info'" size="small">
+              {{ row.abc_class }}
+            </el-tag>
+            <span v-else>—</span>
+          </template>
         </el-table-column>
         <el-table-column label="单位" prop="unit_code" width="80" />
         <el-table-column label="提前期(天)" prop="lead_time_days" width="100" align="right" />
@@ -245,6 +301,20 @@ onMounted(load)
           </el-col>
           <el-col :span="12">
             <el-form-item label="物料分组"><el-input v-model="form.material_group" /></el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="销售类别">
+              <el-select v-model="form.sales_category" style="width: 100%">
+                <el-option v-for="item in SALES_CATEGORIES" :key="item.value" :label="item.label" :value="item.value" />
+              </el-select>
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="ABC 分类">
+              <el-select v-model="form.abc_class" clearable placeholder="未分类" style="width: 100%">
+                <el-option v-for="item in ABC_CLASSES" :key="item.value" :label="item.label" :value="item.value" />
+              </el-select>
+            </el-form-item>
           </el-col>
           <el-col :span="12">
             <el-form-item label="提前期(天)">

@@ -90,6 +90,8 @@ class BalanceOut(_IdOut):
     material_id: int
     material_code: Optional[str] = None
     material_name: Optional[str] = None
+    material_abc_class: Optional[str] = None
+    material_sales_category: Optional[str] = None
     warehouse_id: int
     warehouse_name: Optional[str] = None
     on_hand: Decimal
@@ -97,6 +99,15 @@ class BalanceOut(_IdOut):
     available_quantity: Decimal
     reorder_point: Optional[Decimal] = Field(default=None, description="订货点（仅 A 类物料配置，未配置为 null）")
     reorder_quantity: Optional[Decimal] = Field(default=None, description="建议订货量（仅 A 类物料配置）")
+
+
+class BalanceSummaryOut(BaseModel):
+    """按销售类别汇总的库存量（整机 / 可售备件 / 内部件分开统计）。"""
+
+    sales_category: str
+    on_hand: Decimal
+    available_quantity: Decimal
+    count: int
 
 
 class BalanceReorderUpdate(BaseModel):

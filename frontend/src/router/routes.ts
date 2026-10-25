@@ -228,6 +228,14 @@ export const constantRoutes: RouteRecordRaw[] = [
         meta: { title: '补库需求', perm: 'inventory:replenishment' },
       },
 
+      // ---------- 人事管理 ----------
+      {
+        path: 'hr/employee',
+        name: 'HrEmployee',
+        component: () => import('@/views/hr/index.vue'),
+        meta: { title: '人事工作台', perm: 'system:user' },
+      },
+
       // ---------- 系统管理 ----------
       {
         path: 'system/organization',

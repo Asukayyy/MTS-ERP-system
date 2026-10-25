@@ -146,6 +146,7 @@ def list_forecasts(
     material_id: Optional[int] = None,
     status: Optional[str] = None,
     forecast_month: Optional[str] = None,
+    material_ids: Optional[Sequence[int]] = None,
 ):
     stmt = select(models.SalForecast).order_by(models.SalForecast.id.desc())
     if material_id:
@@ -154,7 +155,36 @@ def list_forecasts(
         stmt = stmt.where(models.SalForecast.status == status)
     if forecast_month:
         stmt = stmt.where(models.SalForecast.forecast_month == forecast_month)
+    if material_ids is not None:
+        ids = [int(i) for i in material_ids]
+        if not ids:
+            return [], 0
+        stmt = stmt.where(models.SalForecast.material_id.in_(ids))
     return _paginate(db, stmt, page, page_size)
+
+
+def forecast_rows(
+    db: Session,
+    *,
+    material_id: Optional[int] = None,
+    status: Optional[str] = None,
+    forecast_month: Optional[str] = None,
+    material_ids: Optional[Sequence[int]] = None,
+) -> List[models.SalForecast]:
+    """查询符合条件的全部预测行（不分页），用于按销售类别汇总。"""
+    stmt = select(models.SalForecast)
+    if material_id:
+        stmt = stmt.where(models.SalForecast.material_id == material_id)
+    if status:
+        stmt = stmt.where(models.SalForecast.status == status)
+    if forecast_month:
+        stmt = stmt.where(models.SalForecast.forecast_month == forecast_month)
+    if material_ids is not None:
+        ids = [int(i) for i in material_ids]
+        if not ids:
+            return []
+        stmt = stmt.where(models.SalForecast.material_id.in_(ids))
+    return list(db.scalars(stmt))
 
 
 def get_forecast(db: Session, forecast_id: int) -> Optional[models.SalForecast]:

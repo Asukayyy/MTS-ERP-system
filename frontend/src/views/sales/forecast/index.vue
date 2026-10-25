@@ -6,6 +6,7 @@ import type { FormInstance, FormRules } from 'element-plus'
 import {
   createForecast,
   deleteForecast,
+  getForecastSummary,
   listCustomers,
   listForecasts,
   listProducts,
@@ -15,13 +16,60 @@ import {
 import RemoteSelect from '@/components/common/RemoteSelect.vue'
 import StatusTag from '@/components/common/StatusTag.vue'
 import { usePagedTable } from '@/composables/usePagedTable'
-import type { Forecast, RemoteOption } from '@/types/erp'
+import type { Forecast, ForecastSummary, RemoteOption } from '@/types/erp'
 
 const { loading, rows, total, page, pageSize, query, load, search, reset, changePage, changeSize } =
-  usePagedTable<Forecast, { material_id: number | undefined; status: string; forecast_month: string }>(
-    (params) => listForecasts(params),
-    { material_id: undefined, status: '', forecast_month: '' },
-  )
+  usePagedTable<
+    Forecast,
+    {
+      material_id: number | undefined
+      status: string
+      forecast_month: string
+      sales_category: string
+    }
+  >((params) => listForecasts(params), {
+    material_id: undefined,
+    status: '',
+    forecast_month: '',
+    sales_category: '',
+  })
+
+/** 销售类别：整机 / 可售备件（如转椅轮子）/ 内部件 */
+const SALES_CATEGORIES = [
+  { value: 'MACHINE', label: '整机' },
+  { value: 'SPARE', label: '可售备件' },
+  { value: 'INTERNAL', label: '内部件' },
+]
+
+const summary = ref<ForecastSummary[]>([])
+
+function summaryOf(category: string): { qty: number; count: number } {
+  const hit = summary.value.find((item) => item.sales_category === category)
+  return { qty: hit ? Number(hit.forecast_qty) : 0, count: hit?.count ?? 0 }
+}
+
+async function loadSummary(): Promise<void> {
+  try {
+    summary.value = await getForecastSummary({
+      material_id: query.material_id,
+      status: query.status || undefined,
+      forecast_month: query.forecast_month || undefined,
+      sales_category: query.sales_category || undefined,
+    })
+  } catch {
+    summary.value = []
+  }
+}
+
+async function doSearch(): Promise<void> {
+  await search()
+  await loadSummary()
+}
+
+async function doReset(): Promise<void> {
+  await reset()
+  await loadSummary()
+}
 
 /** 客户选项 */
 async function loadCustomerOptions(keyword: string): Promise<RemoteOption[]> {
@@ -104,6 +152,7 @@ async function submit(): Promise<void> {
     }
     dialogVisible.value = false
     await load()
+    await loadSummary()
   } catch (error) {
     ElMessage.error((error as Error).message)
   } finally {
@@ -116,6 +165,7 @@ async function changeStatus(row: Forecast, status: string): Promise<void> {
     await setForecastStatus(row.id, status)
     ElMessage.success('状态已更新')
     await load()
+    await loadSummary()
   } catch (error) {
     ElMessage.error((error as Error).message)
   }
@@ -131,12 +181,16 @@ async function remove(row: Forecast): Promise<void> {
     await deleteForecast(row.id)
     ElMessage.success('销售预测已删除')
     await load()
+    await loadSummary()
   } catch (error) {
     ElMessage.error((error as Error).message)
   }
 }
 
-onMounted(load)
+onMounted(() => {
+  load()
+  loadSummary()
+})
 </script>
 
 <template>
@@ -150,9 +204,32 @@ onMounted(load)
         </div>
       </template>
 
+      <div class="summary-cards">
+        <div class="summary-card summary-card--machine">
+          <span class="summary-card__label">整机预测</span>
+          <span class="summary-card__value">{{ summaryOf('MACHINE').qty }}</span>
+          <span class="summary-card__meta">{{ summaryOf('MACHINE').count }} 条预测</span>
+        </div>
+        <div class="summary-card summary-card--spare">
+          <span class="summary-card__label">可售备件预测</span>
+          <span class="summary-card__value">{{ summaryOf('SPARE').qty }}</span>
+          <span class="summary-card__meta">{{ summaryOf('SPARE').count }} 条预测</span>
+        </div>
+        <div class="summary-card summary-card--internal">
+          <span class="summary-card__label">内部件预测</span>
+          <span class="summary-card__value">{{ summaryOf('INTERNAL').qty }}</span>
+          <span class="summary-card__meta">{{ summaryOf('INTERNAL').count }} 条预测</span>
+        </div>
+      </div>
+
       <el-form class="filter-bar" :inline="true" @submit.prevent>
         <el-form-item label="物料">
           <RemoteSelect v-model="query.material_id" :loader="loadProductOptions" placeholder="全部" style="width: 220px" />
+        </el-form-item>
+        <el-form-item label="销售类别">
+          <el-select v-model="query.sales_category" clearable placeholder="全部" style="width: 130px">
+            <el-option v-for="item in SALES_CATEGORIES" :key="item.value" :label="item.label" :value="item.value" />
+          </el-select>
         </el-form-item>
         <el-form-item label="预测月份">
           <el-date-picker
@@ -173,14 +250,27 @@ onMounted(load)
           </el-select>
         </el-form-item>
         <el-form-item>
-          <el-button type="primary" @click="search">查询</el-button>
-          <el-button @click="reset">重置</el-button>
+          <el-button type="primary" @click="doSearch">查询</el-button>
+          <el-button @click="doReset">重置</el-button>
         </el-form-item>
       </el-form>
 
       <el-table v-loading="loading" :data="rows" border size="small">
         <el-table-column label="预测单号" prop="forecast_no" min-width="150" />
         <el-table-column label="客户" prop="customer_name" min-width="150" />
+        <el-table-column label="销售类别" width="100">
+          <template #default="{ row }">
+            {{ SALES_CATEGORIES.find((item) => item.value === row.material_sales_category)?.label ?? '内部件' }}
+          </template>
+        </el-table-column>
+        <el-table-column label="ABC" width="70" align="center">
+          <template #default="{ row }">
+            <el-tag v-if="row.material_abc_class" :type="row.material_abc_class === 'A' ? 'danger' : row.material_abc_class === 'B' ? 'warning' : 'info'" size="small">
+              {{ row.material_abc_class }}
+            </el-tag>
+            <span v-else>—</span>
+          </template>
+        </el-table-column>
         <el-table-column label="物料编码" prop="material_code" min-width="130" />
         <el-table-column label="物料名称" prop="material_name" min-width="140" />
         <el-table-column label="预测月份" prop="forecast_month" width="110" />
@@ -254,3 +344,48 @@ onMounted(load)
     </el-dialog>
   </div>
 </template>
+
+<style scoped>
+.summary-cards {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.summary-card {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  border: 1px solid #e6ebf2;
+  background: #f7f9fc;
+}
+
+.summary-card--machine {
+  border-color: #cfe3ff;
+  background: #f2f8ff;
+}
+
+.summary-card--spare {
+  border-color: #c8ebe4;
+  background: #f1fbf8;
+}
+
+.summary-card__label {
+  font-size: 12px;
+  color: #5b6b7c;
+}
+
+.summary-card__value {
+  font-size: 20px;
+  font-weight: 600;
+  color: #1f2d3d;
+}
+
+.summary-card__meta {
+  font-size: 12px;
+  color: #98a2ad;
+}
+</style>

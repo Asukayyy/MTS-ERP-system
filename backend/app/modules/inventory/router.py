@@ -142,9 +142,11 @@ def list_balances(
     warehouse_id: Optional[int] = Query(default=None, description="仓库ID过滤"),
     keyword: Optional[str] = Query(default=None, description="物料编码/名称关键字"),
     has_reorder_point: bool = Query(default=False, description="仅返回已配置订货点的结存"),
+    sales_category: Optional[str] = Query(default=None, description="MACHINE/SPARE/INTERNAL"),
+    abc_class: Optional[str] = Query(default=None, description="ABC 分类 A/B/C"),
     db: Session = Depends(get_db),
 ) -> ApiResponse[PageData[schemas.BalanceOut]]:
-    """分页查询实时库存（含现存量/锁定量/可用量/订货点）。"""
+    """分页查询实时库存（含现存量/锁定量/可用量/订货点），可按销售类别与 ABC 分类筛选。"""
     rows, total = service.list_balances(
         db,
         page=params.page,
@@ -153,6 +155,8 @@ def list_balances(
         warehouse_id=warehouse_id,
         keyword=keyword,
         has_reorder_point=has_reorder_point,
+        sales_category=sales_category,
+        abc_class=abc_class,
     )
     return success(
         PageData[schemas.BalanceOut](
@@ -173,6 +177,30 @@ def get_available_stock(
 ) -> ApiResponse[schemas.AvailableStockOut]:
     """按物料（可选仓库）查询可用量。"""
     return success(service.get_available_stock(db, material_id, warehouse_id))
+
+
+@router.get(
+    "/balances/summary",
+    response_model=ApiResponse[List[schemas.BalanceSummaryOut]],
+    summary="实时库存按销售类别汇总",
+)
+def balance_summary(
+    warehouse_id: Optional[int] = Query(default=None, description="仓库ID过滤"),
+    keyword: Optional[str] = Query(default=None, description="物料编码/名称关键字"),
+    sales_category: Optional[str] = Query(default=None, description="MACHINE/SPARE/INTERNAL"),
+    abc_class: Optional[str] = Query(default=None, description="ABC 分类 A/B/C"),
+    db: Session = Depends(get_db),
+) -> ApiResponse[List[schemas.BalanceSummaryOut]]:
+    """整机与可单独售卖备件分开统计库存量。"""
+    return success(
+        service.balance_summary(
+            db,
+            warehouse_id=warehouse_id,
+            keyword=keyword,
+            sales_category=sales_category,
+            abc_class=abc_class,
+        )
+    )
 
 
 @router.get(

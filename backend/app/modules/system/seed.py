@@ -268,17 +268,24 @@ ROLE_PERMISSION_BINDINGS: dict[str, list[str]] = {
         "system", "system:material", "system:bom", "system:routing",
         "planning", "planning:schedule", "planning:dispatch", "planning:picking", "planning:finish",
     ],
+    # 采购人员：采购管理全部 + 物料管理/公共字典 + 库存（实时库存、流水、订货点、补货需求）
     "PURCHASE": [
         "procurement", "procurement:plan", "procurement:demand",
-        "procurement:order", "procurement:arrival",
+        "procurement:order", "procurement:arrival", "procurement:qc",
         "procurement:supplier", "procurement:supplier-material",
         "procurement:evaluation", "procurement:report",
-        "system:material", "system:dictionary",
+        "system", "system:material", "system:material:manage",
+        "system:dictionary", "system:dictionary:manage",
+        "inventory", "inventory:stock", "inventory:ledger",
+        "inventory:reorder", "inventory:replenishment",
     ],
+    # 销售人员：销售管理全部 + 物料/人员 + 库存查询与流水 + 需求管理（只读）
     "SALES": [
         "sales", "sales:order", "sales:demand", "sales:shipping", "sales:stock",
         "sales:customer", "sales:return",
-        "system:material",
+        "system", "system:material", "system:personnel",
+        "inventory", "inventory:stock", "inventory:ledger",
+        "planning", "planning:demand",
     ],
     "INVENTORY": [
         "inventory", "inventory:stock", "inventory:inbound",

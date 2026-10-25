@@ -31,6 +31,10 @@ export interface Material {
   unit_code: string
   specification?: string | null
   material_group?: string | null
+  /** 经典 ABC 分类：A 高价值 / B 中等 / C 低值，未分类为 null */
+  abc_class?: string | null
+  /** 销售类别：MACHINE 整机 / SPARE 可单独售卖备件 / INTERNAL 内部件 */
+  sales_category: string
   lead_time_days: number
   safety_stock: Num
   standard_cost: Num
@@ -46,6 +50,8 @@ export interface MaterialPayload {
   unit_code?: string
   specification?: string | null
   material_group?: string | null
+  abc_class?: string | null
+  sales_category?: string
   lead_time_days?: number
   safety_stock?: Num
   standard_cost?: Num
@@ -128,6 +134,8 @@ export interface Personnel {
   id: number
   employee_no: string
   person_name: string
+  gender?: string | null
+  id_card?: string | null
   org_id: number
   position?: string | null
   phone?: string | null
@@ -241,6 +249,8 @@ export interface Product {
   material_type: string
   supply_type?: string | null
   unit_code?: string | null
+  abc_class?: string | null
+  sales_category?: string | null
   lead_time_days?: number | null
   safety_stock?: Num | null
   status: string
@@ -254,10 +264,19 @@ export interface Forecast {
   material_id: number
   material_code?: string | null
   material_name?: string | null
+  material_abc_class?: string | null
+  material_sales_category?: string | null
   forecast_month: string
   forecast_qty: Num
   status: string
   remark?: string | null
+}
+
+/** 销售预测按销售类别汇总 */
+export interface ForecastSummary {
+  sales_category: string
+  forecast_qty: Num
+  count: number
 }
 
 export interface OrderItem {
@@ -661,6 +680,8 @@ export interface Balance {
   material_id: number
   material_code?: string | null
   material_name?: string | null
+  material_abc_class?: string | null
+  material_sales_category?: string | null
   warehouse_id: number
   warehouse_name?: string | null
   on_hand: Num
@@ -668,6 +689,14 @@ export interface Balance {
   available_quantity: Num
   reorder_point?: Num | null
   reorder_quantity?: Num | null
+}
+
+/** 实时库存按销售类别汇总 */
+export interface BalanceSummary {
+  sales_category: string
+  on_hand: Num
+  available_quantity: Num
+  count: number
 }
 
 export interface StockChangeResult {

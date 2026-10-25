@@ -226,9 +226,11 @@ def list_materials(
     supply_type: Optional[str] = None,
     status: Optional[str] = None,
     keyword: Optional[str] = None,
+    abc_class: Optional[str] = None,
+    sales_category: Optional[str] = None,
     db: Session = Depends(get_db),
 ) -> ApiResponse[PageData[MaterialOut]]:
-    """按类型 / 供应类型 / 状态 / 关键字分页查询物料。"""
+    """按类型 / 供应类型 / 状态 / ABC 分类 / 销售类别 / 关键字分页查询物料。"""
     items, total = service.list_materials(
         db,
         page=params.page,
@@ -237,6 +239,8 @@ def list_materials(
         supply_type=supply_type,
         status=status,
         keyword=keyword,
+        abc_class=abc_class,
+        sales_category=sales_category,
     )
     return _page(params, total, items, MaterialOut)
 

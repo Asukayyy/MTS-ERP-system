@@ -83,6 +83,11 @@ export const menuItems: MenuItem[] = [
     ],
   },
   {
+    path: '/hr',
+    title: '人事管理',
+    children: [{ path: '/hr/employee', title: '人事工作台' }],
+  },
+  {
     path: '/system/manage',
     title: '系统管理',
     module: 'system',

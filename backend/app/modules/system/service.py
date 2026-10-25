@@ -128,6 +128,8 @@ def list_materials(
     supply_type: Optional[str] = None,
     status: Optional[str] = None,
     keyword: Optional[str] = None,
+    abc_class: Optional[str] = None,
+    sales_category: Optional[str] = None,
 ):
     """分页查询物料。"""
     return repo.list_materials(
@@ -138,6 +140,8 @@ def list_materials(
         supply_type=supply_type,
         status=status,
         keyword=keyword,
+        abc_class=abc_class,
+        sales_category=sales_category,
     )
 
 
@@ -182,6 +186,8 @@ def create_material(db: Session, payload: MaterialCreate) -> models.SysMaterial:
         unit_code=payload.unit_code,
         specification=payload.specification,
         material_group=payload.material_group,
+        abc_class=payload.abc_class,
+        sales_category=payload.sales_category,
         lead_time_days=payload.lead_time_days,
         safety_stock=payload.safety_stock,
         standard_cost=payload.standard_cost,
@@ -996,6 +1002,8 @@ def create_personnel(db: Session, payload: PersonnelCreate) -> models.SysPersonn
     """新增员工：工号唯一、组织存在。"""
     if repo.get_personnel_by_no(db, payload.employee_no):
         raise BusinessException(CODE_EMPLOYEE_NO_EXISTS, "员工工号已存在")
+    if payload.id_card and repo.get_personnel_by_id_card(db, payload.id_card):
+        raise BusinessException(CODE_EMPLOYEE_NO_EXISTS, "身份证号已存在")
     if not repo.get_organization(db, payload.org_id):
         raise BusinessException(CODE_NOT_FOUND, "所属组织不存在")
     _validate_status(payload.status)
@@ -1003,6 +1011,8 @@ def create_personnel(db: Session, payload: PersonnelCreate) -> models.SysPersonn
     personnel = models.SysPersonnel(
         employee_no=payload.employee_no,
         person_name=payload.person_name,
+        gender=payload.gender,
+        id_card=payload.id_card,
         org_id=payload.org_id,
         position=payload.position,
         phone=payload.phone,
@@ -1029,6 +1039,10 @@ def update_personnel(
     """修改员工。"""
     personnel = get_personnel(db, personnel_id)
     data = payload.model_dump(exclude_unset=True)
+    if data.get("id_card"):
+        existing = repo.get_personnel_by_id_card(db, data["id_card"])
+        if existing and existing.id != personnel_id:
+            raise BusinessException(CODE_EMPLOYEE_NO_EXISTS, "身份证号已存在")
     if "org_id" in data and not repo.get_organization(db, data["org_id"]):
         raise BusinessException(CODE_NOT_FOUND, "所属组织不存在")
     if "status" in data:

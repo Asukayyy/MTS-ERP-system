@@ -16,6 +16,7 @@ import {
   listMaterials,
   setBomStatus,
   updateBomItem,
+  updateMaterial,
 } from '@/api/system'
 import RemoteSelect from '@/components/common/RemoteSelect.vue'
 import StatusTag from '@/components/common/StatusTag.vue'
@@ -30,6 +31,35 @@ const treeLoading = ref(false)
 const selectedMaterialId = ref<number>()
 const nodeMaterial = ref<Material | null>(null)
 const nodeBom = ref<Bom | null>(null)
+
+// ---- 节点属性：ABC 分类与销售类别（在 BOM 表内直接维护） ----
+const nodeAbc = ref('')
+const nodeSalesCategory = ref('INTERNAL')
+const classSaving = ref(false)
+
+function syncNodeClassification(): void {
+  nodeAbc.value = nodeMaterial.value?.abc_class ?? ''
+  nodeSalesCategory.value = nodeMaterial.value?.sales_category ?? 'INTERNAL'
+}
+
+async function saveNodeClassification(): Promise<void> {
+  const materialId = selectedMaterialId.value
+  if (!materialId) return
+  classSaving.value = true
+  try {
+    const updated = await updateMaterial(materialId, {
+      abc_class: nodeAbc.value || null,
+      sales_category: nodeSalesCategory.value,
+    })
+    nodeMaterial.value = updated
+    ElMessage.success('物料分类已更新')
+  } catch (error) {
+    ElMessage.error((error as Error).message)
+    syncNodeClassification()
+  } finally {
+    classSaving.value = false
+  }
+}
 
 const versions = ref<Bom[]>([])
 const selectedVersionId = ref<number>()
@@ -46,6 +76,84 @@ async function materialOptions(keyword: string): Promise<RemoteOption[]> {
     id: item.id,
     label: `${item.material_code} ${item.material_name}`,
   }))
+}
+
+// ---------------- 根物料选择：按 BOM 结构逐层展开 + 直接打字搜索 ----------------
+
+const pickerVisible = ref(false)
+const pickerKeyword = ref('')
+const pickerLoading = ref(false)
+const searchResults = ref<Material[]>([])
+const rootLabel = ref('')
+let searchTimer: number | undefined
+
+/** 懒加载：首层列成品，展开后按该物料的 BOM 结构继续下钻 */
+async function loadPickerNodes(
+  node: { level: number; data: { material_id?: number } },
+  resolve: (data: BomTreeNode[]) => void,
+): Promise<void> {
+  if (node.level > 0) {
+    try {
+      const tree = await getBomTree(node.data.material_id as number)
+      resolve(tree[0]?.children ?? [])
+    } catch {
+      resolve([])
+    }
+    return
+  }
+  try {
+    const data = await listMaterials({ page: 1, page_size: 200 })
+    const finished = data.items.filter((item) => item.material_type === 'FINISHED')
+    const roots = finished.length ? finished : data.items
+    resolve(
+      roots.map((item) => ({
+        material_id: item.id,
+        material_code: item.material_code,
+        material_name: item.material_name,
+        quantity: 1,
+        level: 0,
+        lead_time_offset: 0,
+        scrap_rate: 0,
+        children: [],
+      })) as BomTreeNode[],
+    )
+  } catch {
+    resolve([])
+  }
+}
+
+function onPickerInput(): void {
+  window.clearTimeout(searchTimer)
+  const kw = pickerKeyword.value.trim()
+  if (!kw) {
+    searchResults.value = []
+    return
+  }
+  searchTimer = window.setTimeout(async () => {
+    pickerLoading.value = true
+    try {
+      searchResults.value = (await listMaterials({ keyword: kw, page: 1, page_size: 50 })).items
+    } finally {
+      pickerLoading.value = false
+    }
+  }, 250)
+}
+
+/** 树节点或搜索结果统一作为根物料 */
+async function pickMaterial(item: {
+  material_id?: number
+  id?: number
+  material_code: string
+  material_name: string
+}): Promise<void> {
+  const id = item.material_id ?? item.id
+  if (!id) return
+  rootMaterialId.value = id
+  rootLabel.value = `${item.material_code} ${item.material_name}`
+  pickerVisible.value = false
+  pickerKeyword.value = ''
+  searchResults.value = []
+  await loadTree()
 }
 
 /** 加载多层 BOM 树 */
@@ -72,6 +180,7 @@ async function selectNode(node?: BomTreeNode): Promise<void> {
   selectedMaterialId.value = node.material_id
   try {
     nodeMaterial.value = await getMaterial(node.material_id)
+    syncNodeClassification()
   } catch (error) {
     nodeMaterial.value = null
     ElMessage.error((error as Error).message)
@@ -379,6 +488,7 @@ async function loadDefaultTree(): Promise<void> {
     const target = data.items.find((item) => item.material_code === 'FG-CLAMP-001')
     if (!target) return
     rootMaterialId.value = target.id
+    rootLabel.value = `${target.material_code} ${target.material_name}`
     await loadTree()
   } catch (error) {
     ElMessage.error((error as Error).message)
@@ -393,14 +503,64 @@ onMounted(loadDefaultTree)
     <el-card shadow="never">
       <template #header>
         <div class="table-toolbar">
-          <span class="page-title">BOM 编辑器</span>
+          <span class="page-title">BOM 表</span>
           <span class="table-toolbar__spacer" />
-          <RemoteSelect
-            v-model="rootMaterialId"
-            :loader="materialOptions"
-            placeholder="选择根物料"
-            style="width: 280px"
-          />
+          <el-popover
+            v-model:visible="pickerVisible"
+            placement="bottom-end"
+            :width="400"
+            trigger="click"
+            popper-class="bom-picker"
+          >
+            <template #reference>
+              <el-input
+                :model-value="rootLabel"
+                placeholder="选择根物料"
+                readonly
+                style="width: 280px"
+              />
+            </template>
+            <div class="bom-picker__panel">
+              <el-input
+                v-model="pickerKeyword"
+                placeholder="输入物料编码 / 名称直接搜索"
+                clearable
+                @input="onPickerInput"
+              />
+              <div v-loading="pickerLoading" class="bom-picker__list">
+                <template v-if="pickerKeyword.trim()">
+                  <div
+                    v-for="item in searchResults"
+                    :key="item.id"
+                    class="bom-picker__item"
+                    @click="pickMaterial(item)"
+                  >
+                    <span class="bom-picker__code">{{ item.material_code }}</span>
+                    <span class="bom-picker__name">{{ item.material_name }}</span>
+                  </div>
+                  <div v-if="!pickerLoading && !searchResults.length" class="bom-picker__empty">
+                    无匹配物料
+                  </div>
+                </template>
+                <el-tree
+                  v-else
+                  lazy
+                  :load="loadPickerNodes"
+                  :props="{ label: 'material_name', children: 'children' }"
+                  node-key="material_id"
+                  :expand-on-click-node="false"
+                  @node-click="pickMaterial"
+                >
+                  <template #default="{ data }">
+                    <span class="bom-picker__node">
+                      <span class="bom-picker__code">{{ data.material_code }}</span>
+                      <span class="bom-picker__name">{{ data.material_name }}</span>
+                    </span>
+                  </template>
+                </el-tree>
+              </div>
+            </div>
+          </el-popover>
           <el-button type="primary" :loading="treeLoading" @click="loadTree">展开结构树</el-button>
         </div>
       </template>
@@ -446,6 +606,34 @@ onMounted(loadDefaultTree)
               <el-descriptions-item label="名称">{{ nodeMaterial.material_name }}</el-descriptions-item>
               <el-descriptions-item label="供应类型">
                 <StatusTag :status="nodeMaterial.supply_type" />
+              </el-descriptions-item>
+              <el-descriptions-item label="ABC 分类">
+                <el-select
+                  v-model="nodeAbc"
+                  size="small"
+                  clearable
+                  placeholder="未分类"
+                  style="width: 100%"
+                  :disabled="classSaving"
+                  @change="saveNodeClassification"
+                >
+                  <el-option label="A 类（高价值）" value="A" />
+                  <el-option label="B 类（中等）" value="B" />
+                  <el-option label="C 类（低值）" value="C" />
+                </el-select>
+              </el-descriptions-item>
+              <el-descriptions-item label="销售类别">
+                <el-select
+                  v-model="nodeSalesCategory"
+                  size="small"
+                  style="width: 100%"
+                  :disabled="classSaving"
+                  @change="saveNodeClassification"
+                >
+                  <el-option label="整机" value="MACHINE" />
+                  <el-option label="可售备件" value="SPARE" />
+                  <el-option label="内部件" value="INTERNAL" />
+                </el-select>
               </el-descriptions-item>
               <el-descriptions-item label="当前版本">{{ selectedVersion?.bom_version ?? '-' }}</el-descriptions-item>
               <el-descriptions-item label="是否激活">

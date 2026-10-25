@@ -510,13 +510,24 @@ def list_balances(
     warehouse_id: Optional[int] = None,
     keyword: Optional[str] = None,
     has_reorder_point: bool = False,
+    sales_category: Optional[str] = None,
+    abc_class: Optional[str] = None,
 ) -> Tuple[List[Dict[str, Any]], int]:
-    """分页查询实时库存，附带物料编码/名称与可用量。"""
+    """分页查询实时库存，附带物料编码/名称、ABC 分类、销售类别与可用量。"""
     material_ids: Optional[List[int]] = None
-    if keyword:
+    if keyword or sales_category or abc_class:
         from app.modules.system.contract import search_materials
 
-        material_ids = [m["id"] for m in search_materials(db, keyword=keyword, limit=500)]
+        material_ids = [
+            m["id"]
+            for m in search_materials(
+                db,
+                keyword=keyword,
+                sales_category=sales_category,
+                abc_class=abc_class,
+                limit=5000,
+            )
+        ]
     rows, total = repository.list_balances(
         db, page, page_size, material_id, warehouse_id, material_ids,
         has_reorder_point=has_reorder_point,
@@ -532,6 +543,8 @@ def list_balances(
                 "material_id": row.material_id,
                 "material_code": material.get("material_code"),
                 "material_name": material.get("material_name"),
+                "material_abc_class": material.get("abc_class"),
+                "material_sales_category": material.get("sales_category"),
                 "warehouse_id": row.warehouse_id,
                 "warehouse_name": warehouses.get(row.warehouse_id),
                 "reorder_point": row.reorder_point,
@@ -540,6 +553,51 @@ def list_balances(
             }
         )
     return items, total
+
+
+def balance_summary(
+    db: Session,
+    *,
+    warehouse_id: Optional[int] = None,
+    keyword: Optional[str] = None,
+    sales_category: Optional[str] = None,
+    abc_class: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """按销售类别汇总库存：整机与可单独售卖备件分开统计，互不混算。"""
+    material_ids: Optional[List[int]] = None
+    if keyword or sales_category or abc_class:
+        from app.modules.system.contract import search_materials
+
+        material_ids = [
+            m["id"]
+            for m in search_materials(
+                db,
+                keyword=keyword,
+                sales_category=sales_category,
+                abc_class=abc_class,
+                limit=5000,
+            )
+        ]
+    rows = repository.balance_rows(db, warehouse_id=warehouse_id, material_ids=material_ids)
+    materials = _material_map(db, [row.material_id for row in rows])
+    buckets: Dict[str, Dict[str, Any]] = {}
+    for row in rows:
+        category = materials.get(row.material_id, {}).get("sales_category") or "INTERNAL"
+        bucket = buckets.setdefault(
+            category,
+            {
+                "sales_category": category,
+                "on_hand": _as_decimal(0),
+                "available_quantity": _as_decimal(0),
+                "count": 0,
+            },
+        )
+        bucket["on_hand"] += _as_decimal(row.quantity)
+        bucket["available_quantity"] += _as_decimal(row.quantity) - _as_decimal(
+            row.locked_quantity
+        )
+        bucket["count"] += 1
+    return list(buckets.values())
 
 
 def get_available_stock(

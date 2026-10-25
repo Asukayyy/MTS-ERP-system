@@ -51,6 +51,12 @@ class MaterialCreate(BaseModel):
     unit_code: str = Field(default="PCS", max_length=20, description="计量单位")
     specification: Optional[str] = Field(default=None, max_length=200, description="规格型号")
     material_group: Optional[str] = Field(default=None, max_length=50, description="物料分组")
+    abc_class: Optional[str] = Field(default=None, pattern="^[ABC]$", description="ABC 分类 A/B/C")
+    sales_category: str = Field(
+        default="INTERNAL",
+        pattern="^(MACHINE|SPARE|INTERNAL)$",
+        description="销售类别 MACHINE 整机 / SPARE 可售备件 / INTERNAL 内部件",
+    )
     lead_time_days: int = Field(default=0, description="提前期（天）")
     safety_stock: Decimal = Field(default=Decimal("0"), description="安全库存")
     standard_cost: Decimal = Field(default=Decimal("0"), description="标准成本")
@@ -67,6 +73,8 @@ class MaterialUpdate(BaseModel):
     unit_code: Optional[str] = Field(default=None, max_length=20)
     specification: Optional[str] = Field(default=None, max_length=200)
     material_group: Optional[str] = Field(default=None, max_length=50)
+    abc_class: Optional[str] = Field(default=None, pattern="^[ABC]$")
+    sales_category: Optional[str] = Field(default=None, pattern="^(MACHINE|SPARE|INTERNAL)$")
     lead_time_days: Optional[int] = None
     safety_stock: Optional[Decimal] = None
     standard_cost: Optional[Decimal] = None
@@ -82,6 +90,8 @@ class MaterialOut(_IdOut):
     unit_code: str
     specification: Optional[str] = None
     material_group: Optional[str] = None
+    abc_class: Optional[str] = None
+    sales_category: str
     lead_time_days: int
     safety_stock: Decimal
     standard_cost: Decimal
@@ -300,6 +310,10 @@ class PersonnelCreate(BaseModel):
 
     employee_no: str = Field(max_length=50, description="员工工号（唯一）")
     person_name: str = Field(max_length=100, description="姓名")
+    gender: Optional[str] = Field(default=None, pattern="^(MALE|FEMALE)$", description="性别")
+    id_card: Optional[str] = Field(
+        default=None, pattern=r"^\d{17}[\dXx]$", description="身份证号"
+    )
     org_id: int = Field(description="所属组织ID")
     position: Optional[str] = Field(default=None, max_length=50)
     phone: Optional[str] = Field(default=None, max_length=30)
@@ -313,6 +327,8 @@ class PersonnelUpdate(BaseModel):
     """人员修改入参。"""
 
     person_name: Optional[str] = Field(default=None, max_length=100)
+    gender: Optional[str] = Field(default=None, pattern="^(MALE|FEMALE)$")
+    id_card: Optional[str] = Field(default=None, pattern=r"^\d{17}[\dXx]$")
     org_id: Optional[int] = None
     position: Optional[str] = Field(default=None, max_length=50)
     phone: Optional[str] = Field(default=None, max_length=30)
@@ -325,6 +341,8 @@ class PersonnelUpdate(BaseModel):
 class PersonnelOut(_IdOut):
     employee_no: str
     person_name: str
+    gender: Optional[str] = None
+    id_card: Optional[str] = None
     org_id: int
     position: Optional[str] = None
     phone: Optional[str] = None

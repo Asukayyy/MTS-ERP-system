@@ -93,6 +93,8 @@ class ProductOut(BaseModel):
     material_type: str
     supply_type: Optional[str] = None
     unit_code: Optional[str] = None
+    abc_class: Optional[str] = None
+    sales_category: str
     lead_time_days: Optional[int] = None
     safety_stock: Optional[Decimal] = None
     status: str
@@ -131,10 +133,20 @@ class ForecastOut(_IdOut):
     material_id: int
     material_code: Optional[str] = None
     material_name: Optional[str] = None
+    material_abc_class: Optional[str] = None
+    material_sales_category: Optional[str] = None
     forecast_month: str
     forecast_qty: Decimal
     status: str
     remark: Optional[str] = None
+
+
+class ForecastSummaryOut(BaseModel):
+    """按销售类别汇总的预测量（整机 / 可售备件 / 内部件分开统计）。"""
+
+    sales_category: str
+    forecast_qty: Decimal
+    count: int
 
 
 # ==================== 销售订单 ====================

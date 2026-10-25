@@ -29,14 +29,15 @@ from app.modules.inventory.contract import (
 )
 from app.modules.sales import models, repository
 from app.modules.system.contract import (
-    get_finished_materials,
+    get_sellable_materials,
     get_material,
     get_materials,
     get_personnel_name,
     get_personnel_names,
     log_operation,
+    search_materials,
 )
-from app.shared.enums import MaterialType, RecordStatus
+from app.shared.enums import RecordStatus
 
 # ==================== 错误码（2000~2999） ====================
 
@@ -106,11 +107,11 @@ def _current_month_range(today: Optional[date] = None) -> Tuple[date, date]:
     return first_day, (first_day + timedelta(days=32)).replace(day=1)
 
 
-def _is_finished_active(material: Dict[str, Any]) -> bool:
-    """判定物料是否可销售的成品（FINISHED + ACTIVE）。"""
+def _is_sellable_active(material: Dict[str, Any]) -> bool:
+    """判定物料是否可对外销售：启用，且销售类别为整机（MACHINE）或可售备件（SPARE）。"""
     return (
-        material.get("material_type") == MaterialType.FINISHED.value
-        and material.get("status") == RecordStatus.ACTIVE.value
+        material.get("status") == RecordStatus.ACTIVE.value
+        and material.get("sales_category") in ("MACHINE", "SPARE")
     )
 
 
@@ -215,6 +216,8 @@ def _material_fields(material: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     return {
         "material_code": material.get("material_code"),
         "material_name": material.get("material_name"),
+        "material_abc_class": material.get("abc_class"),
+        "material_sales_category": material.get("sales_category"),
     }
 
 
@@ -507,8 +510,8 @@ def delete_customer(
 
 
 def list_products(db: Session, keyword: Optional[str] = None) -> List[Dict[str, Any]]:
-    """可销售成品：直接读取 `system.contract`，不建销售产品表。"""
-    return get_finished_materials(db, keyword)
+    """可销售物料：整机（MACHINE）与可单独售卖备件（SPARE），不建销售产品表。"""
+    return get_sellable_materials(db, keyword)
 
 
 # ==================== 销售预测 ====================
@@ -521,9 +524,12 @@ def list_forecasts(
     material_id: Optional[int] = None,
     status: Optional[str] = None,
     forecast_month: Optional[str] = None,
+    sales_category: Optional[str] = None,
+    abc_class: Optional[str] = None,
 ) -> Tuple[List[Dict[str, Any]], int]:
+    material_ids = _filter_material_ids(db, sales_category, abc_class)
     rows, total = repository.list_forecasts(
-        db, page, page_size, material_id, status, forecast_month
+        db, page, page_size, material_id, status, forecast_month, material_ids
     )
     materials = _material_map(db, [r.material_id for r in rows])
     customers = {
@@ -532,6 +538,51 @@ def list_forecasts(
     }
     items = [_forecast_dict(row, materials, customers.get(row.customer_id)) for row in rows]
     return items, total
+
+
+def _filter_material_ids(
+    db: Session, sales_category: Optional[str], abc_class: Optional[str]
+) -> Optional[List[int]]:
+    """按销售类别 / ABC 分类收敛物料范围；两个条件都为空时返回 None（不过滤）。"""
+    if not sales_category and not abc_class:
+        return None
+    rows = search_materials(
+        db,
+        abc_class=abc_class,
+        sales_category=sales_category,
+        limit=5000,
+    )
+    return [int(row["id"]) for row in rows]
+
+
+def forecast_summary(
+    db: Session,
+    *,
+    material_id: Optional[int] = None,
+    status: Optional[str] = None,
+    forecast_month: Optional[str] = None,
+    sales_category: Optional[str] = None,
+    abc_class: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """按销售类别汇总预测数量：整机与可售备件分开统计，互不混算。"""
+    material_ids = _filter_material_ids(db, sales_category, abc_class)
+    rows = repository.forecast_rows(
+        db,
+        material_id=material_id,
+        status=status,
+        forecast_month=forecast_month,
+        material_ids=material_ids,
+    )
+    materials = _material_map(db, [row.material_id for row in rows])
+    buckets: Dict[str, Dict[str, Any]] = {}
+    for row in rows:
+        category = materials.get(row.material_id, {}).get("sales_category") or "INTERNAL"
+        bucket = buckets.setdefault(
+            category, {"sales_category": category, "forecast_qty": Decimal("0"), "count": 0}
+        )
+        bucket["forecast_qty"] += _as_decimal(row.forecast_qty)
+        bucket["count"] += 1
+    return list(buckets.values())
 
 
 def get_forecast(db: Session, forecast_id: int) -> Dict[str, Any]:
@@ -892,10 +943,10 @@ def _validate_order_confirm(db: Session, order: models.SalOrder) -> None:
         material = get_material(db, item.material_id)
         if not material:
             raise BusinessException(CODE_PARAM_INVALID, f"订单行物料不存在：{item.material_id}")
-        if not _is_finished_active(material):
+        if not _is_sellable_active(material):
             raise BusinessException(
                 CODE_PARAM_INVALID,
-                f"物料 {material.get('material_code')} 不是启用的成品，不能确认订单",
+                f"物料 {material.get('material_code')} 不是可销售的整机或备件，不能确认订单",
             )
         if _as_decimal(item.quantity) <= 0:
             raise BusinessException(CODE_PARAM_INVALID, "订单行数量必须为正数")

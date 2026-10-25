@@ -158,6 +158,24 @@ def list_balances(
     return _paginate(db, stmt, page, page_size)
 
 
+def balance_rows(
+    db: Session,
+    *,
+    warehouse_id: Optional[int] = None,
+    material_ids: Optional[Sequence[int]] = None,
+) -> List[models.InvBalance]:
+    """查询符合条件的全部结存行（不分页），用于按销售类别汇总。"""
+    stmt = select(models.InvBalance)
+    if warehouse_id:
+        stmt = stmt.where(models.InvBalance.warehouse_id == warehouse_id)
+    if material_ids is not None:
+        ids = [int(i) for i in material_ids]
+        if not ids:
+            return []
+        stmt = stmt.where(models.InvBalance.material_id.in_(ids))
+    return list(db.scalars(stmt))
+
+
 def sum_quantity(
     db: Session, material_id: int, warehouse_id: Optional[int] = None
 ) -> Decimal:
