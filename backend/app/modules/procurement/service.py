@@ -1398,6 +1398,129 @@ def create_evaluation(
     )
 
 
+def auto_evaluate_supplier(
+    db: Session,
+    *,
+    supplier_id: int,
+    evaluate_date: Optional[date] = None,
+    evaluator_id: Optional[int] = None,
+    remark: Optional[str] = None,
+    operator_id: Optional[int] = None,
+) -> Dict[str, Any]:
+    """自动供应商评价：按真实业务数据计算三项得分并落库。
+
+    算法（与前端评价页公示口径一致，统计该供应商全部历史单据）：
+
+    1. **交期得分** = 按时到货率 × 100。
+       按时 = 到货单 `receipt_date` ≤ 采购订单 `expected_date`；
+       统计口径：状态为已确认 / 已完成的到货单。
+    2. **质量得分** = 检验合格率 × 100 = 合格总量 ÷ 到货总量 × 100（同口径到货单）。
+    3. **价格得分** = 100 − 平均偏离百分比。
+       偏离% =（该供应商某物料订单均价 − 全部供应商同物料订单均价）÷ 全部均价 × 100，
+       按物料简单平均；高于均价减分、低于均价加分，结果截断到 [0, 100]。
+
+    综合得分 = 有数据维度（1~3 项）的简单平均，四舍五入 4 位小数；
+    三项均无业务数据时报错（无法客观评价）。
+    """
+    _require_supplier(db, supplier_id)
+    if evaluator_id:
+        _require_personnel(db, evaluator_id)
+
+    # ---- 1. 交期得分：按时到货率 ----
+    receipt_total, receipt_on_time = repository.supplier_on_time_stats(db, supplier_id)
+    delivery_score: Optional[Decimal] = None
+    on_time_rate: Optional[Decimal] = None
+    if receipt_total > 0:
+        on_time_rate = (Decimal(receipt_on_time) / Decimal(receipt_total)).quantize(
+            _SCORE_STEP, rounding=ROUND_HALF_UP
+        )
+        delivery_score = (on_time_rate * 100).quantize(_SCORE_STEP, rounding=ROUND_HALF_UP)
+
+    # ---- 2. 质量得分：检验合格率 ----
+    qty_total, qty_qualified = repository.supplier_quality_sums(db, supplier_id)
+    quality_score: Optional[Decimal] = None
+    qualified_rate: Optional[Decimal] = None
+    if qty_total > 0:
+        qualified_rate = (qty_qualified / qty_total).quantize(
+            _SCORE_STEP, rounding=ROUND_HALF_UP
+        )
+        quality_score = (qualified_rate * 100).quantize(_SCORE_STEP, rounding=ROUND_HALF_UP)
+
+    # ---- 3. 价格得分：相对全部供应商均价的偏离 ----
+    supplier_prices = dict(repository.material_avg_prices(db, supplier_id))
+    market_prices = dict(repository.material_avg_prices(db))
+    price_score: Optional[Decimal] = None
+    price_deviation_pct: Optional[Decimal] = None
+    deviations: List[Decimal] = []
+    for material_id, s_avg in supplier_prices.items():
+        m_avg = market_prices.get(material_id)
+        if m_avg is None or m_avg <= 0:
+            continue
+        deviations.append((s_avg - m_avg) / m_avg * 100)
+    if deviations:
+        price_deviation_pct = (sum(deviations) / len(deviations)).quantize(
+            _SCORE_STEP, rounding=ROUND_HALF_UP
+        )
+        raw = Decimal("100") - price_deviation_pct
+        price_score = min(max(raw, Decimal("0")), Decimal("100")).quantize(
+            _SCORE_STEP, rounding=ROUND_HALF_UP
+        )
+
+    present = [s for s in (quality_score, delivery_score, price_score) if s is not None]
+    if not present:
+        raise BusinessException(
+            CODE_PARAM_INVALID,
+            "该供应商暂无有效到货/订单业务数据，无法自动评价，请使用手工录入",
+        )
+    # 缺失维度（尚无业务数据）按 0 分处理会误伤供应商，这里以有数据的维度落库、
+    # 综合分取有数据维度的平均。
+    total = (sum(present) / len(present)).quantize(_SCORE_STEP, rounding=ROUND_HALF_UP)
+    evaluation = models.PurSupplierEvaluation(
+        supplier_id=supplier_id,
+        evaluate_date=evaluate_date or date.today(),
+        quality_score=quality_score if quality_score is not None else Decimal("0"),
+        delivery_score=delivery_score if delivery_score is not None else Decimal("0"),
+        price_score=price_score if price_score is not None else Decimal("0"),
+        total_score=total,
+        evaluator_id=evaluator_id,
+        remark=f"[自动评价] {remark}" if remark else "[自动评价]",
+        created_by=operator_id,
+    )
+    repository.add_evaluation(db, evaluation)
+    log_operation(
+        db,
+        module=MODULE,
+        action="CREATE",
+        target_type="pur_supplier_evaluation",
+        target_id=evaluation.id,
+        operator_id=operator_id,
+        detail=(
+            f"自动评价供应商{supplier_id}：交期{delivery_score} 质量{quality_score} "
+            f"价格{price_score}，综合 {total}"
+        ),
+    )
+    supplier = repository.get_supplier(db, supplier_id)
+    result = _evaluation_dict(
+        evaluation,
+        supplier.supplier_name if supplier else None,
+        get_personnel_name(db, evaluator_id),
+    )
+    # 计算依据（供前端展示），缺失维度为 None
+    result.update(
+        {
+            "on_time_rate": on_time_rate,
+            "receipt_total": receipt_total,
+            "receipt_on_time": receipt_on_time,
+            "qualified_rate": qualified_rate,
+            "receipt_qty_total": _as_decimal(qty_total),
+            "receipt_qty_qualified": _as_decimal(qty_qualified),
+            "price_deviation_pct": price_deviation_pct,
+            "scored_dimensions": len(present),
+        }
+    )
+    return result
+
+
 def list_evaluations(
     db: Session,
     page: int = 1,
