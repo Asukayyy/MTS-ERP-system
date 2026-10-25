@@ -291,6 +291,22 @@ class LowStockOut(BaseModel):
     shortage_qty: Decimal
 
 
+class SafetyStockSuggestionOut(BaseModel):
+    """安全库存补库建议：可用量低于安全库存时的建议。"""
+
+    material_id: int
+    material_code: Optional[str] = None
+    material_name: Optional[str] = None
+    supply_type: Optional[str] = None
+    source_type: str = Field(description="补库来源 REORDER / PRODUCTION")
+    warehouse_id: int
+    warehouse_code: Optional[str] = None
+    warehouse_name: Optional[str] = None
+    available_quantity: Decimal
+    safety_stock: Decimal
+    suggested_qty: Decimal
+
+
 class FlowSummaryOut(BaseModel):
     """出入库汇总行（基于库存操作单聚合）。"""
 

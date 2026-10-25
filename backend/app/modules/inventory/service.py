@@ -29,6 +29,7 @@ from app.modules.system.contract import (
     get_material,
     get_materials,
     log_operation,
+    search_materials,
 )
 
 # ==================== 错误码（5000~5999） ====================
@@ -1154,6 +1155,108 @@ def low_stock_report(db: Session) -> List[Dict[str, Any]]:
             row["shortage_qty"] = row["safety_stock"] - row["available_quantity"]
             report.append(row)
     return report
+
+
+def _suggestion_warehouse(
+    db: Session, material_id: int
+) -> Optional[models.InvWarehouse]:
+    """补库建议的目标仓库：优先取该物料存量最大的仓库，否则取第一个启用的仓库。"""
+    balance = db.scalars(
+        select(models.InvBalance)
+        .where(models.InvBalance.material_id == material_id)
+        .order_by(models.InvBalance.quantity.desc(), models.InvBalance.id)
+        .limit(1)
+    ).first()
+    if balance is not None:
+        return repository.get_warehouse(db, balance.warehouse_id)
+    return db.scalars(
+        select(models.InvWarehouse)
+        .where(models.InvWarehouse.status == "ACTIVE")
+        .order_by(models.InvWarehouse.id)
+        .limit(1)
+    ).first()
+
+
+def safety_stock_suggestions(db: Session) -> List[Dict[str, Any]]:
+    """按安全库存给出补库建议（替代原订货点口径）。
+
+    口径：物料级可用量（各仓库合计，无结存视为 0）低于物料主数据 `safety_stock`
+    时给出建议，建议量 = safety_stock − 可用量；目标仓库取该物料存量最大的仓库，
+    没有任何结存时取第一个启用仓库。
+    补库方式按 supply_type 区分：BUY → REORDER（转采购），MAKE → PRODUCTION（转生产计划）。
+    """
+    materials = search_materials(db, status="ACTIVE")
+    available_map = {
+        material_id: available
+        for material_id, _, available in repository.aggregate_by_material(db)
+    }
+    suggestions: List[Dict[str, Any]] = []
+    for material in materials:
+        safety = _as_decimal(material.get("safety_stock"))
+        if safety <= 0:
+            continue
+        available = _as_decimal(available_map.get(material["id"]))
+        if available >= safety:
+            continue
+        warehouse = _suggestion_warehouse(db, material["id"])
+        if warehouse is None:
+            continue
+        supply_type = material.get("supply_type") or "BUY"
+        suggestions.append(
+            {
+                "material_id": material["id"],
+                "material_code": material.get("material_code"),
+                "material_name": material.get("material_name"),
+                "supply_type": supply_type,
+                "source_type": "REORDER" if supply_type == "BUY" else "PRODUCTION",
+                "warehouse_id": warehouse.id,
+                "warehouse_code": warehouse.warehouse_code,
+                "warehouse_name": warehouse.warehouse_name,
+                "available_quantity": available,
+                "safety_stock": safety,
+                "suggested_qty": safety - available,
+            }
+        )
+    return suggestions
+
+
+def generate_from_safety_stock(
+    db: Session, operator_id: Optional[int] = None
+) -> Dict[str, Any]:
+    """按安全库存建议批量生成 DRAFT 补库需求（已有在途需求的物料+仓库跳过）。"""
+    created_ids: List[int] = []
+    skipped = 0
+    for suggestion in safety_stock_suggestions(db):
+        pending = repository.count_where(
+            db,
+            models.InvReplenishmentRequest,
+            models.InvReplenishmentRequest.material_id == suggestion["material_id"],
+            models.InvReplenishmentRequest.warehouse_id == suggestion["warehouse_id"],
+            models.InvReplenishmentRequest.status.in_(
+                ["DRAFT", "CONFIRMED", "RELEASED"]
+            ),
+        )
+        if pending:
+            skipped += 1
+            continue
+        result = create_replenishment_request(
+            db,
+            material_id=suggestion["material_id"],
+            warehouse_id=suggestion["warehouse_id"],
+            request_qty=suggestion["suggested_qty"],
+            required_date=date.today(),
+            source_type=suggestion["source_type"],
+            current_qty=suggestion["available_quantity"],
+            target_qty=suggestion["safety_stock"],
+            remark="安全库存自动生成",
+            operator_id=operator_id,
+        )
+        created_ids.append(result["id"])
+    return {
+        "created_count": len(created_ids),
+        "request_ids": created_ids,
+        "skipped_count": skipped,
+    }
 
 
 def flow_summary(db: Session, date_from: date, date_to: date) -> List[Dict[str, Any]]:

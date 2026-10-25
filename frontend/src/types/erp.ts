@@ -675,6 +675,22 @@ export interface LowStock {
   shortage_qty: Num
 }
 
+/** 安全库存补库建议（可用量低于安全库存） */
+export interface SafetyStockSuggestion {
+  material_id: number
+  material_code?: string | null
+  material_name?: string | null
+  supply_type?: string | null
+  /** 补库来源：REORDER 转采购 / PRODUCTION 转生产计划 */
+  source_type: string
+  warehouse_id: number
+  warehouse_code?: string | null
+  warehouse_name?: string | null
+  available_quantity: Num
+  safety_stock: Num
+  suggested_qty: Num
+}
+
 export interface FlowSummaryRow {
   transaction_type: string
   material_id: number
