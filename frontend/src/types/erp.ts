@@ -929,6 +929,17 @@ export interface SupplierEvaluation {
   evaluator_id?: number | null
   evaluator_name?: string | null
   remark?: string | null
+  /** 自动评价的按时到货率（0~1），手工录入为空 */
+  on_time_rate?: Num | null
+  receipt_total?: number | null
+  receipt_on_time?: number | null
+  /** 自动评价的检验合格率（0~1） */
+  qualified_rate?: Num | null
+  receipt_qty_total?: Num | null
+  receipt_qty_qualified?: Num | null
+  /** 自动评价的价格偏离百分比（正=高于均价） */
+  price_deviation_pct?: Num | null
+  scored_dimensions?: number | null
 }
 
 /** 采购计划执行报表行 */

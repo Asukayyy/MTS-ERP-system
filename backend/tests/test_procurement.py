@@ -492,3 +492,130 @@ def test_supplier_evaluation_total_score(db: Session) -> None:
         )
     assert exc.value.code == 4000
     db.rollback()
+
+
+# ==================== 9. 自动供应商评价 ====================
+
+
+def test_auto_evaluation_computes_three_scores(db: Session) -> None:
+    """自动评价：交期=按时到货率×100，质量=检验合格率×100，价格=100-偏离均价%。"""
+    material_id = _create_material(db)
+    warehouse_id = _create_warehouse(db)
+    supplier_a = _create_supplier(db, name="自动评价供应商A")
+    supplier_b = _create_supplier(db, name="自动评价供应商B")
+    today = date.today()
+
+    # 供应商A：订单单价 12，预计 today+5 到货
+    order_a = service.create_order(
+        db,
+        supplier_id=supplier_a["id"],
+        order_date=today,
+        expected_date=today + timedelta(days=5),
+        items=[{"material_id": material_id, "quantity": Decimal("200"), "unit_price": Decimal("12")}],
+    )
+    db.commit()
+    service.set_order_status(db, order_a["id"], "CONFIRMED")
+    db.commit()
+    order_item_a = order_a["items"][0]["id"]
+
+    # 到货1：提前 3 天（按时），到货 100 合格 90
+    r1 = service.create_receipt(
+        db,
+        purchase_order_id=order_a["id"],
+        warehouse_id=warehouse_id,
+        receipt_date=today + timedelta(days=3),
+        items=[{"order_item_id": order_item_a, "quantity": Decimal("100"), "qualified_qty": Decimal("90")}],
+    )
+    db.commit()
+    service.confirm_receipt(db, r1["id"])
+    db.commit()
+    # 到货2：逾期 5 天（不按时），到货 100 合格 100
+    r2 = service.create_receipt(
+        db,
+        purchase_order_id=order_a["id"],
+        warehouse_id=warehouse_id,
+        receipt_date=today + timedelta(days=10),
+        items=[{"order_item_id": order_item_a, "quantity": Decimal("100"), "qualified_qty": Decimal("100")}],
+    )
+    db.commit()
+    service.confirm_receipt(db, r2["id"])
+    db.commit()
+
+    # 供应商B：同物料订单单价 8（市场参照价），仅确认订单即可参与价格统计
+    order_b = service.create_order(
+        db,
+        supplier_id=supplier_b["id"],
+        order_date=today,
+        expected_date=today + timedelta(days=5),
+        items=[{"material_id": material_id, "quantity": Decimal("50"), "unit_price": Decimal("8")}],
+    )
+    db.commit()
+    service.set_order_status(db, order_b["id"], "CONFIRMED")
+    db.commit()
+
+    result = service.auto_evaluate_supplier(db, supplier_id=supplier_a["id"])
+    db.commit()
+
+    # 交期：2 单到货 1 单按时 → 0.5 × 100 = 50
+    assert result["delivery_score"] == Decimal("50.0000")
+    assert result["receipt_total"] == 2
+    assert result["receipt_on_time"] == 1
+    # 质量：(90+100)/200 = 0.95 × 100 = 95
+    assert result["quality_score"] == Decimal("95.0000")
+    # 价格：市场均价 (12+8)/2=10，A 偏离 (12-10)/10=+20% → 100-20 = 80
+    assert result["price_deviation_pct"] == Decimal("20.0000")
+    assert result["price_score"] == Decimal("80.0000")
+    # 综合：(50+95+80)/3 = 75
+    assert result["total_score"] == Decimal("75.0000")
+    assert result["scored_dimensions"] == 3
+    assert result["remark"].startswith("[自动评价]")
+
+
+def test_auto_evaluation_without_business_data_rejected(db: Session) -> None:
+    """无任何到货/订单数据的供应商：自动评价返回 4000。"""
+    supplier = _create_supplier(db, name="无业务供应商")
+    with pytest.raises(BusinessException) as exc:
+        service.auto_evaluate_supplier(db, supplier_id=supplier["id"])
+    assert exc.value.code == 4000
+    db.rollback()
+
+
+def test_auto_evaluation_api(client: TestClient, db: Session) -> None:
+    """自动评价接口：POST /evaluations/auto 返回三项得分与计算依据。"""
+    material_id = _create_material(db)
+    warehouse_id = _create_warehouse(db)
+    supplier = _create_supplier(db, name="接口自动评价供应商")
+    today = date.today()
+    order = service.create_order(
+        db,
+        supplier_id=supplier["id"],
+        order_date=today,
+        expected_date=today + timedelta(days=5),
+        items=[{"material_id": material_id, "quantity": Decimal("10"), "unit_price": Decimal("9")}],
+    )
+    db.commit()
+    service.set_order_status(db, order["id"], "CONFIRMED")
+    db.commit()
+    receipt = service.create_receipt(
+        db,
+        purchase_order_id=order["id"],
+        warehouse_id=warehouse_id,
+        receipt_date=today + timedelta(days=4),
+        items=[{"order_item_id": order["items"][0]["id"], "quantity": Decimal("10")}],
+    )
+    db.commit()
+    service.confirm_receipt(db, receipt["id"])
+    db.commit()
+
+    resp = client.post(
+        "/api/v1/procurement/evaluations/auto", json={"supplier_id": supplier["id"]}
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["code"] == 0
+    data = body["data"]
+    assert data["delivery_score"] == "100.0000"  # 唯一一单按时
+    assert data["quality_score"] == "100.0000"  # qualified_qty 默认 = quantity
+    assert data["remark"].startswith("[自动评价]")
+    assert data["on_time_rate"] is not None
+    assert data["receipt_total"] == 1

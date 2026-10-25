@@ -328,6 +328,21 @@ class EvaluationCreate(BaseModel):
     operator_id: Optional[int] = None
 
 
+class EvaluationAutoCreate(BaseModel):
+    """自动供应商评价入参：三项得分由系统按业务数据计算，无需传分。
+
+    算法：交期得分 = 按时到货率×100；质量得分 = 检验合格率×100；
+    价格得分 = 100 − 相对全部供应商均价的平均偏离百分比（高于均价减分、
+    低于均价加分，截断到 0~100）；综合分 = 有数据维度的简单平均。
+    """
+
+    supplier_id: int = Field(description="供应商ID")
+    evaluate_date: Optional[date] = Field(default=None, description="评价日期，默认今天")
+    evaluator_id: Optional[int] = Field(default=None, description="评价人（sys_personnel.id）")
+    remark: Optional[str] = None
+    operator_id: Optional[int] = None
+
+
 class EvaluationOut(_IdOut):
     supplier_id: int
     supplier_name: Optional[str] = None
@@ -339,6 +354,15 @@ class EvaluationOut(_IdOut):
     evaluator_id: Optional[int] = None
     evaluator_name: Optional[str] = None
     remark: Optional[str] = None
+    # ---- 自动评价的计算依据（手工录入时为 None） ----
+    on_time_rate: Optional[Decimal] = None
+    receipt_total: Optional[int] = None
+    receipt_on_time: Optional[int] = None
+    qualified_rate: Optional[Decimal] = None
+    receipt_qty_total: Optional[Decimal] = None
+    receipt_qty_qualified: Optional[Decimal] = None
+    price_deviation_pct: Optional[Decimal] = None
+    scored_dimensions: Optional[int] = None
 
 
 # ==================== 报表 / 统计 ====================
