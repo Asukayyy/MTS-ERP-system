@@ -530,6 +530,21 @@ def safety_stock_suggestions(
 
 
 @router.get(
+    "/reports/stocktake-summary",
+    response_model=ApiResponse[schemas.StocktakeSummaryOut],
+    summary="盘点汇总（盘盈盘亏）",
+)
+def stocktake_summary(
+    date_from: Optional[date] = Query(default=None, description="盘点日期起（含）"),
+    date_to: Optional[date] = Query(default=None, description="盘点日期止（含）"),
+    warehouse_id: Optional[int] = Query(default=None, description="仓库ID"),
+    db: Session = Depends(get_db),
+) -> ApiResponse[schemas.StocktakeSummaryOut]:
+    """已确认盘点单的盘盈盘亏汇总（差异 = 实盘 − 账面）。"""
+    return success(service.stocktake_summary(db, date_from, date_to, warehouse_id))
+
+
+@router.get(
     "/reports/flow-summary",
     response_model=ApiResponse[List[schemas.FlowSummaryOut]],
     summary="出入库汇总报表",

@@ -12,6 +12,7 @@ import type {
   StockChangeResult,
   StockOperation,
   StockSummary,
+  StocktakeSummary,
   Warehouse,
 } from '@/types/erp'
 
@@ -165,6 +166,11 @@ export function getLowStockReport(): Promise<LowStock[]> {
 /** 安全库存补库建议（可用量低于安全库存的物料） */
 export function getSafetyStockSuggestions(): Promise<SafetyStockSuggestion[]> {
   return get<SafetyStockSuggestion[]>('/inventory/reports/safety-stock-suggestions')
+}
+
+/** 盘点汇总（盘盈盘亏），只统计已确认盘点单 */
+export function getStocktakeSummary(params: Record<string, unknown> = {}): Promise<StocktakeSummary> {
+  return get<StocktakeSummary>('/inventory/reports/stocktake-summary', params)
 }
 
 // ---------------- 课程数据导入（规格 §37） ----------------

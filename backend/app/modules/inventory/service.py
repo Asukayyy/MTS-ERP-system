@@ -1259,6 +1259,106 @@ def generate_from_safety_stock(
     }
 
 
+def stocktake_summary(
+    db: Session,
+    date_from: Optional[date] = None,
+    date_to: Optional[date] = None,
+    warehouse_id: Optional[int] = None,
+) -> Dict[str, Any]:
+    """盘点汇总（盘盈盘亏报表）。
+
+    只统计**已确认**（COMPLETED）的盘点单（DRAFT 尚未调整结存，计入会失真）。
+    差异口径：`difference = actual_qty - book_qty`，正数=盘盈，负数=盘亏；
+    差异金额 = 差异数量 × 物料标准成本。
+    """
+    stmt = select(models.InvStockOperation).where(
+        models.InvStockOperation.op_type == "STOCKTAKE",
+        models.InvStockOperation.status == "COMPLETED",
+    )
+    if date_from is not None:
+        stmt = stmt.where(models.InvStockOperation.op_date >= date_from)
+    if date_to is not None:
+        stmt = stmt.where(models.InvStockOperation.op_date <= date_to)
+    if warehouse_id is not None:
+        stmt = stmt.where(models.InvStockOperation.warehouse_id == warehouse_id)
+    operations = list(
+        db.scalars(
+            stmt.order_by(
+                models.InvStockOperation.op_date.desc(), models.InvStockOperation.id.desc()
+            )
+        )
+    )
+
+    materials = _material_map(
+        db,
+        [item.material_id for op in operations for item in op.items],
+    )
+    warehouses = _warehouse_map(db, [op.warehouse_id for op in operations if op.warehouse_id])
+
+    items: List[Dict[str, Any]] = []
+    line_count = matched_count = gain_count = loss_count = 0
+    gain_qty = loss_qty = Decimal("0")
+    gain_amount = loss_amount = Decimal("0")
+
+    for op in operations:
+        warehouse = warehouses.get(op.warehouse_id, {}) if op.warehouse_id else {}
+        for item in op.items:
+            book = _as_decimal(item.book_qty)
+            actual = _as_decimal(item.actual_qty)
+            difference = actual - book
+            material = materials.get(item.material_id, {})
+            cost = _as_decimal(material.get("standard_cost"))
+            diff_amount = difference * cost
+            line_count += 1
+            if difference == 0:
+                matched_count += 1
+            elif difference > 0:
+                gain_count += 1
+                gain_qty += difference
+                gain_amount += diff_amount
+            else:
+                loss_count += 1
+                loss_qty += -difference
+                loss_amount += -diff_amount
+            items.append(
+                {
+                    "operation_id": op.id,
+                    "operation_no": op.operation_no,
+                    "op_date": op.op_date,
+                    "warehouse_id": op.warehouse_id,
+                    "warehouse_code": warehouse.get("warehouse_code"),
+                    "warehouse_name": warehouse.get("warehouse_name"),
+                    "material_id": item.material_id,
+                    "material_code": material.get("material_code"),
+                    "material_name": material.get("material_name"),
+                    "book_qty": book,
+                    "actual_qty": actual,
+                    "difference": difference,
+                    "standard_cost": cost,
+                    "diff_amount": diff_amount,
+                    "result": "GAIN" if difference > 0 else ("LOSS" if difference < 0 else "MATCH"),
+                }
+            )
+
+    return {
+        "operation_count": len(operations),
+        "line_count": line_count,
+        "matched_count": matched_count,
+        "gain_count": gain_count,
+        "gain_qty": gain_qty,
+        "loss_count": loss_count,
+        "loss_qty": loss_qty,
+        "net_qty": gain_qty - loss_qty,
+        "gain_amount": gain_amount,
+        "loss_amount": loss_amount,
+        "net_amount": gain_amount - loss_amount,
+        "accuracy_rate": (Decimal(matched_count) / Decimal(line_count))
+        if line_count
+        else Decimal("0"),
+        "items": items,
+    }
+
+
 def flow_summary(db: Session, date_from: date, date_to: date) -> List[Dict[str, Any]]:
     """出入库汇总：从库存操作单（移库/盘点）按物料统计数量合计。
 

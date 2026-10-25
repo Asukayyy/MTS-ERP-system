@@ -307,6 +307,44 @@ class SafetyStockSuggestionOut(BaseModel):
     suggested_qty: Decimal
 
 
+class StocktakeSummaryItemOut(BaseModel):
+    """盘点汇总明细行（单条盘点明细）。"""
+
+    operation_id: int
+    operation_no: str
+    op_date: date
+    warehouse_id: Optional[int] = None
+    warehouse_code: Optional[str] = None
+    warehouse_name: Optional[str] = None
+    material_id: int
+    material_code: Optional[str] = None
+    material_name: Optional[str] = None
+    book_qty: Decimal
+    actual_qty: Decimal
+    difference: Decimal
+    standard_cost: Decimal
+    diff_amount: Decimal
+    result: str = Field(description="GAIN 盘盈 / LOSS 盘亏 / MATCH 相符")
+
+
+class StocktakeSummaryOut(BaseModel):
+    """盘点汇总（盘盈盘亏报表）。"""
+
+    operation_count: int
+    line_count: int
+    matched_count: int
+    gain_count: int
+    gain_qty: Decimal
+    loss_count: int
+    loss_qty: Decimal
+    net_qty: Decimal
+    gain_amount: Decimal
+    loss_amount: Decimal
+    net_amount: Decimal
+    accuracy_rate: Decimal
+    items: List[StocktakeSummaryItemOut]
+
+
 class FlowSummaryOut(BaseModel):
     """出入库汇总行（基于库存操作单聚合）。"""
 

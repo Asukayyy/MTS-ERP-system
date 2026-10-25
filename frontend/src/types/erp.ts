@@ -691,6 +691,43 @@ export interface SafetyStockSuggestion {
   suggested_qty: Num
 }
 
+/** 盘点汇总明细行 */
+export interface StocktakeSummaryItem {
+  operation_id: number
+  operation_no: string
+  op_date: string
+  warehouse_id?: number | null
+  warehouse_code?: string | null
+  warehouse_name?: string | null
+  material_id: number
+  material_code?: string | null
+  material_name?: string | null
+  book_qty: Num
+  actual_qty: Num
+  difference: Num
+  standard_cost: Num
+  diff_amount: Num
+  /** GAIN 盘盈 / LOSS 盘亏 / MATCH 相符 */
+  result: string
+}
+
+/** 盘点汇总（盘盈盘亏报表） */
+export interface StocktakeSummary {
+  operation_count: number
+  line_count: number
+  matched_count: number
+  gain_count: number
+  gain_qty: Num
+  loss_count: number
+  loss_qty: Num
+  net_qty: Num
+  gain_amount: Num
+  loss_amount: Num
+  net_amount: Num
+  accuracy_rate: Num
+  items: StocktakeSummaryItem[]
+}
+
 export interface FlowSummaryRow {
   transaction_type: string
   material_id: number
