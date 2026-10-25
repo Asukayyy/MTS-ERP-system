@@ -18,7 +18,7 @@ from app.common.response import ApiResponse, success
 from app.core import security
 from app.core.config import settings
 from app.core.database import get_db
-from app.modules.system import schemas, service
+from app.modules.system import models, schemas, service
 from app.modules.system.schemas import (
     BomConfirmOut,
     BomCreate,
@@ -57,7 +57,7 @@ from app.modules.system.schemas import (
     PersonnelCreate,
     PersonnelOut,
     PersonnelUpdate,
-    RegisterIn,
+    ChangePasswordIn,
     RoleCreate,
     RoleIdsUpdate,
     RoleOut,
@@ -94,13 +94,10 @@ def _perm(*codes: str) -> Optional[tuple]:
     return tuple(codes) or None
 
 
-# 公开接口：健康检查、登录、注册，以及注册页构建部门下拉所需的组织平铺列表。
+# 公开接口：健康检查、登录（账号由 HR 统一创建，不再提供自助注册）。
 PUBLIC_ENDPOINTS: set = {
     "GET /health",
     "POST /auth/login",
-    "POST /auth/register",
-    "GET /auth/register-roles",
-    "GET /organizations/flat",
 }
 
 ENDPOINT_PERMISSIONS: dict = {
@@ -131,8 +128,9 @@ ENDPOINT_PERMISSIONS: dict = {
     "POST /routings/{routing_id}/operations": _perm("system:routing:manage"),
     "PUT /routing-operations/{operation_id}": _perm("system:routing:manage"),
     "DELETE /routing-operations/{operation_id}": _perm("system:routing:manage"),
-    # 组织（/organizations/flat 见 PUBLIC_ENDPOINTS）
+    # 组织（含 HR 建号与人员选择所需的平铺列表）
     "GET /organizations": _perm("system:org"),
+    "GET /organizations/flat": _perm("system:org"),
     "GET /organizations/{org_id}": _perm("system:org"),
     "POST /organizations": _perm("system:org:manage"),
     "PUT /organizations/{org_id}": _perm("system:org:manage"),
@@ -156,8 +154,11 @@ ENDPOINT_PERMISSIONS: dict = {
     "PUT /users/{user_id}": _perm("system:user:manage"),
     "PATCH /users/{user_id}/status": _perm("system:user:manage"),
     "POST /users/{user_id}/roles": _perm("system:user:assign"),
+    # 登录用户自助改密（仅需登录）
+    "POST /auth/change-password": _perm(),
     # 角色
-    "GET /roles": _perm("system:role"),
+    # 角色列表：HR 建号需要读取可选身份，故同时接受 system:user:assign
+    "GET /roles": _perm("system:role", "system:user:assign"),
     "POST /roles": _perm("system:role:manage"),
     "PUT /roles/{role_id}": _perm("system:role:manage"),
     "POST /roles/{role_id}/permissions": _perm("system:role:assign"),
@@ -866,28 +867,18 @@ def login(payload: LoginIn, db: Session = Depends(get_db)) -> ApiResponse[LoginO
     )
 
 
-@router.post("/auth/register", response_model=ApiResponse[UserOut], summary="注册账号（自选身份）")
-def register(payload: RegisterIn, db: Session = Depends(get_db)) -> ApiResponse[UserOut]:
-    """公开注册：创建 ACTIVE 账号并绑定所选身份角色（九种身份可复选）。
-
-    九种身份角色由应用启动时幂等写入（见 `app/modules/system/seed.py`），
-    注册页通过 `GET /system/auth/register-roles` 展示可选择的身份列表。
-    """
-    user = service.register(db, payload)
-    db.commit()
-    return success(UserOut.model_validate(user))
-
-
-@router.get(
-    "/auth/register-roles",
-    response_model=ApiResponse[List[RoleOut]],
-    summary="注册可选身份查询",
+@router.post(
+    "/auth/change-password", response_model=ApiResponse[bool], summary="修改本人密码"
 )
-def list_register_roles(db: Session = Depends(get_db)) -> ApiResponse[List[RoleOut]]:
-    """返回注册页可选的九种身份角色（按种子定义顺序）。"""
-    return success(
-        [RoleOut.model_validate(role) for role in service.list_register_roles(db)]
-    )
+def change_password(
+    payload: ChangePasswordIn,
+    db: Session = Depends(get_db),
+    current_user: models.SysUser = Depends(security.get_current_user),
+) -> ApiResponse[bool]:
+    """登录用户自助修改密码：校验原密码，6~64 位新密码。"""
+    service.change_password(db, current_user, payload.old_password, payload.new_password)
+    db.commit()
+    return success(True)
 
 
 # ==================== 操作日志 ====================

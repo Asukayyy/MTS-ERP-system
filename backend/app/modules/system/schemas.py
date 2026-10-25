@@ -394,12 +394,20 @@ class DictionaryOut(_IdOut):
 
 
 class UserCreate(BaseModel):
-    """用户账号新增入参。"""
+    """用户账号新增入参。
+
+    两种建号方式：
+    - 关联既有员工：传 `personnel_id`；
+    - 直接建号（HR 新建员工）：传 `org_id` + 可选 `employee_no`，服务端同时创建员工档案。
+    """
 
     username: str = Field(max_length=50, description="登录名（唯一）")
-    password: str = Field(description="明文密码（服务端 sha256 后入库）")
+    password: str = Field(min_length=6, max_length=64, description="明文密码（服务端 sha256 后入库）")
     display_name: str = Field(max_length=100, description="显示名")
     personnel_id: Optional[int] = Field(default=None, description="关联员工ID（可为空，1:1）")
+    org_id: Optional[int] = Field(default=None, description="所属组织/部门ID（未关联员工时用于新建档案）")
+    employee_no: Optional[str] = Field(default=None, max_length=50, description="员工工号（留空自动生成）")
+    role_ids: List[int] = Field(default_factory=list, description="身份角色ID集合（建号时一并绑定）")
     status: str = Field(default="ACTIVE", description="状态 ACTIVE/INACTIVE")
     remark: Optional[str] = None
 
@@ -514,17 +522,11 @@ class LoginIn(BaseModel):
     password: str = Field(description="明文密码")
 
 
-class RegisterIn(BaseModel):
-    """公开注册入参：归入部门 + 自选一种或多种身份。"""
+class ChangePasswordIn(BaseModel):
+    """登录用户自助修改密码入参。"""
 
-    username: str = Field(max_length=50, description="登录名（唯一）")
-    password: str = Field(min_length=6, max_length=64, description="明文密码（服务端 sha256 后入库）")
-    display_name: str = Field(max_length=100, description="显示名（同时作为员工姓名）")
-    org_id: int = Field(description="所属组织/部门ID（注册页下拉选择）")
-    employee_no: Optional[str] = Field(
-        default=None, max_length=50, description="员工工号（留空自动生成）"
-    )
-    role_ids: List[int] = Field(min_length=1, description="身份角色ID集合（九种身份，可复选）")
+    old_password: str = Field(description="原密码")
+    new_password: str = Field(min_length=6, max_length=64, description="新密码（6~64 位）")
 
 
 class LoginOut(BaseModel):

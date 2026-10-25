@@ -2,15 +2,15 @@
 """组织/人员/账号演示数据种子脚本（幂等，可重复执行）。
 
 功能：
-1. 清理垃圾角色（仅保留 13 个正式身份）、
+1. 清理垃圾角色（仅保留 14 个正式身份）、
    全部旧账号、旧员工、旧组织；
-2. 重建组织架构：1 个公司根 + 8 个部门 + 智能加工中心（FACTORY，下辖下料/数控/车工/铣工/钳工/磨工/粉末冶金/总装/包装 9 个车间，覆盖全部工艺路线工序）；
+2. 重建组织架构：1 个公司根 + 9 个部门 + 智能加工中心（FACTORY，下辖下料/数控/车工/铣工/钳工/磨工/粉末冶金/总装/包装 9 个车间，覆盖全部工艺路线工序）；
    设计部**不配人**，设计人员由用户自行创建；
 3. 重建人员与账号（初始密码统一 123456）：
    - 管理员 3：徐黔晨 / 陈自鹏 / 牛晕针（ADMIN）
-   - 销售 5（SALES）、采购 5（PURCHASE）、仓储 5（INVENTORY）
+   - 人事 1（HR）、销售 5（SALES）、采购 5（PURCHASE）、仓储 5（INVENTORY）
    - 计划 2（PLAN）、生产 10（MAKE，经理挂中心、9 车间各 1 人）、质检 2（QC）、财务 2（FINANCE）
-   共 34 人，每人完成「员工档案 → 登录账号 → 角色绑定」全链路。
+   共 35 人，每人完成「员工档案 → 登录账号 → 角色绑定」全链路。
 
 执行方式（cwd = backend）：
     .venv/Scripts/python.exe scripts/seed_demo_org.py
@@ -30,13 +30,14 @@ from app.modules.system import models
 
 # ============================ 常量 ============================
 
-SEED_ROLE_CODES = ("ADMIN", "DESIGN", "MAKE", "PURCHASE", "SALES", "INVENTORY", "PLAN", "QC", "FINANCE", "DEPT_HEAD", "WORKER", "GROUP_LEADER", "DIRECTOR")
+SEED_ROLE_CODES = ("ADMIN", "DESIGN", "MAKE", "PURCHASE", "SALES", "INVENTORY", "PLAN", "QC", "FINANCE", "DEPT_HEAD", "HR", "WORKER", "GROUP_LEADER", "DIRECTOR")
 DEFAULT_PASSWORD = "123456"
 
 # (组织编码, 名称, 上级编码, 类型)
 ORGS = [
     ("CO-001", "大树科技有限公司", None, "COMPANY"),
     ("DEP-ADMIN", "总经办", "CO-001", "DEPARTMENT"),
+    ("DEP-HR", "人事部", "CO-001", "DEPARTMENT"),
     ("DEP-DESIGN", "设计部", "CO-001", "DEPARTMENT"),
     ("DEP-PLAN", "计划部", "CO-001", "DEPARTMENT"),
     ("DEP-PURCHASE", "采购部", "CO-001", "DEPARTMENT"),
@@ -63,6 +64,8 @@ STAFF = [
     ("徐黔晨", "DEP-ADMIN", "系统管理员", "ADM", 1, "xuqianchen", "ADMIN"),
     ("陈自鹏", "DEP-ADMIN", "系统管理员", "ADM", 2, "chenzipeng", "ADMIN"),
     ("牛晕针", "DEP-ADMIN", "系统管理员", "ADM", 3, "niuyunzhen", "ADMIN"),
+    # 人事 1
+    ("何静", "DEP-HR", "人事专员", "HR", 1, "hr01", "HR"),
     # 计划 2
     ("王志远", "DEP-PLAN", "计划经理", "PLN", 1, "planner01", "PLAN"),
     ("李思敏", "DEP-PLAN", "计划员", "PLN", 2, "planner02", "PLAN"),
@@ -126,7 +129,7 @@ def clear_rbac() -> None:
 
 def seed() -> None:
     clear_rbac()
-    print("[1/3] 已清空旧组织/员工/账号及垃圾角色（保留 13 个正式身份）")
+    print("[1/3] 已清空旧组织/员工/账号及垃圾角色（保留 14 个正式身份）")
 
     db = SessionLocal()
     try:
@@ -177,7 +180,7 @@ def seed() -> None:
             db.add(user)
             db.flush()
             db.add(models.SysUserRole(user_id=user.id, role_id=role_ids[role_code]))
-        print(f"[2/3] 已创建组织节点 {len(ORGS) - 1} 个（部门 8 / 智能加工中心 1 / 车间 9）、员工账号 {len(STAFF)} 个（管理员 3 / 销售 5 / 采购 5 / 仓储 5 / 计划 2 / 生产 10 / 质检 2 / 财务 2）")
+        print(f"[2/3] 已创建组织节点 {len(ORGS) - 1} 个（部门 9 / 智能加工中心 1 / 车间 9）、员工账号 {len(STAFF)} 个（管理员 3 / 人事 1 / 销售 5 / 采购 5 / 仓储 5 / 计划 2 / 生产 10 / 质检 2 / 财务 2）")
 
         # 部门经理回填
         for org_code, person_id in managers.items():

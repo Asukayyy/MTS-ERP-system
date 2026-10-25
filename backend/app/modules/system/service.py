@@ -23,7 +23,6 @@ from sqlalchemy.orm import Session
 from app.common.exceptions import BusinessException
 from app.modules.system import models, repository as repo
 from app.modules.system.contract import log_operation
-from app.modules.system.seed import REGISTER_ROLE_CODES
 from app.modules.system.schemas import (
     BomConfirmOut,
     BomCreate,
@@ -53,7 +52,6 @@ from app.modules.system.schemas import (
     PermissionUpdate,
     PersonnelCreate,
     PersonnelUpdate,
-    RegisterIn,
     RoutingCreate,
     RoutingOperationCreate,
     RoutingOperationUpdate,
@@ -1224,32 +1222,72 @@ def get_user(db: Session, user_id: int) -> models.SysUser:
 
 
 def create_user(db: Session, payload: UserCreate) -> models.SysUser:
-    """新增用户账号：登录名唯一、关联员工 1:1。"""
+    """新增用户账号。
+
+    两种建号方式（由 HR 统一建号）：
+    - 关联既有员工：传 `personnel_id`；
+    - 直接建号：传 `org_id`（+ 可选 `employee_no`），服务端一并创建员工档案。
+    同时可通过 `role_ids` 在同一个请求里绑定身份角色。
+    """
     if repo.get_user_by_username(db, payload.username):
         raise BusinessException(CODE_CODE_EXISTS, "登录名已存在")
     _validate_status(payload.status)
+
+    personnel: Optional[models.SysPersonnel] = None
     if payload.personnel_id is not None:
-        if not repo.get_personnel(db, payload.personnel_id):
+        personnel = repo.get_personnel(db, payload.personnel_id)
+        if not personnel:
             raise BusinessException(CODE_NOT_FOUND, "关联员工不存在")
         if repo.get_user_by_personnel(db, payload.personnel_id):
             raise BusinessException(CODE_INVALID_PARAM, "该员工已关联其它账号")
+    elif payload.org_id is not None:
+        if not repo.get_organization(db, payload.org_id):
+            raise BusinessException(CODE_NOT_FOUND, "所属组织/部门不存在")
+        employee_no = (payload.employee_no or "").strip()
+        if employee_no:
+            if repo.get_personnel_by_no(db, employee_no):
+                raise BusinessException(CODE_EMPLOYEE_NO_EXISTS, "员工工号已存在")
+        else:
+            employee_no = repo.next_employee_no(db)
+        personnel = models.SysPersonnel(
+            employee_no=employee_no,
+            person_name=payload.display_name,
+            org_id=payload.org_id,
+            status=RecordStatus.ACTIVE.value,
+            hire_date=date.today(),
+        )
+        repo.add_personnel(db, personnel)
+        db.flush()
 
     user = models.SysUser(
         username=payload.username,
         password_hash=_hash_password(payload.password),
         display_name=payload.display_name,
-        personnel_id=payload.personnel_id,
+        personnel_id=personnel.id if personnel else None,
         status=payload.status,
         remark=payload.remark,
     )
     repo.add_user(db, user)
+
+    role_ids = list(dict.fromkeys(int(i) for i in payload.role_ids))
+    if role_ids:
+        for role_id in role_ids:
+            if not repo.get_role(db, role_id):
+                raise BusinessException(CODE_NOT_FOUND, f"身份角色不存在：{role_id}")
+        repo.replace_user_roles(db, user.id, role_ids)
+        db.flush()
+        repo.refresh(db, user)
+
     log_operation(
         db,
         module="system",
         action="CREATE",
         target_type="sys_user",
         target_id=user.id,
-        detail=f"新增用户 {user.username}",
+        detail=(
+            f"新增用户 {user.username}：员工 {personnel.employee_no if personnel else '-'}，"
+            f"身份角色 {role_ids or '-'}"
+        ),
     )
     return user
 
@@ -1324,11 +1362,6 @@ def set_user_roles(
 def list_roles(db: Session, status: Optional[str] = None) -> List[models.SysRole]:
     """返回角色列表。"""
     return repo.list_roles(db, status=status)
-
-
-def list_register_roles(db: Session) -> List[models.SysRole]:
-    """返回注册页可选的九种身份（按种子定义顺序，过滤库里其它角色）。"""
-    return repo.list_roles_by_codes(db, REGISTER_ROLE_CODES)
 
 
 def create_role(db: Session, payload: RoleCreate) -> models.SysRole:
@@ -1522,61 +1555,22 @@ def login(db: Session, username: str, password: str) -> Dict[str, object]:
     return {"user": user, "roles": roles, "permissions": permissions}
 
 
-def register(db: Session, payload: RegisterIn) -> models.SysUser:
-    """公开注册：创建员工档案（部门+工号）与登录账号，绑定所选身份角色。
-
-    一条注册动作串联 组织 → 员工 → 账号 → 角色 → 权限 全链路，
-    数据一致性与系统管理「员工/账号」创建路径保持一致。
-    """
-    if repo.get_user_by_username(db, payload.username):
-        raise BusinessException(CODE_CODE_EXISTS, "登录名已存在")
-    role_ids = list(dict.fromkeys(int(i) for i in payload.role_ids))
-    for role_id in role_ids:
-        if not repo.get_role(db, role_id):
-            raise BusinessException(CODE_NOT_FOUND, f"身份角色不存在：{role_id}")
-    if not repo.get_organization(db, payload.org_id):
-        raise BusinessException(CODE_NOT_FOUND, "所属组织/部门不存在")
-
-    # 工号：留空自动生成 EMP+序号，手工填写则校验唯一
-    employee_no = (payload.employee_no or "").strip()
-    if employee_no:
-        if repo.get_personnel_by_no(db, employee_no):
-            raise BusinessException(CODE_EMPLOYEE_NO_EXISTS, "员工工号已存在")
-    else:
-        employee_no = repo.next_employee_no(db)
-
-    # 先建员工档案，再建账号并挂 1:1 关联
-    personnel = models.SysPersonnel(
-        employee_no=employee_no,
-        person_name=payload.display_name,
-        org_id=payload.org_id,
-        status=RecordStatus.ACTIVE.value,
-        hire_date=date.today(),
-    )
-    repo.add_personnel(db, personnel)
-    db.flush()
-
-    user = models.SysUser(
-        username=payload.username,
-        password_hash=_hash_password(payload.password),
-        display_name=payload.display_name,
-        personnel_id=personnel.id,
-        status=RecordStatus.ACTIVE.value,
-    )
-    repo.add_user(db, user)
-    repo.replace_user_roles(db, user.id, role_ids)
-    db.flush()
-    repo.refresh(db, user)
+def change_password(
+    db: Session, user: models.SysUser, old_password: str, new_password: str
+) -> models.SysUser:
+    """登录用户自助修改密码：校验原密码后写入新密码。"""
+    if user.password_hash != _hash_password(old_password):
+        raise BusinessException(CODE_INVALID_PARAM, "原密码不正确")
+    if old_password == new_password:
+        raise BusinessException(CODE_INVALID_PARAM, "新密码不能与原密码相同")
+    user.password_hash = _hash_password(new_password)
     log_operation(
         db,
         module="system",
-        action="REGISTER",
+        action="PASSWORD",
         target_type="sys_user",
         target_id=user.id,
-        detail=(
-            f"用户 {user.username} 注册：员工 {employee_no}，部门 {payload.org_id}，"
-            f"身份角色 {role_ids}"
-        ),
+        detail=f"用户 {user.username} 修改密码",
     )
     return user
 

@@ -66,3 +66,22 @@ body {
 .form-tip--error {
   color: #f56c6c;
 }
+
+/* 数据表格斑马纹：蒂芙尼蓝 / 奶酪色交替，降低宽表格横向串行 */
+.el-table .el-table__body tr.el-table__row:nth-child(odd) > td.el-table__cell {
+  background-color: #e3f5f3;
+}
+
+.el-table .el-table__body tr.el-table__row:nth-child(even) > td.el-table__cell {
+  background-color: #fdf6e3;
+}
+
+/* 悬停与选中行在高亮时覆盖斑马纹，保持可辨认 */
+.el-table .el-table__body tr.el-table__row:hover > td.el-table__cell {
+  background-color: #ccebe7;
+}
+
+.el-table .el-table__body tr.el-table__row.current-row > td.el-table__cell,
+.el-table .el-table__body tr.el-table__row.current-row:hover > td.el-table__cell {
+  background-color: #b8e2dd;
+}

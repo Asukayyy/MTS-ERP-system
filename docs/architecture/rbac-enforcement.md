@@ -145,7 +145,7 @@ GET http://127.0.0.1:8000/api/v1/system/users?page=1&page_size=5
 | 3 | 新增权限依赖工厂 `require_perm(*codes)`：查当前用户权限码集合，缺失则返回 403 | 同上 |
 | 4 | `system` 模块优先挂保护：账号 / 角色 / 权限 / 组织 / 员工 / 操作日志的写接口 | `system/router.py` |
 | 5 | 各业务模块接口逐个挂功能码（**需各模块 owner 配合**） | `sales` / `planning` / `procurement` / `inventory` router |
-| 6 | 保持公开：`/auth/login`、`/auth/register`、`/auth/register-roles` | `system/router.py` |
+| 6 | 保持公开：`/auth/login`；`/auth/change-password` 仅需登录（不设功能码） | `system/router.py` |
 | 7 | 统一异常：401（未登录）与 403（无权限）走既有 `BusinessException` 体系 | `app/common` |
 
 ### 4.2 前端

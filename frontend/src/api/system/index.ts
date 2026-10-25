@@ -259,21 +259,12 @@ export function login(payload: { username: string; password: string }): Promise<
   return post<LoginResult>('/system/auth/login', payload)
 }
 
-/** 注册页可选的九种身份角色 */
-export function listRegisterRoles(): Promise<Role[]> {
-  return get<Role[]>('/system/auth/register-roles')
-}
-
-/** 注册账号：选择部门 + 选择一种身份（九选一），工号留空自动生成 */
-export function register(payload: {
-  username: string
-  password: string
-  display_name: string
-  org_id: number
-  employee_no?: string
-  role_ids: number[]
-}): Promise<User> {
-  return post<User>('/system/auth/register', payload)
+/** 登录用户自助修改密码 */
+export function changePassword(payload: {
+  old_password: string
+  new_password: string
+}): Promise<boolean> {
+  return post<boolean>('/system/auth/change-password', payload)
 }
 
 export function listOperationLogs(params: Record<string, unknown> = {}): Promise<PageData<OperationLog>> {
