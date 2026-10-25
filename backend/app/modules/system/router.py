@@ -20,6 +20,7 @@ from app.core.config import settings
 from app.core.database import get_db
 from app.modules.system import models, schemas, service
 from app.modules.system.schemas import (
+    AbcClassifyResult,
     BomConfirmOut,
     BomCreate,
     BomItemCreate,
@@ -107,6 +108,7 @@ ENDPOINT_PERMISSIONS: dict = {
     "GET /materials/{material_id}": _perm("system:material"),
     "PUT /materials/{material_id}": _perm("system:material:manage"),
     "PATCH /materials/{material_id}/status": _perm("system:material:manage"),
+    "POST /materials/abc-classify": _perm("system:material:manage"),
     # BOM
     "GET /boms": _perm("system:bom"),
     "POST /boms": _perm("system:bom:manage"),
@@ -285,6 +287,18 @@ def change_material_status(
     material = service.change_material_status(db, material_id, payload.status)
     db.commit()
     return success(MaterialOut.model_validate(material))
+
+
+@router.post(
+    "/materials/abc-classify",
+    response_model=ApiResponse[AbcClassifyResult],
+    summary="自动 ABC 分类",
+)
+def classify_materials_abc(db: Session = Depends(get_db)) -> ApiResponse[AbcClassifyResult]:
+    """按价值累计占比自动重算全部启用物料的 A/B/C 分类。"""
+    result = service.auto_classify_abc(db)
+    db.commit()
+    return success(AbcClassifyResult(**result))
 
 
 # ==================== BOM ====================
@@ -946,8 +960,9 @@ def preview_materials_import(
 def confirm_materials_import(
     payload: ImportSourceIn, db: Session = Depends(get_db)
 ) -> ApiResponse[MaterialConfirmOut]:
-    """重新校验后仅创建缺失物料（幂等：已存在的编码跳过）。"""
+    """重新校验后仅创建缺失物料（幂等：已存在的编码跳过），并自动重算 ABC 分类。"""
     result = service.confirm_materials_import(db, payload.source)
+    service.auto_classify_abc(db)
     db.commit()
     return success(result)
 

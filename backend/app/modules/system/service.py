@@ -21,6 +21,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 from sqlalchemy.orm import Session
 
 from app.common.exceptions import BusinessException
+from app.modules.inventory import contract as inventory_contract
 from app.modules.system import models, repository as repo
 from app.modules.system.contract import log_operation
 from app.modules.system.schemas import (
@@ -255,6 +256,107 @@ def change_material_status(
         detail=f"物料 {material.material_code} 状态改为 {status}",
     )
     return material
+
+
+#: ABC 分类默认累计占比阈值（%）
+ABC_A_THRESHOLD = 70
+ABC_B_THRESHOLD = 90
+
+
+def auto_classify_abc(
+    db: Session,
+    *,
+    a_threshold: int = ABC_A_THRESHOLD,
+    b_threshold: int = ABC_B_THRESHOLD,
+):
+    """按价值累计占比自动划分 ABC 类（帕累托分类）。
+
+    分类依据优先级：
+    1. 库存金额 = 标准成本 × 现有库存（有库存金额时）；
+    2. 标准成本（无库存数据但有成本时）；
+    3. 库存数量（既无库存金额也无成本时）。
+
+    按依据值倒序累计，累计占比 < A 阈值的为 A 类，< B 阈值的为 B 类，
+    其余为 C 类；依据值为 0 的物料直接归 C 类。
+    """
+    _require(0 < a_threshold < b_threshold <= 100, CODE_INVALID_PARAM, "ABC 阈值不合法")
+
+    materials = repo.list_active_materials(db)
+    material_ids = [item.id for item in materials]
+    snapshot = inventory_contract.get_stock_snapshot(db, material_ids) if material_ids else {}
+
+    rows = []
+    total_qty = Decimal("0")
+    total_value = Decimal("0")
+    for material in materials:
+        on_hand = Decimal(snapshot.get(material.id, {}).get("on_hand", 0) or 0)
+        cost = Decimal(material.standard_cost or 0)
+        rows.append((material, on_hand, cost))
+        total_qty += abs(on_hand)
+        total_value += abs(on_hand * cost)
+
+    if total_value > 0:
+        basis = "库存金额"
+        total = total_value
+        weights = [abs(qty * cost) for _, qty, cost in rows]
+    elif any(cost > 0 for _, _, cost in rows):
+        basis = "标准成本"
+        total = sum(cost for _, _, cost in rows)
+        weights = [cost for _, _, cost in rows]
+    elif total_qty > 0:
+        basis = "库存数量"
+        total = total_qty
+        weights = [abs(qty) for _, qty, _ in rows]
+    else:
+        basis = "库存数量"
+        total = Decimal("0")
+        weights = [Decimal("0") for _ in rows]
+
+    ranked = sorted(
+        zip(rows, weights), key=lambda item: item[1], reverse=True
+    )
+
+    counts = {"A": 0, "B": 0, "C": 0}
+    cumulative = Decimal("0")
+    for (material, _, _), weight in ranked:
+        if total <= 0 or weight <= 0:
+            abc_class = "C"
+        else:
+            share_before = cumulative / total * Decimal("100")
+            if share_before < a_threshold:
+                abc_class = "A"
+            elif share_before < b_threshold:
+                abc_class = "B"
+            else:
+                abc_class = "C"
+            cumulative += weight
+
+        if material.abc_class != abc_class:
+            material.abc_class = abc_class
+        counts[abc_class] += 1
+
+    log_operation(
+        db,
+        module="system",
+        action="UPDATE",
+        target_type="sys_material",
+        target_id=None,
+        detail=(
+            f"自动 ABC 分类：A={counts['A']} B={counts['B']} C={counts['C']}"
+            f"（依据 {basis}，阈值 {a_threshold}/{b_threshold}）"
+        ),
+    )
+
+    return {
+        "total_count": len(materials),
+        "a_count": counts["A"],
+        "b_count": counts["B"],
+        "c_count": counts["C"],
+        "total_value": total,
+        "basis": basis,
+        "a_threshold": a_threshold,
+        "b_threshold": b_threshold,
+    }
 
 
 # ==================== BOM ====================

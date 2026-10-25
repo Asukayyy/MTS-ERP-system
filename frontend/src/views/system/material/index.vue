@@ -1,9 +1,15 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 
-import { createMaterial, listMaterials, setMaterialStatus, updateMaterial } from '@/api/system'
+import {
+  autoClassifyAbc,
+  createMaterial,
+  listMaterials,
+  setMaterialStatus,
+  updateMaterial,
+} from '@/api/system'
 import StatusTag from '@/components/common/StatusTag.vue'
 import { usePagedTable } from '@/composables/usePagedTable'
 import type { Material } from '@/types/erp'
@@ -51,6 +57,33 @@ const SALES_CATEGORIES = [
 
 function salesCategoryLabel(value?: string | null): string {
   return SALES_CATEGORIES.find((item) => item.value === value)?.label ?? '内部件'
+}
+
+/** 自动 ABC 分类：按价值累计占比重算，覆盖现有分类 */
+const classifying = ref(false)
+
+async function runAbcClassify(): Promise<void> {
+  try {
+    await ElMessageBox.confirm(
+      '按库存金额（标准成本 × 现有库存）从高到低累计，累计占比 < 70% 归 A 类、< 90% 归 B 类、其余归 C 类。会覆盖现有分类，是否继续？',
+      '自动 ABC 分类',
+      { type: 'warning', confirmButtonText: '开始分类', cancelButtonText: '取消' },
+    )
+  } catch {
+    return
+  }
+  classifying.value = true
+  try {
+    const result = await autoClassifyAbc()
+    ElMessage.success(
+      `分类完成：A ${result.a_count} / B ${result.b_count} / C ${result.c_count}（依据：${result.basis}）`,
+    )
+    await load()
+  } catch (error) {
+    ElMessage.error((error as Error).message)
+  } finally {
+    classifying.value = false
+  }
 }
 
 const dialogVisible = ref(false)
@@ -173,6 +206,7 @@ onMounted(load)
         <div class="table-toolbar">
           <span class="page-title">物料管理</span>
           <span class="table-toolbar__spacer" />
+          <el-button :loading="classifying" @click="runAbcClassify">自动 ABC 分类</el-button>
           <el-button type="primary" @click="openCreate">新增物料</el-button>
         </div>
       </template>

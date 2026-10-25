@@ -50,6 +50,22 @@ export function setMaterialStatus(id: number, status: string): Promise<Material>
   return patch<Material>(`/system/materials/${id}/status`, { status })
 }
 
+export interface AbcClassifyResult {
+  total_count: number
+  a_count: number
+  b_count: number
+  c_count: number
+  total_value: string | number
+  basis: string
+  a_threshold: number
+  b_threshold: number
+}
+
+/** 自动 ABC 分类（按价值累计占比重算全部启用物料） */
+export function autoClassifyAbc(): Promise<AbcClassifyResult> {
+  return post<AbcClassifyResult>('/system/materials/abc-classify')
+}
+
 // ---------------- BOM ----------------
 
 export function listBoms(params: Record<string, unknown> = {}): Promise<PageData<Bom>> {

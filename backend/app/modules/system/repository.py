@@ -74,6 +74,15 @@ def list_materials(
     return _paginate(db, stmt, page, page_size)
 
 
+def list_active_materials(db: Session) -> list[models.SysMaterial]:
+    """取全部启用物料（ABC 自动分类使用）。"""
+    return list(
+        db.scalars(
+            select(models.SysMaterial).where(models.SysMaterial.status == "ACTIVE")
+        ).all()
+    )
+
+
 def get_material(db: Session, material_id: int) -> Optional[models.SysMaterial]:
     return db.get(models.SysMaterial, material_id)
 

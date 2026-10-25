@@ -99,6 +99,19 @@ class MaterialOut(_IdOut):
     remark: Optional[str] = None
 
 
+class AbcClassifyResult(BaseModel):
+    """自动 ABC 分类结果。"""
+
+    total_count: int = Field(description="参与分类的启用物料数")
+    a_count: int = Field(description="A 类物料数")
+    b_count: int = Field(description="B 类物料数")
+    c_count: int = Field(description="C 类物料数")
+    total_value: Decimal = Field(description="分类依据的总价值")
+    basis: str = Field(description="分类依据：库存金额 / 标准成本 / 库存数量")
+    a_threshold: int = Field(description="A 类累计占比阈值（%）")
+    b_threshold: int = Field(description="B 类累计占比阈值（%）")
+
+
 # ==================== BOM ====================
 
 
