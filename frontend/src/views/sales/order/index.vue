@@ -16,7 +16,7 @@ import {
   updateOrder,
 } from '@/api/sales'
 import { listPersonnel } from '@/api/system'
-import { listWarehouses } from '@/api/inventory'
+import { listBalances, listWarehouses } from '@/api/inventory'
 import RemoteSelect from '@/components/common/RemoteSelect.vue'
 import StatusTag from '@/components/common/StatusTag.vue'
 import { usePagedTable, toNumber } from '@/composables/usePagedTable'
@@ -53,6 +53,33 @@ async function loadSalespersonOptions(keyword: string): Promise<RemoteOption[]> 
 async function loadWarehouseOptions(keyword: string): Promise<RemoteOption[]> {
   const data = await listWarehouses({ keyword, page: 1, page_size: 50 })
   return data.items.map((item) => ({ id: item.id, label: `${item.warehouse_code} ${item.warehouse_name}` }))
+}
+
+// ---------------- 物料库存提示 ----------------
+interface StockInfo {
+  onHand: number
+  available: number
+}
+
+/** 物料ID -> 各仓汇总库存，选物料后展示该物料的可用/现存数量 */
+const stockMap = ref<Record<number, StockInfo>>({})
+
+function formatQty(value: number): string {
+  return String(Math.round(value * 10000) / 10000)
+}
+
+function stockText(materialId: number | undefined): string {
+  const info = materialId ? stockMap.value[materialId] : undefined
+  if (!info) return ''
+  return `可用库存 ${formatQty(info.available)}（现存 ${formatQty(info.onHand)}）`
+}
+
+async function loadMaterialStock(materialId: number | undefined): Promise<void> {
+  if (!materialId || stockMap.value[materialId]) return
+  const data = await listBalances({ material_id: materialId, page: 1, page_size: 200 })
+  const onHand = data.items.reduce((sum, item) => sum + toNumber(item.on_hand), 0)
+  const available = data.items.reduce((sum, item) => sum + toNumber(item.available_quantity), 0)
+  stockMap.value = { ...stockMap.value, [materialId]: { onHand, available } }
 }
 
 // ---------------- 新增 / 修改订单 ----------------
@@ -131,6 +158,7 @@ function openEdit(row: Order): void {
     })),
   })
   if (!form.items.length) addLine()
+  form.items.forEach((item) => void loadMaterialStock(item.material_id))
   dialogVisible.value = true
 }
 
@@ -555,7 +583,15 @@ onMounted(load)
       <el-table :data="form.items" border size="small">
         <el-table-column label="物料" min-width="240">
           <template #default="{ row }">
-            <RemoteSelect v-model="row.material_id" :loader="loadProductOptions" style="width: 100%" />
+            <RemoteSelect
+              v-model="row.material_id"
+              :loader="loadProductOptions"
+              style="width: 100%"
+              @change="loadMaterialStock"
+            />
+            <div v-if="stockText(row.material_id)" class="stock-hint">
+              {{ stockText(row.material_id) }}
+            </div>
           </template>
         </el-table-column>
         <el-table-column label="数量" width="140">
@@ -694,5 +730,12 @@ onMounted(load)
 .nested-table {
   margin: 4px 0 4px 48px;
   width: calc(100% - 48px);
+}
+
+.stock-hint {
+  margin-top: 2px;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--el-text-color-secondary);
 }
 </style>
