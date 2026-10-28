@@ -43,23 +43,34 @@ def _refresh(db: Session) -> None:
 
 
 def _create_material(
-    db: Session, *, material_type: str = "FINISHED", status: str = "ACTIVE"
+    db: Session,
+    *,
+    material_type: str = "FINISHED",
+    status: str = "ACTIVE",
+    sales_category: str | None = None,
 ) -> int:
-    """直接写入统一物料主数据 `sys_material`，返回物料ID。"""
+    """直接写入统一物料主数据 `sys_material`，返回物料ID。
+
+    `sales_category` 默认按物料类型推导：成品视为可售整机（MACHINE），
+    其余视为内部件（INTERNAL）——销售订单确认只接受 MACHINE / SPARE。
+    """
     code = f"MAT{_tag()}"
     supply_type = "MAKE" if material_type in ("FINISHED", "SEMI") else "BUY"
+    if sales_category is None:
+        sales_category = "MACHINE" if material_type == "FINISHED" else "INTERNAL"
     db.execute(
         text(
             "INSERT INTO sys_material (material_code, material_name, material_type, "
-            "supply_type, unit_code, lead_time_days, safety_stock, standard_cost, status, "
-            "created_at, updated_at) "
-            "VALUES (:code, :name, :mtype, :supply, 'PCS', 0, 0, 0, :status, NOW(), NOW())"
+            "supply_type, unit_code, lead_time_days, safety_stock, standard_cost, "
+            "sales_category, status, created_at, updated_at) "
+            "VALUES (:code, :name, :mtype, :supply, 'PCS', 0, 0, 0, :category, :status, NOW(), NOW())"
         ),
         {
             "code": code,
             "name": f"销售测试物料{code}",
             "mtype": material_type,
             "supply": supply_type,
+            "category": sales_category,
             "status": status,
         },
     )
