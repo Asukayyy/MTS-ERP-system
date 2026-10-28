@@ -28,8 +28,8 @@ router.afterEach((to) => {
  */
 const LOGIN_PATH = '/login'
 const FORBIDDEN_PATH = '/403'
-// 登录前可访问的公开页面（注册页不要求登录态）
-const PUBLIC_PATHS = new Set([LOGIN_PATH, '/register'])
+// 登录前可访问的公开页面（账号由 HR 统一创建，不提供自助注册）
+const PUBLIC_PATHS = new Set([LOGIN_PATH])
 
 router.beforeEach((to) => {
   if (!PUBLIC_PATHS.has(to.path)) {
@@ -40,7 +40,7 @@ router.beforeEach((to) => {
       return { path: FORBIDDEN_PATH }
     }
   }
-  // 已登录访问登录页 → 回工作台（注册页不拦截）
+  // 已登录访问登录页 → 回工作台
   if (to.path === LOGIN_PATH && isLoggedIn()) {
     return { path: '/dashboard' }
   }

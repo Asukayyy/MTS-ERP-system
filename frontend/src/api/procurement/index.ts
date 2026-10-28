@@ -168,6 +168,11 @@ export function createEvaluation(payload: Record<string, unknown>): Promise<Supp
   return post<SupplierEvaluation>('/procurement/evaluations', payload)
 }
 
+/** 自动供应商评价：系统按按时到货率/检验合格率/价格指数计算三项得分 */
+export function createAutoEvaluation(payload: Record<string, unknown>): Promise<SupplierEvaluation> {
+  return post<SupplierEvaluation>('/procurement/evaluations/auto', payload)
+}
+
 /** 某供应商的全部评价记录 */
 export function listEvaluationsBySupplier(supplierId: number): Promise<SupplierEvaluation[]> {
   return get<SupplierEvaluation[]>(`/procurement/evaluations/supplier/${supplierId}`)

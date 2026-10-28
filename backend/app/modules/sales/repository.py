@@ -146,6 +146,7 @@ def list_forecasts(
     material_id: Optional[int] = None,
     status: Optional[str] = None,
     forecast_month: Optional[str] = None,
+    material_ids: Optional[Sequence[int]] = None,
 ):
     stmt = select(models.SalForecast).order_by(models.SalForecast.id.desc())
     if material_id:
@@ -154,7 +155,36 @@ def list_forecasts(
         stmt = stmt.where(models.SalForecast.status == status)
     if forecast_month:
         stmt = stmt.where(models.SalForecast.forecast_month == forecast_month)
+    if material_ids is not None:
+        ids = [int(i) for i in material_ids]
+        if not ids:
+            return [], 0
+        stmt = stmt.where(models.SalForecast.material_id.in_(ids))
     return _paginate(db, stmt, page, page_size)
+
+
+def forecast_rows(
+    db: Session,
+    *,
+    material_id: Optional[int] = None,
+    status: Optional[str] = None,
+    forecast_month: Optional[str] = None,
+    material_ids: Optional[Sequence[int]] = None,
+) -> List[models.SalForecast]:
+    """查询符合条件的全部预测行（不分页），用于按销售类别汇总。"""
+    stmt = select(models.SalForecast)
+    if material_id:
+        stmt = stmt.where(models.SalForecast.material_id == material_id)
+    if status:
+        stmt = stmt.where(models.SalForecast.status == status)
+    if forecast_month:
+        stmt = stmt.where(models.SalForecast.forecast_month == forecast_month)
+    if material_ids is not None:
+        ids = [int(i) for i in material_ids]
+        if not ids:
+            return []
+        stmt = stmt.where(models.SalForecast.material_id.in_(ids))
+    return list(db.scalars(stmt))
 
 
 def get_forecast(db: Session, forecast_id: int) -> Optional[models.SalForecast]:
@@ -554,21 +584,59 @@ def pending_shipment_order_count(
 # ==================== 跨模块契约专用查询（不提交事务） ====================
 
 
+def draft_shipment_allocations(db: Session) -> dict:
+    """未确认发货草稿已占用的库存：`{(warehouse_id, material_id): 数量}`。
+
+    订单确认时按库存分配需要扣除这些已占用数量，避免多张订单
+    把同一批库存重复分配（发货确认前库存不会被扣减）。
+    """
+    stmt = (
+        select(
+            models.SalShipmentItem.warehouse_id,
+            models.SalShipmentItem.material_id,
+            func.sum(models.SalShipmentItem.quantity),
+        )
+        .join(models.SalShipment, models.SalShipment.id == models.SalShipmentItem.shipment_id)
+        .where(models.SalShipment.status == "DRAFT")
+        .group_by(models.SalShipmentItem.warehouse_id, models.SalShipmentItem.material_id)
+    )
+    return {
+        (int(row[0]), int(row[1])): Decimal(str(row[2]))
+        for row in db.execute(stmt).all()
+    }
+
+
 def open_order_demand_rows(db: Session, on_date: Optional[date] = None) -> List[Tuple]:
-    """未交付需求行：状态 CONFIRMED/IN_PROGRESS 且未交付数量 > 0。"""
+    """未交付需求行：状态 CONFIRMED/IN_PROGRESS 且剩余未发数量 > 0。
+
+    剩余数量还要扣掉**已生成但未确认的发货草稿**占用量：订单确认时库存充足
+    的部分会自动生成发货草稿，这部分不再属于“需要生产”的需求，否则计划侧
+    会把同一批货既算库存发货、又算生产需求。
+    """
+    draft_qty = (
+        select(func.coalesce(func.sum(models.SalShipmentItem.quantity), 0))
+        .join(models.SalShipment, models.SalShipment.id == models.SalShipmentItem.shipment_id)
+        .where(
+            models.SalShipmentItem.order_item_id == models.SalOrderItem.id,
+            models.SalShipment.status == "DRAFT",
+        )
+        .correlate(models.SalOrderItem)
+        .scalar_subquery()
+    )
+    open_qty = models.SalOrderItem.quantity - models.SalOrderItem.delivered_qty - draft_qty
     stmt = (
         select(
             models.SalOrder.id,
             models.SalOrder.order_no,
             models.SalOrder.customer_id,
             models.SalOrderItem.material_id,
-            models.SalOrderItem.quantity - models.SalOrderItem.delivered_qty,
+            open_qty,
             models.SalOrder.delivery_date,
         )
         .join(models.SalOrderItem, models.SalOrderItem.order_id == models.SalOrder.id)
         .where(
             models.SalOrder.status.in_(["CONFIRMED", "IN_PROGRESS"]),
-            models.SalOrderItem.quantity - models.SalOrderItem.delivered_qty > 0,
+            open_qty > 0,
         )
         .order_by(models.SalOrder.delivery_date, models.SalOrder.id)
     )

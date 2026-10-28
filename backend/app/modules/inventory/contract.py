@@ -38,6 +38,25 @@ def get_available_qty(
     return service.get_available_qty(db, material_id, warehouse_id)
 
 
+def get_available_by_warehouse(db: Session, material_id: int) -> List[Dict[str, Any]]:
+    """某物料各仓库可用量明细（可用量 > 0），按可用量倒序。
+
+    返回 `[{"warehouse_id", "on_hand", "available"}]`；供 Sales 在订单确认时
+    把可用库存分配到具体仓库并生成发货草稿。
+    """
+    return service.get_available_by_warehouse(db, material_id)
+
+
+def get_warehouse_names(
+    db: Session, warehouse_ids: Sequence[int]
+) -> Dict[int, Dict[str, str]]:
+    """批量取仓库编码 / 名称，用于其它模块列表展示。
+
+    返回 `{warehouse_id: {"warehouse_code", "warehouse_name"}}`。
+    """
+    return service.get_warehouse_names(db, warehouse_ids)
+
+
 def get_stock_snapshot(
     db: Session, material_ids: Sequence[int], warehouse_id: Optional[int] = None
 ) -> Dict[int, Dict[str, Decimal]]:

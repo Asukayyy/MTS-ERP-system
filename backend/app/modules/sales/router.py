@@ -180,15 +180,50 @@ def list_forecasts(
     material_id: Optional[int] = Query(default=None),
     status: Optional[str] = Query(default=None),
     forecast_month: Optional[str] = Query(default=None, description="预测月份 YYYY-MM"),
+    sales_category: Optional[str] = Query(default=None, description="MACHINE/SPARE/INTERNAL"),
+    abc_class: Optional[str] = Query(default=None, description="ABC 分类 A/B/C"),
     db: Session = Depends(get_db),
 ) -> ApiResponse[PageData[schemas.ForecastOut]]:
-    """分页查询销售预测。"""
+    """分页查询销售预测，可按销售类别与 ABC 分类筛选。"""
     rows, total = service.list_forecasts(
-        db, params.page, params.page_size, material_id, status, forecast_month
+        db,
+        params.page,
+        params.page_size,
+        material_id,
+        status,
+        forecast_month,
+        sales_category,
+        abc_class,
     )
     return success(
         PageData[schemas.ForecastOut](
             page=params.page, page_size=params.page_size, total=total, items=rows
+        )
+    )
+
+
+@router.get(
+    "/forecasts/summary",
+    response_model=ApiResponse[List[schemas.ForecastSummaryOut]],
+    summary="销售预测按销售类别汇总",
+)
+def forecast_summary(
+    material_id: Optional[int] = Query(default=None),
+    status: Optional[str] = Query(default=None),
+    forecast_month: Optional[str] = Query(default=None, description="预测月份 YYYY-MM"),
+    sales_category: Optional[str] = Query(default=None, description="MACHINE/SPARE/INTERNAL"),
+    abc_class: Optional[str] = Query(default=None, description="ABC 分类 A/B/C"),
+    db: Session = Depends(get_db),
+) -> ApiResponse[List[schemas.ForecastSummaryOut]]:
+    """整机与可单独售卖备件分开统计预测数量。"""
+    return success(
+        service.forecast_summary(
+            db,
+            material_id=material_id,
+            status=status,
+            forecast_month=forecast_month,
+            sales_category=sales_category,
+            abc_class=abc_class,
         )
     )
 

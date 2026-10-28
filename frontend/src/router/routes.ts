@@ -19,12 +19,6 @@ export const constantRoutes: RouteRecordRaw[] = [
     meta: { title: '登录' },
   },
   {
-    path: '/register',
-    name: 'Register',
-    component: () => import('@/views/register/index.vue'),
-    meta: { title: '注册' },
-  },
-  {
     path: '/403',
     name: 'Forbidden',
     component: () => import('@/views/error/Forbidden.vue'),
@@ -232,6 +226,14 @@ export const constantRoutes: RouteRecordRaw[] = [
         name: 'InventoryReplenishment',
         component: () => import('@/views/inventory/replenishment/index.vue'),
         meta: { title: '补库需求', perm: 'inventory:replenishment' },
+      },
+
+      // ---------- 人事管理 ----------
+      {
+        path: 'hr/employee',
+        name: 'HrEmployee',
+        component: () => import('@/views/hr/index.vue'),
+        meta: { title: '人事工作台', perm: 'system:user' },
       },
 
       // ---------- 系统管理 ----------

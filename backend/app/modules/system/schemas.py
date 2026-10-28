@@ -51,6 +51,12 @@ class MaterialCreate(BaseModel):
     unit_code: str = Field(default="PCS", max_length=20, description="计量单位")
     specification: Optional[str] = Field(default=None, max_length=200, description="规格型号")
     material_group: Optional[str] = Field(default=None, max_length=50, description="物料分组")
+    abc_class: Optional[str] = Field(default=None, pattern="^[ABC]$", description="ABC 分类 A/B/C")
+    sales_category: str = Field(
+        default="INTERNAL",
+        pattern="^(MACHINE|SPARE|INTERNAL)$",
+        description="销售类别 MACHINE 整机 / SPARE 可售备件 / INTERNAL 内部件",
+    )
     lead_time_days: int = Field(default=0, description="提前期（天）")
     safety_stock: Decimal = Field(default=Decimal("0"), description="安全库存")
     standard_cost: Decimal = Field(default=Decimal("0"), description="标准成本")
@@ -67,6 +73,8 @@ class MaterialUpdate(BaseModel):
     unit_code: Optional[str] = Field(default=None, max_length=20)
     specification: Optional[str] = Field(default=None, max_length=200)
     material_group: Optional[str] = Field(default=None, max_length=50)
+    abc_class: Optional[str] = Field(default=None, pattern="^[ABC]$")
+    sales_category: Optional[str] = Field(default=None, pattern="^(MACHINE|SPARE|INTERNAL)$")
     lead_time_days: Optional[int] = None
     safety_stock: Optional[Decimal] = None
     standard_cost: Optional[Decimal] = None
@@ -82,11 +90,26 @@ class MaterialOut(_IdOut):
     unit_code: str
     specification: Optional[str] = None
     material_group: Optional[str] = None
+    abc_class: Optional[str] = None
+    sales_category: str
     lead_time_days: int
     safety_stock: Decimal
     standard_cost: Decimal
     status: str
     remark: Optional[str] = None
+
+
+class AbcClassifyResult(BaseModel):
+    """自动 ABC 分类结果。"""
+
+    total_count: int = Field(description="参与分类的启用物料数")
+    a_count: int = Field(description="A 类物料数")
+    b_count: int = Field(description="B 类物料数")
+    c_count: int = Field(description="C 类物料数")
+    total_value: Decimal = Field(description="分类依据的总价值")
+    basis: str = Field(description="分类依据：库存金额 / 标准成本 / 库存数量")
+    a_threshold: int = Field(description="A 类累计占比阈值（%）")
+    b_threshold: int = Field(description="B 类累计占比阈值（%）")
 
 
 # ==================== BOM ====================
@@ -300,6 +323,10 @@ class PersonnelCreate(BaseModel):
 
     employee_no: str = Field(max_length=50, description="员工工号（唯一）")
     person_name: str = Field(max_length=100, description="姓名")
+    gender: Optional[str] = Field(default=None, pattern="^(MALE|FEMALE)$", description="性别")
+    id_card: Optional[str] = Field(
+        default=None, pattern=r"^\d{17}[\dXx]$", description="身份证号"
+    )
     org_id: int = Field(description="所属组织ID")
     position: Optional[str] = Field(default=None, max_length=50)
     phone: Optional[str] = Field(default=None, max_length=30)
@@ -313,6 +340,8 @@ class PersonnelUpdate(BaseModel):
     """人员修改入参。"""
 
     person_name: Optional[str] = Field(default=None, max_length=100)
+    gender: Optional[str] = Field(default=None, pattern="^(MALE|FEMALE)$")
+    id_card: Optional[str] = Field(default=None, pattern=r"^\d{17}[\dXx]$")
     org_id: Optional[int] = None
     position: Optional[str] = Field(default=None, max_length=50)
     phone: Optional[str] = Field(default=None, max_length=30)
@@ -325,6 +354,8 @@ class PersonnelUpdate(BaseModel):
 class PersonnelOut(_IdOut):
     employee_no: str
     person_name: str
+    gender: Optional[str] = None
+    id_card: Optional[str] = None
     org_id: int
     position: Optional[str] = None
     phone: Optional[str] = None
@@ -394,12 +425,20 @@ class DictionaryOut(_IdOut):
 
 
 class UserCreate(BaseModel):
-    """用户账号新增入参。"""
+    """用户账号新增入参。
+
+    两种建号方式：
+    - 关联既有员工：传 `personnel_id`；
+    - 直接建号（HR 新建员工）：传 `org_id` + 可选 `employee_no`，服务端同时创建员工档案。
+    """
 
     username: str = Field(max_length=50, description="登录名（唯一）")
-    password: str = Field(description="明文密码（服务端 sha256 后入库）")
+    password: str = Field(min_length=6, max_length=64, description="明文密码（服务端 sha256 后入库）")
     display_name: str = Field(max_length=100, description="显示名")
     personnel_id: Optional[int] = Field(default=None, description="关联员工ID（可为空，1:1）")
+    org_id: Optional[int] = Field(default=None, description="所属组织/部门ID（未关联员工时用于新建档案）")
+    employee_no: Optional[str] = Field(default=None, max_length=50, description="员工工号（留空自动生成）")
+    role_ids: List[int] = Field(default_factory=list, description="身份角色ID集合（建号时一并绑定）")
     status: str = Field(default="ACTIVE", description="状态 ACTIVE/INACTIVE")
     remark: Optional[str] = None
 
@@ -514,17 +553,11 @@ class LoginIn(BaseModel):
     password: str = Field(description="明文密码")
 
 
-class RegisterIn(BaseModel):
-    """公开注册入参：归入部门 + 自选一种或多种身份。"""
+class ChangePasswordIn(BaseModel):
+    """登录用户自助修改密码入参。"""
 
-    username: str = Field(max_length=50, description="登录名（唯一）")
-    password: str = Field(min_length=6, max_length=64, description="明文密码（服务端 sha256 后入库）")
-    display_name: str = Field(max_length=100, description="显示名（同时作为员工姓名）")
-    org_id: int = Field(description="所属组织/部门ID（注册页下拉选择）")
-    employee_no: Optional[str] = Field(
-        default=None, max_length=50, description="员工工号（留空自动生成）"
-    )
-    role_ids: List[int] = Field(min_length=1, description="身份角色ID集合（九种身份，可复选）")
+    old_password: str = Field(description="原密码")
+    new_password: str = Field(min_length=6, max_length=64, description="新密码（6~64 位）")
 
 
 class LoginOut(BaseModel):

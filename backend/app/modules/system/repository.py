@@ -51,6 +51,8 @@ def list_materials(
     supply_type: Optional[str] = None,
     status: Optional[str] = None,
     keyword: Optional[str] = None,
+    abc_class: Optional[str] = None,
+    sales_category: Optional[str] = None,
 ):
     stmt = select(models.SysMaterial).order_by(models.SysMaterial.id.desc())
     if material_type:
@@ -59,6 +61,10 @@ def list_materials(
         stmt = stmt.where(models.SysMaterial.supply_type == supply_type)
     if status:
         stmt = stmt.where(models.SysMaterial.status == status)
+    if abc_class:
+        stmt = stmt.where(models.SysMaterial.abc_class == abc_class)
+    if sales_category:
+        stmt = stmt.where(models.SysMaterial.sales_category == sales_category)
     if keyword:
         like = f"%{keyword}%"
         stmt = stmt.where(
@@ -66,6 +72,15 @@ def list_materials(
             | models.SysMaterial.material_name.like(like)
         )
     return _paginate(db, stmt, page, page_size)
+
+
+def list_active_materials(db: Session) -> list[models.SysMaterial]:
+    """取全部启用物料（ABC 自动分类使用）。"""
+    return list(
+        db.scalars(
+            select(models.SysMaterial).where(models.SysMaterial.status == "ACTIVE")
+        ).all()
+    )
 
 
 def get_material(db: Session, material_id: int) -> Optional[models.SysMaterial]:
@@ -365,6 +380,10 @@ def get_personnel_by_no(db: Session, employee_no: str) -> Optional[models.SysPer
     return db.scalar(
         select(models.SysPersonnel).where(models.SysPersonnel.employee_no == employee_no)
     )
+
+
+def get_personnel_by_id_card(db: Session, id_card: str) -> Optional[models.SysPersonnel]:
+    return db.scalar(select(models.SysPersonnel).where(models.SysPersonnel.id_card == id_card))
 
 
 def next_employee_no(db: Session) -> str:

@@ -5,6 +5,7 @@ import type { FormInstance, FormRules } from 'element-plus'
 
 import {
   createUser,
+  listOrganizationsFlat,
   listPersonnel,
   listRoles,
   listUsers,
@@ -15,7 +16,7 @@ import {
 import RemoteSelect from '@/components/common/RemoteSelect.vue'
 import StatusTag from '@/components/common/StatusTag.vue'
 import { usePagedTable } from '@/composables/usePagedTable'
-import type { RemoteOption, Role, User } from '@/types/erp'
+import type { Organization, RemoteOption, Role, User } from '@/types/erp'
 
 const { loading, rows, total, page, pageSize, query, load, search, reset, changePage, changeSize } =
   usePagedTable<User, { keyword: string; status: string }>(
@@ -25,6 +26,17 @@ const { loading, rows, total, page, pageSize, query, load, search, reset, change
 
 /** 全部角色（用于分配角色） */
 const roleOptions = ref<Role[]>([])
+
+/** 组织列表（HR 建号时为新员工选择部门） */
+const orgOptions = ref<Organization[]>([])
+
+async function loadOrgs(): Promise<void> {
+  try {
+    orgOptions.value = await listOrganizationsFlat()
+  } catch (error) {
+    ElMessage.error((error as Error).message)
+  }
+}
 
 /** 员工选项 */
 async function loadPersonnelOptions(keyword: string): Promise<RemoteOption[]> {
@@ -54,6 +66,9 @@ const form = reactive<{
   password: string
   display_name: string
   personnel_id: number | undefined
+  org_id: number | undefined
+  employee_no: string
+  role_ids: number[]
   status: string
   remark: string
 }>({
@@ -61,6 +76,9 @@ const form = reactive<{
   password: '',
   display_name: '',
   personnel_id: undefined,
+  org_id: undefined,
+  employee_no: '',
+  role_ids: [],
   status: 'ACTIVE',
   remark: '',
 })
@@ -76,6 +94,9 @@ function resetForm(): void {
     password: '',
     display_name: '',
     personnel_id: undefined,
+    org_id: undefined,
+    employee_no: '',
+    role_ids: [],
     status: 'ACTIVE',
     remark: '',
   })
@@ -94,6 +115,9 @@ function openEdit(row: User): void {
     password: '',
     display_name: row.display_name,
     personnel_id: row.personnel_id ?? undefined,
+    org_id: undefined,
+    employee_no: '',
+    role_ids: [],
     status: row.status,
     remark: row.remark ?? '',
   })
@@ -107,6 +131,10 @@ async function submit(): Promise<void> {
     ElMessage.warning('请为新用户设置初始密码')
     return
   }
+  if (editingId.value === null && !form.personnel_id && !form.org_id) {
+    ElMessage.warning('请选择关联员工，或选择部门为新员工建档')
+    return
+  }
   submitting.value = true
   try {
     if (editingId.value === null) {
@@ -115,6 +143,9 @@ async function submit(): Promise<void> {
         password: form.password,
         display_name: form.display_name,
         personnel_id: form.personnel_id ?? null,
+        org_id: form.personnel_id ? null : (form.org_id ?? null),
+        employee_no: form.personnel_id ? null : form.employee_no.trim() || null,
+        role_ids: form.role_ids,
         status: form.status,
         remark: form.remark || null,
       })
@@ -179,6 +210,7 @@ async function submitRoles(): Promise<void> {
 onMounted(() => {
   load()
   loadRoles()
+  loadOrgs()
 })
 </script>
 
@@ -252,6 +284,14 @@ onMounted(() => {
     </el-card>
 
     <el-dialog v-model="dialogVisible" :title="editingId === null ? '新增用户' : '修改用户'" width="620px">
+      <el-alert
+        v-if="editingId === null"
+        type="info"
+        :closable="false"
+        show-icon
+        title="账号由人事统一创建：可关联已有员工，或选择部门 + 工号（可留空）自动建档，并同时绑定身份角色。"
+        style="margin-bottom: 14px"
+      />
       <el-form ref="formRef" :model="form" :rules="rules" label-width="100px">
         <el-row :gutter="12">
           <el-col :span="12">
@@ -277,6 +317,45 @@ onMounted(() => {
           <el-col :span="12">
             <el-form-item label="关联员工">
               <RemoteSelect v-model="form.personnel_id" :loader="loadPersonnelOptions" style="width: 100%" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="所属部门">
+              <el-select
+                v-model="form.org_id"
+                placeholder="选择部门"
+                style="width: 100%"
+                clearable
+                :disabled="!!form.personnel_id"
+              >
+                <el-option
+                  v-for="org in orgOptions"
+                  :key="org.id"
+                  :label="`${org.org_code} ${org.org_name}`"
+                  :value="org.id"
+                />
+              </el-select>
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="工号">
+              <el-input
+                v-model="form.employee_no"
+                placeholder="留空自动生成"
+                :disabled="!!form.personnel_id"
+              />
+            </el-form-item>
+          </el-col>
+          <el-col v-if="editingId === null" :span="24">
+            <el-form-item label="身份角色">
+              <el-select v-model="form.role_ids" multiple placeholder="选择身份（可多选）" style="width: 100%">
+                <el-option
+                  v-for="item in roleOptions"
+                  :key="item.id"
+                  :label="`${item.role_code} ${item.role_name}`"
+                  :value="item.id"
+                />
+              </el-select>
             </el-form-item>
           </el-col>
           <el-col :span="12">

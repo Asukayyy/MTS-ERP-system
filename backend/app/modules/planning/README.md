@@ -1,6 +1,6 @@
 # Planning Module（计划管理）
 
-> 状态：**已实现**（后端 61 个路径；含真实多层 BOM 展开 MRP 引擎）
+> 状态：**已实现**（后端 62 个操作；含真实多层 BOM 展开 MRP 引擎）
 > 本课程设计中**生产相关功能全部归属本模块**，不设独立的 production 模块。
 
 ## 模块职责
@@ -8,13 +8,18 @@
 负责需求汇总、MPS、MRP 与生产作业计划。MRP 结果分流后：MAKE 件由本模块生成生产计划，
 BUY 件通过契约交给 procurement 生成采购计划。
 
+**主链路（唯一）**：销售订单 + 补库申请 → 统一需求 `pln_demand`（销售订单记 `SALES`、
+补库申请记 `STOCKFILL`）→ `/mps/from-demands` 汇总生成 MPS → `/mrp/run`（仅以 MPS 为输入）
+→ MRP 结果分流。销售预测（`FORECAST`）单独留存，**不参与 MPS 汇总**；MPS 的手工新增
+与课程案例导入仅作为补充录入手段，不再作为 MRP 的需求旁路。
+
 ## 已实现功能
 
 | 功能 | 说明 |
 | --- | --- |
-| 需求管理 | `pln_demand` 维护；`/demands/from-sales` 拉取销售订单需求、`/demands/from-forecast` 拉取已确认销售预测；`/demands/from-replenishment` 接补库需求（**仅转计划 `PRODUCTION`**，转采购 `REORDER` 由采购模块受理） |
-| 主生产计划 MPS | 头 + 明细增删改查、状态流转（确认后只读）、`/mps/import/{preview,confirm}` 课程数据两段式导入 |
-| MRP 运算 | `/mrp/run` 触发；多层 BFS 展开、毛需求 / 净需求 / 建议下达日期计算；每次运行独立 `pln_mrp_run`，历史不覆盖 |
+| 需求管理 | `pln_demand` 维护；`/demands/from-sales` 拉取销售订单需求（`SALES`）、`/demands/from-forecast` 拉取已确认销售预测（`FORECAST`，**不参与 MPS 汇总**）；`/demands/from-replenishment` 接补库需求（**仅转计划 `PRODUCTION`**，记 `STOCKFILL`；转采购 `REORDER` 由采购模块受理） |
+| 主生产计划 MPS | 头 + 明细增删改查、状态流转（确认后只读）；`/mps/from-demands` **由统一需求汇总生成 MPS**（按「物料 + 需求月份」聚合已确认的销售订单 `SALES` + 补库申请 `STOCKFILL`，需求置 `RELEASED` 并在 MPS 行记录来源需求 ID）；`/mps/import/{preview,confirm}` 课程数据两段式导入 |
+| MRP 运算 | `/mrp/run` 触发，**只接受 `mps_id`**（需求必须先汇总为 MPS，不接受需求 ID 或销售订单直算）；多层 BFS 展开、毛需求 / 净需求 / 建议下达日期计算；每次运行独立 `pln_mrp_run`，历史不覆盖 |
 | MRP 结果 | 按运行查询结果、`/mrp/runs/{id}/explain` 展示展开过程、结果状态流转 |
 | 结果分流 | `/mrp/runs/{id}/create-production-plans`（MAKE→生产计划）、`/mrp/runs/{id}/create-purchase-plan`（BUY→采购计划） |
 | 生产计划 | 增删改查、状态流转、`/production-plans/from-mrp` |
@@ -31,9 +36,11 @@ BUY 件通过契约交给 procurement 生成采购计划。
 
 ## MRP 计算规则（实现要点）
 
-- 多层展开：`子件毛需求 = 父件净需求 × 用量 × (1 + 损耗率)`
+- 多层展开：`子件毛需求 = 父件下达量（净需求取整后）× 用量`（**损耗率不参与计算**）
+- 净需求：`净需求 = 毛需求 + 安全库存 − 可用量`（不足取 0）
+- 建议下达量：**自制件（MAKE）向上取整为整数件**，采购件（BUY）保留原精度；
+  生产作业计划的 `planned_qty` 取整数下达量，保证不出现小数件
 - 需求时间：`子件需求日期 = 父件需求日期 − lead_time_offset`
-- 净需求：`净需求 = max(毛需求 + 安全库存 − 可用库存, 0)`
 - 建议下达日期：`需求日期 − lead_time_days`
 - 供应分流：`supply_type == MAKE` → 生产计划；`BUY` → 采购计划
 - 可用库存按批次只抵扣一次（`remaining_available` 映射），避免同一批库存被重复使用
@@ -52,6 +59,11 @@ BUY 件通过契约交给 procurement 生成采购计划。
 - 采购需求（交 procurement 模块，经 `procurement.contract.create_purchase_plan_from_mrp`）
 - 生产作业计划 / 派工单 / 领料单 / 完工报告（领料与完工经 `inventory.contract` 执行）
 
+> 列表 / 详情出参除保留 `*_id` 外，同时返回可直接展示的业务标识：
+> `material_code` / `material_name`、`plan_no`（作业计划编号）、`dispatch_no`、
+> `mps_no`、`warehouse_code` / `warehouse_name`、`worker_name`、
+> `source_demand_nos`（MPS 行来源需求单号），均由 service 层批量补齐，不做跨模块 JOIN。
+
 ## 数据表（Owner: planning，共 10 张）
 
 `pln_demand`、`pln_mps`、`pln_mps_item`、`pln_mrp_run`、`pln_mrp_result`、
@@ -65,6 +77,8 @@ BUY 件通过契约交给 procurement 生成采购计划。
 `backend/app/modules/planning/contract.py`：
 
 - `create_production_plan_from_replenishment(db, request_id)` → `{"plan_id", "plan_no"}`
+- `create_sales_demand_from_shortage(db, ...)` → 销售订单确认时库存缺口登记为 `SALES` 需求（`CONFIRMED`）
+- `cancel_sales_demands_for_order(db, order_id)` → 订单取消时作废未进入 MPS 的缺口需求
 - `create_production_plan_from_mrp_result(db, mrp_result_id)` → 由 MRP 结果直接建生产计划
 - `get_mrp_results(db, result_ids)` → 供 procurement 从 MRP BUY 结果生成采购计划
 - `get_open_production_qty(db, material_id)` → 在制量

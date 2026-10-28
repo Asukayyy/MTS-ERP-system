@@ -6,14 +6,13 @@ import type { FormInstance, FormRules } from 'element-plus'
 import {
   addRoutingOperation,
   createRouting,
-  listMaterials,
   listRoutings,
   setRoutingStatus,
 } from '@/api/system'
-import RemoteSelect from '@/components/common/RemoteSelect.vue'
+import BomMaterialPicker from '@/components/common/BomMaterialPicker.vue'
 import StatusTag from '@/components/common/StatusTag.vue'
 import { usePagedTable } from '@/composables/usePagedTable'
-import type { RemoteOption, Routing } from '@/types/erp'
+import type { Routing } from '@/types/erp'
 
 /** 工艺路线：路线头 + 工序明细 */
 
@@ -22,11 +21,6 @@ const { loading, rows, total, page, pageSize, query, load, search, reset, change
     (params) => listRoutings(params),
     { material_id: undefined, status: '' },
   )
-
-async function materialOptions(keyword: string): Promise<RemoteOption[]> {
-  const data = await listMaterials({ keyword, page: 1, page_size: 20 })
-  return data.items.map((item) => ({ id: item.id, label: `${item.material_code} ${item.material_name}` }))
-}
 
 interface OperationForm {
   sequence_no: number
@@ -158,7 +152,7 @@ onMounted(load)
 
       <el-form class="filter-bar" :inline="true" @submit.prevent>
         <el-form-item label="物料">
-          <RemoteSelect v-model="query.material_id" :loader="materialOptions" placeholder="全部物料" style="width: 220px" />
+          <BomMaterialPicker v-model="query.material_id" placeholder="全部物料（按 BOM 展开）" width="220px" />
         </el-form-item>
         <el-form-item label="状态">
           <el-select v-model="query.status" clearable placeholder="全部" style="width: 120px">
@@ -228,7 +222,7 @@ onMounted(load)
         <el-row :gutter="12">
           <el-col :span="12">
             <el-form-item label="自制件物料" prop="material_id">
-              <RemoteSelect v-model="form.material_id" :loader="materialOptions" />
+              <BomMaterialPicker v-model="form.material_id" placeholder="按 BOM 逐层展开或搜索" width="100%" />
             </el-form-item>
           </el-col>
           <el-col :span="12">

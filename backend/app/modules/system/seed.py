@@ -1,6 +1,6 @@
 """system 模块 RBAC 初始化数据（种子数据）。
 
-为注册页 / 管理界面提供 **十三种人员身份**（角色）、覆盖五个模块功能的权限资源树，
+为管理界面提供 **十四种人员身份**（角色）、覆盖五个模块功能的权限资源树，
 以及角色与权限的绑定关系。由 `app/main.py` 启动时调用 `seed_roles_and_permissions(db)`。
 
 设计约定：
@@ -21,9 +21,9 @@ from sqlalchemy.orm import Session
 from app.modules.system import models
 
 # --------------------------------------------------------------------------- #
-# 一、十三种人员身份（角色）
+# 一、十四种人员身份（角色）
 # --------------------------------------------------------------------------- #
-# 团队版 SysRole 无 data_scope / sort_order 列，数据范围约定并入 description 供注册页展示。
+# 团队版 SysRole 无 data_scope / sort_order 列，数据范围约定并入 description 供管理界面展示。
 ROLE_SEEDS: list[dict[str, Any]] = [
     {
         "role_code": "ADMIN",
@@ -84,6 +84,12 @@ ROLE_SEEDS: list[dict[str, Any]] = [
         "role_name": "部长",
         "status": "ACTIVE",
         "description": "部门负责人：拥有五个业务模块与基础信息的全部权限，不含账号/角色/权限/日志管理（数据范围：全部）",
+    },
+    {
+        "role_code": "HR",
+        "role_name": "人事",
+        "status": "ACTIVE",
+        "description": "人事专员：统一创建员工档案与登录账号、分配身份角色，不含角色/权限定义（数据范围：全部）",
     },
     {
         "role_code": "WORKER",
@@ -249,9 +255,6 @@ PERMISSION_SEEDS: list[dict[str, Any]] = [
 # 所有权限编码（供 ADMIN 全量授权使用）
 ALL_PERMISSION_CODES: list[str] = [item["code"] for item in PERMISSION_SEEDS]
 
-#: 注册页可选身份的角色编码（按展示顺序）
-REGISTER_ROLE_CODES: list[str] = [item["role_code"] for item in ROLE_SEEDS]
-
 # --------------------------------------------------------------------------- #
 # 三、角色-权限绑定（按五个模块的功能划分）
 # --------------------------------------------------------------------------- #
@@ -265,17 +268,24 @@ ROLE_PERMISSION_BINDINGS: dict[str, list[str]] = {
         "system", "system:material", "system:bom", "system:routing",
         "planning", "planning:schedule", "planning:dispatch", "planning:picking", "planning:finish",
     ],
+    # 采购人员：采购管理全部 + 物料管理/公共字典 + 库存（实时库存、流水、订货点、补货需求）
     "PURCHASE": [
         "procurement", "procurement:plan", "procurement:demand",
-        "procurement:order", "procurement:arrival",
+        "procurement:order", "procurement:arrival", "procurement:qc",
         "procurement:supplier", "procurement:supplier-material",
         "procurement:evaluation", "procurement:report",
-        "system:material", "system:dictionary",
+        "system", "system:material", "system:material:manage",
+        "system:dictionary", "system:dictionary:manage",
+        "inventory", "inventory:stock", "inventory:ledger",
+        "inventory:reorder", "inventory:replenishment",
     ],
+    # 销售人员：销售管理全部 + 物料/人员 + 库存查询与流水 + 需求管理（只读）
     "SALES": [
         "sales", "sales:order", "sales:demand", "sales:shipping", "sales:stock",
         "sales:customer", "sales:return",
-        "system:material",
+        "system", "system:material", "system:personnel",
+        "inventory", "inventory:stock", "inventory:ledger",
+        "planning", "planning:demand",
     ],
     "INVENTORY": [
         "inventory", "inventory:stock", "inventory:inbound",
@@ -337,6 +347,11 @@ ROLE_PERMISSION_BINDINGS: dict[str, list[str]] = {
         "inventory:ledger", "inventory:transfer", "inventory:stocktake",
         "inventory:reorder", "inventory:replenishment",
     ],
+    # 人事：统一建号（员工档案 + 账号 + 角色），维护组织/人员信息
+    "HR": [
+        "system", "system:user", "system:user:manage", "system:user:assign",
+        "system:org", "system:personnel", "system:personnel:manage",
+    ],
     "WORKER": [
         "system", "system:material", "system:bom", "system:routing",
         "planning", "planning:picking", "planning:finish",
@@ -367,7 +382,7 @@ ROLE_PERMISSION_BINDINGS: dict[str, list[str]] = {
 
 
 def seed_roles_and_permissions(db: Session) -> None:
-    """写入十三种身份角色、权限资源树，并把角色-权限绑定同步为代码定义。
+    """写入十四种身份角色、权限资源树，并把角色-权限绑定同步为代码定义。
 
     - 角色、权限：按 `role_code` / `perm_code` 存在即跳过，不覆盖人工调整；
     - 角色-权限绑定：按角色对齐到 `ROLE_PERMISSION_BINDINGS`（补缺失、删多余），

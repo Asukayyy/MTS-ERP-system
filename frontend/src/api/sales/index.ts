@@ -3,6 +3,7 @@ import type { PageData } from '@/types/api'
 import type {
   Customer,
   Forecast,
+  ForecastSummary,
   Order,
   Product,
   SalesReturn,
@@ -48,6 +49,13 @@ export function listProducts(params: Record<string, unknown> = {}): Promise<Prod
 
 export function listForecasts(params: Record<string, unknown> = {}): Promise<PageData<Forecast>> {
   return get<PageData<Forecast>>('/sales/forecasts', params)
+}
+
+/** 销售预测按销售类别（整机 / 可售备件 / 内部件）汇总 */
+export function getForecastSummary(
+  params: Record<string, unknown> = {},
+): Promise<ForecastSummary[]> {
+  return get<ForecastSummary[]>('/sales/forecasts/summary', params)
 }
 
 export function createForecast(payload: Record<string, unknown>): Promise<Forecast> {

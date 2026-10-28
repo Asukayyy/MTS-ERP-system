@@ -66,3 +66,69 @@ body {
 .form-tip--error {
   color: #f56c6c;
 }
+
+/* 数据表格斑马纹：天蓝色 / 白色交替，降低宽表格横向串行 */
+.el-table .el-table__body tr.el-table__row:nth-child(odd) > td.el-table__cell {
+  background-color: #ffffff;
+}
+
+.el-table .el-table__body tr.el-table__row:nth-child(even) > td.el-table__cell {
+  background-color: #e8f3fc;
+}
+
+/* 悬停与选中行在高亮时覆盖斑马纹，保持可辨认 */
+.el-table .el-table__body tr.el-table__row:hover > td.el-table__cell {
+  background-color: #d6e9f9;
+}
+
+.el-table .el-table__body tr.el-table__row.current-row > td.el-table__cell,
+.el-table .el-table__body tr.el-table__row.current-row:hover > td.el-table__cell {
+  background-color: #c6e0f5;
+}
+
+/* BOM 根物料选择面板（弹层挂载到 body，故写为全局样式） */
+.bom-picker__panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.bom-picker__list {
+  max-height: 300px;
+  overflow: auto;
+}
+
+.bom-picker__item {
+  display: flex;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.bom-picker__item:hover {
+  background: #e8f3fc;
+}
+
+.bom-picker__node {
+  display: flex;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.bom-picker__code {
+  color: #5f6b76;
+}
+
+.bom-picker__name {
+  color: #1f2d3d;
+}
+
+.bom-picker__empty {
+  padding: 16px 0;
+  text-align: center;
+  font-size: 12px;
+  color: #98a2ad;
+}
+

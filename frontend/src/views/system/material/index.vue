@@ -1,9 +1,15 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 
-import { createMaterial, listMaterials, setMaterialStatus, updateMaterial } from '@/api/system'
+import {
+  autoClassifyAbc,
+  createMaterial,
+  listMaterials,
+  setMaterialStatus,
+  updateMaterial,
+} from '@/api/system'
 import StatusTag from '@/components/common/StatusTag.vue'
 import { usePagedTable } from '@/composables/usePagedTable'
 import type { Material } from '@/types/erp'
@@ -11,12 +17,21 @@ import type { Material } from '@/types/erp'
 const { loading, rows, total, page, pageSize, query, load, search, reset, changePage, changeSize } =
   usePagedTable<
     Material,
-    { keyword: string; material_type: string; supply_type: string; status: string }
+    {
+      keyword: string
+      material_type: string
+      supply_type: string
+      status: string
+      abc_class: string
+      sales_category: string
+    }
   >((params) => listMaterials(params), {
     keyword: '',
     material_type: '',
     supply_type: '',
     status: '',
+    abc_class: '',
+    sales_category: '',
   })
 
 const MATERIAL_TYPES = [
@@ -25,6 +40,51 @@ const MATERIAL_TYPES = [
   { value: 'SEMI', label: '半成品' },
   { value: 'FINISHED', label: '成品' },
 ]
+
+/** 经典 ABC 分类：A 高价值、B 中等、C 低值 */
+const ABC_CLASSES = [
+  { value: 'A', label: 'A 类（高价值）' },
+  { value: 'B', label: 'B 类（中等）' },
+  { value: 'C', label: 'C 类（低值）' },
+]
+
+/** 销售类别：整机 / 可单独售卖备件 / 内部件 */
+const SALES_CATEGORIES = [
+  { value: 'MACHINE', label: '整机' },
+  { value: 'SPARE', label: '可售备件' },
+  { value: 'INTERNAL', label: '内部件' },
+]
+
+function salesCategoryLabel(value?: string | null): string {
+  return SALES_CATEGORIES.find((item) => item.value === value)?.label ?? '内部件'
+}
+
+/** 自动 ABC 分类：按价值累计占比重算，覆盖现有分类 */
+const classifying = ref(false)
+
+async function runAbcClassify(): Promise<void> {
+  try {
+    await ElMessageBox.confirm(
+      '按库存金额（标准成本 × 现有库存）从高到低累计，累计占比 < 70% 归 A 类、< 90% 归 B 类、其余归 C 类。会覆盖现有分类，是否继续？',
+      '自动 ABC 分类',
+      { type: 'warning', confirmButtonText: '开始分类', cancelButtonText: '取消' },
+    )
+  } catch {
+    return
+  }
+  classifying.value = true
+  try {
+    const result = await autoClassifyAbc()
+    ElMessage.success(
+      `分类完成：A ${result.a_count} / B ${result.b_count} / C ${result.c_count}（依据：${result.basis}）`,
+    )
+    await load()
+  } catch (error) {
+    ElMessage.error((error as Error).message)
+  } finally {
+    classifying.value = false
+  }
+}
 
 const dialogVisible = ref(false)
 const submitting = ref(false)
@@ -38,6 +98,8 @@ const form = reactive({
   unit_code: 'PCS',
   specification: '',
   material_group: '',
+  abc_class: '',
+  sales_category: 'INTERNAL',
   lead_time_days: 0,
   safety_stock: 0,
   standard_cost: 0,
@@ -62,6 +124,8 @@ function resetForm(): void {
     unit_code: 'PCS',
     specification: '',
     material_group: '',
+    abc_class: '',
+    sales_category: 'INTERNAL',
     lead_time_days: 0,
     safety_stock: 0,
     standard_cost: 0,
@@ -86,6 +150,8 @@ function openEdit(row: Material): void {
     unit_code: row.unit_code,
     specification: row.specification ?? '',
     material_group: row.material_group ?? '',
+    abc_class: row.abc_class ?? '',
+    sales_category: row.sales_category ?? 'INTERNAL',
     lead_time_days: row.lead_time_days,
     safety_stock: Number(row.safety_stock),
     standard_cost: Number(row.standard_cost),
@@ -99,13 +165,15 @@ async function submit(): Promise<void> {
   const valid = await formRef.value?.validate().catch(() => false)
   if (!valid) return
   submitting.value = true
+  const { abc_class, ...rest } = form
+  const payload = { ...rest, abc_class: abc_class || null }
   try {
     if (editingId.value === null) {
-      await createMaterial({ ...form })
+      await createMaterial(payload)
       ElMessage.success('物料已新增')
     } else {
-      const { material_code: _code, ...payload } = form
-      await updateMaterial(editingId.value, payload)
+      const { material_code: _code, ...editable } = payload
+      await updateMaterial(editingId.value, editable)
       ElMessage.success('物料已修改')
     }
     dialogVisible.value = false
@@ -138,6 +206,7 @@ onMounted(load)
         <div class="table-toolbar">
           <span class="page-title">物料管理</span>
           <span class="table-toolbar__spacer" />
+          <el-button :loading="classifying" @click="runAbcClassify">自动 ABC 分类</el-button>
           <el-button type="primary" @click="openCreate">新增物料</el-button>
         </div>
       </template>
@@ -155,6 +224,16 @@ onMounted(load)
           <el-select v-model="query.supply_type" clearable placeholder="全部" style="width: 120px">
             <el-option label="自制" value="MAKE" />
             <el-option label="采购" value="BUY" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="销售类别">
+          <el-select v-model="query.sales_category" clearable placeholder="全部" style="width: 130px">
+            <el-option v-for="item in SALES_CATEGORIES" :key="item.value" :label="item.label" :value="item.value" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="ABC">
+          <el-select v-model="query.abc_class" clearable placeholder="全部" style="width: 110px">
+            <el-option v-for="item in ABC_CLASSES" :key="item.value" :label="item.label" :value="item.value" />
           </el-select>
         </el-form-item>
         <el-form-item label="状态">
@@ -177,6 +256,17 @@ onMounted(load)
         </el-table-column>
         <el-table-column label="供应" width="90">
           <template #default="{ row }"><StatusTag :status="row.supply_type" /></template>
+        </el-table-column>
+        <el-table-column label="销售类别" width="100">
+          <template #default="{ row }">{{ salesCategoryLabel(row.sales_category) }}</template>
+        </el-table-column>
+        <el-table-column label="ABC" width="80" align="center">
+          <template #default="{ row }">
+            <el-tag v-if="row.abc_class" :type="row.abc_class === 'A' ? 'danger' : row.abc_class === 'B' ? 'warning' : 'info'" size="small">
+              {{ row.abc_class }}
+            </el-tag>
+            <span v-else>—</span>
+          </template>
         </el-table-column>
         <el-table-column label="单位" prop="unit_code" width="80" />
         <el-table-column label="提前期(天)" prop="lead_time_days" width="100" align="right" />
@@ -245,6 +335,20 @@ onMounted(load)
           </el-col>
           <el-col :span="12">
             <el-form-item label="物料分组"><el-input v-model="form.material_group" /></el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="销售类别">
+              <el-select v-model="form.sales_category" style="width: 100%">
+                <el-option v-for="item in SALES_CATEGORIES" :key="item.value" :label="item.label" :value="item.value" />
+              </el-select>
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="ABC 分类">
+              <el-select v-model="form.abc_class" clearable placeholder="未分类" style="width: 100%">
+                <el-option v-for="item in ABC_CLASSES" :key="item.value" :label="item.label" :value="item.value" />
+              </el-select>
+            </el-form-item>
           </el-col>
           <el-col :span="12">
             <el-form-item label="提前期(天)">

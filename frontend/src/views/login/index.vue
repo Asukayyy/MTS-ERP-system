@@ -106,9 +106,7 @@ async function submit(): Promise<void> {
       </div>
 
       <div class="login__footer">
-        <div class="login__links">
-          没有账号？<router-link to="/register">去注册</router-link>
-        </div>
+        <div class="login__links">账号由人事部统一开通</div>
         <div class="login__links">忘记密码请联系系统管理员</div>
       </div>
     </form>

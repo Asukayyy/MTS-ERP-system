@@ -31,6 +31,10 @@ export interface Material {
   unit_code: string
   specification?: string | null
   material_group?: string | null
+  /** 经典 ABC 分类：A 高价值 / B 中等 / C 低值，未分类为 null */
+  abc_class?: string | null
+  /** 销售类别：MACHINE 整机 / SPARE 可单独售卖备件 / INTERNAL 内部件 */
+  sales_category: string
   lead_time_days: number
   safety_stock: Num
   standard_cost: Num
@@ -46,6 +50,8 @@ export interface MaterialPayload {
   unit_code?: string
   specification?: string | null
   material_group?: string | null
+  abc_class?: string | null
+  sales_category?: string
   lead_time_days?: number
   safety_stock?: Num
   standard_cost?: Num
@@ -128,6 +134,8 @@ export interface Personnel {
   id: number
   employee_no: string
   person_name: string
+  gender?: string | null
+  id_card?: string | null
   org_id: number
   position?: string | null
   phone?: string | null
@@ -241,6 +249,8 @@ export interface Product {
   material_type: string
   supply_type?: string | null
   unit_code?: string | null
+  abc_class?: string | null
+  sales_category?: string | null
   lead_time_days?: number | null
   safety_stock?: Num | null
   status: string
@@ -254,10 +264,19 @@ export interface Forecast {
   material_id: number
   material_code?: string | null
   material_name?: string | null
+  material_abc_class?: string | null
+  material_sales_category?: string | null
   forecast_month: string
   forecast_qty: Num
   status: string
   remark?: string | null
+}
+
+/** 销售预测按销售类别汇总 */
+export interface ForecastSummary {
+  sales_category: string
+  forecast_qty: Num
+  count: number
 }
 
 export interface OrderItem {
@@ -274,6 +293,25 @@ export interface OrderItem {
   remark?: string | null
 }
 
+export interface StockAllocationItem {
+  material_id: number
+  material_code?: string | null
+  material_name?: string | null
+  required_qty: Num
+  stock_qty: Num
+  shortage_qty: Num
+}
+
+/** 订单确认时的库存分流结果（仅确认动作返回） */
+export interface StockAllocation {
+  shipment_id?: number | null
+  shipment_no?: string | null
+  stock_qty: Num
+  shortage_qty: Num
+  demand_nos: string[]
+  items: StockAllocationItem[]
+}
+
 export interface Order {
   id: number
   order_no: string
@@ -287,6 +325,7 @@ export interface Order {
   status: string
   remark?: string | null
   items: OrderItem[]
+  allocation?: StockAllocation | null
 }
 
 export interface ShipmentItem {
@@ -359,6 +398,8 @@ export interface Demand {
   source_reference_id?: number | null
   source_no?: string | null
   material_id: number
+  material_code?: string | null
+  material_name?: string | null
   quantity: Num
   due_date: string
   status: string
@@ -369,6 +410,8 @@ export interface MpsItem {
   id: number
   mps_id: number
   material_id: number
+  material_code?: string | null
+  material_name?: string | null
   period_label?: string | null
   planned_qty: Num
   finished_qty: Num
@@ -376,6 +419,8 @@ export interface MpsItem {
   end_date: string
   status: string
   remark?: string | null
+  source_demand_ids?: string | null
+  source_demand_nos?: string | null
 }
 
 export interface Mps {
@@ -395,7 +440,11 @@ export interface MrpResult {
   id: number
   run_id: number
   material_id: number
+  material_code?: string | null
+  material_name?: string | null
   parent_material_id?: number | null
+  parent_material_code?: string | null
+  parent_material_name?: string | null
   bom_level: number
   gross_requirement: Num
   on_hand: Num
@@ -415,6 +464,7 @@ export interface MrpRun {
   id: number
   run_no: string
   mps_id?: number | null
+  mps_no?: string | null
   run_at: string
   status: string
   material_count: number
@@ -482,6 +532,8 @@ export interface ProductionPlan {
   source_type: string
   source_reference_id?: number | null
   material_id: number
+  material_code?: string | null
+  material_name?: string | null
   planned_qty: Num
   completed_qty: Num
   plan_date: string
@@ -497,10 +549,12 @@ export interface DispatchOrder {
   source_type: string
   source_reference_id?: number | null
   plan_id?: number | null
+  plan_no?: string | null
   operation?: string | null
   planned_qty: Num
   completed_qty: Num
   worker_id?: number | null
+  worker_name?: string | null
   planned_start: string
   planned_end: string
   status: string
@@ -511,6 +565,8 @@ export interface RequisitionItem {
   id: number
   requisition_id: number
   material_id: number
+  material_code?: string | null
+  material_name?: string | null
   required_qty: Num
   issued_qty: Num
   remark?: string | null
@@ -522,7 +578,10 @@ export interface Requisition {
   source_type: string
   source_reference_id?: number | null
   plan_id?: number | null
+  plan_no?: string | null
   warehouse_id?: number | null
+  warehouse_code?: string | null
+  warehouse_name?: string | null
   req_date: string
   status: string
   remark?: string | null
@@ -569,12 +628,18 @@ export interface CompletionReport {
   id: number
   report_no: string
   plan_id?: number | null
+  plan_no?: string | null
   dispatch_id?: number | null
+  dispatch_no?: string | null
   material_id: number
+  material_code?: string | null
+  material_name?: string | null
   completed_qty: Num
   qualified_qty: Num
   scrap_qty: Num
   warehouse_id?: number | null
+  warehouse_code?: string | null
+  warehouse_name?: string | null
   report_date?: string | null
   status: string
   remark?: string | null
@@ -615,6 +680,8 @@ export interface Balance {
   material_id: number
   material_code?: string | null
   material_name?: string | null
+  material_abc_class?: string | null
+  material_sales_category?: string | null
   warehouse_id: number
   warehouse_name?: string | null
   on_hand: Num
@@ -622,6 +689,14 @@ export interface Balance {
   available_quantity: Num
   reorder_point?: Num | null
   reorder_quantity?: Num | null
+}
+
+/** 实时库存按销售类别汇总 */
+export interface BalanceSummary {
+  sales_category: string
+  on_hand: Num
+  available_quantity: Num
+  count: number
 }
 
 export interface StockChangeResult {
@@ -854,6 +929,17 @@ export interface SupplierEvaluation {
   evaluator_id?: number | null
   evaluator_name?: string | null
   remark?: string | null
+  /** 自动评价的按时到货率（0~1），手工录入为空 */
+  on_time_rate?: Num | null
+  receipt_total?: number | null
+  receipt_on_time?: number | null
+  /** 自动评价的检验合格率（0~1） */
+  qualified_rate?: Num | null
+  receipt_qty_total?: Num | null
+  receipt_qty_qualified?: Num | null
+  /** 自动评价的价格偏离百分比（正=高于均价） */
+  price_deviation_pct?: Num | null
+  scored_dimensions?: number | null
 }
 
 /** 采购计划执行报表行 */

@@ -12,6 +12,8 @@ export default defineConfig({
     },
   },
   server: {
+    // 同时监听 IPv4/IPv6，避免只绑 localhost(::1) 时通过 127.0.0.1 访问失败
+    host: true,
     port: 5173,
     // 开发环境把 /api 代理到后端，避免跨域配置
     proxy: {

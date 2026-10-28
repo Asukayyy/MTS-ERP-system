@@ -42,6 +42,8 @@ def _material_dict(row: models.SysMaterial) -> Dict[str, Any]:
         "material_type": row.material_type,
         "supply_type": row.supply_type,
         "unit_code": row.unit_code,
+        "abc_class": row.abc_class,
+        "sales_category": row.sales_category,
         "lead_time_days": row.lead_time_days,
         "safety_stock": row.safety_stock,
         "status": row.status,
@@ -82,6 +84,8 @@ def search_materials(
     material_type: Optional[str] = None,
     status: Optional[str] = None,
     keyword: Optional[str] = None,
+    abc_class: Optional[str] = None,
+    sales_category: Optional[str] = None,
     limit: int = 200,
 ) -> List[Dict[str, Any]]:
     """按条件查询物料（Sales 的“销售产品查询”、Procurement 的“采购材料”均走此处）。"""
@@ -90,6 +94,10 @@ def search_materials(
         stmt = stmt.where(models.SysMaterial.material_type == material_type)
     if status:
         stmt = stmt.where(models.SysMaterial.status == status)
+    if abc_class:
+        stmt = stmt.where(models.SysMaterial.abc_class == abc_class)
+    if sales_category:
+        stmt = stmt.where(models.SysMaterial.sales_category == sales_category)
     if keyword:
         like = f"%{keyword}%"
         stmt = stmt.where(
@@ -109,6 +117,30 @@ def get_finished_materials(db: Session, keyword: Optional[str] = None) -> List[D
         status=RecordStatus.ACTIVE.value,
         keyword=keyword,
     )
+
+
+def get_sellable_materials(db: Session, keyword: Optional[str] = None) -> List[Dict[str, Any]]:
+    """取可对外销售的物料：启用的整机（MACHINE）与可售备件（SPARE）。
+
+    备件示例：转椅轮子既可作为整椅的 BOM 子件，也可单独售卖提供更换维修服务。
+    """
+    like = f"%{keyword}%" if keyword else None
+    stmt = (
+        select(models.SysMaterial)
+        .where(
+            models.SysMaterial.status == RecordStatus.ACTIVE.value,
+            models.SysMaterial.sales_category.in_(("MACHINE", "SPARE")),
+        )
+        .order_by(models.SysMaterial.material_code)
+    )
+    if like:
+        stmt = stmt.where(
+            or_(
+                models.SysMaterial.material_code.like(like),
+                models.SysMaterial.material_name.like(like),
+            )
+        )
+    return [_material_dict(row) for row in db.scalars(stmt.limit(200))]
 
 
 # ==================== 人员 / 组织 ====================

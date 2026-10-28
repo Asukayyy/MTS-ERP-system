@@ -637,6 +637,33 @@ def create_evaluation(
     return success(evaluation)
 
 
+@router.post(
+    "/evaluations/auto",
+    response_model=ApiResponse[schemas.EvaluationOut],
+    summary="自动供应商评价",
+)
+def auto_evaluate(
+    payload: schemas.EvaluationAutoCreate, db: Session = Depends(get_db)
+) -> ApiResponse[schemas.EvaluationOut]:
+    """按业务数据自动计算三项得分：
+
+    - 交期得分 = 按时到货率 × 100（到货日期 ≤ 订单预计到货日期）
+    - 质量得分 = 检验合格率 × 100（合格总量 / 到货总量）
+    - 价格得分 = 100 − 相对全部供应商均价的平均偏离百分比（截断 0~100）
+    - 综合得分 = 有数据维度的简单平均；无任何业务数据时报错
+    """
+    evaluation = service.auto_evaluate_supplier(
+        db,
+        supplier_id=payload.supplier_id,
+        evaluate_date=payload.evaluate_date,
+        evaluator_id=payload.evaluator_id,
+        remark=payload.remark,
+        operator_id=payload.operator_id,
+    )
+    db.commit()
+    return success(evaluation)
+
+
 @router.get(
     "/evaluations/supplier/{supplier_id}",
     response_model=ApiResponse[List[schemas.EvaluationOut]],

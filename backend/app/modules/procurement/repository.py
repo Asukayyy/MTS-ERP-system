@@ -14,7 +14,7 @@ from datetime import date
 from decimal import Decimal
 from typing import Dict, List, Optional, Sequence, Tuple
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import case, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.modules.procurement import models
@@ -452,6 +452,92 @@ def add_evaluation(
 
 def delete_evaluation(db: Session, evaluation: models.PurSupplierEvaluation) -> None:
     db.delete(evaluation)
+
+
+# ---- 自动评价统计查询（只 JOIN 本模块 pur_* 表） ----
+
+#: 参与评价的到货单状态（草稿/已取消不计）
+_EVAL_RECEIPT_STATUSES = ("CONFIRMED", "COMPLETED")
+#: 参与价格统计的订单状态（草稿/已取消的价格不具参考性）
+_EVAL_ORDER_STATUSES = ("CONFIRMED", "RELEASED", "IN_PROGRESS", "COMPLETED")
+
+
+def supplier_on_time_stats(db: Session, supplier_id: int) -> Tuple[int, int]:
+    """供应商按时到货统计：返回（有效到货单数, 按时到货单数）。
+
+    按时判定：到货单 `receipt_date` <= 关联采购订单 `expected_date`。
+    """
+    stmt = (
+        select(
+            func.count(models.PurReceipt.id),
+            func.coalesce(
+                func.sum(
+                    case(
+                        (
+                            models.PurReceipt.receipt_date <= models.PurOrder.expected_date,
+                            1,
+                        ),
+                        else_=0,
+                    )
+                ),
+                0,
+            ),
+        )
+        .join(
+            models.PurOrder,
+            models.PurReceipt.purchase_order_id == models.PurOrder.id,
+        )
+        .where(
+            models.PurReceipt.supplier_id == supplier_id,
+            models.PurReceipt.status.in_(_EVAL_RECEIPT_STATUSES),
+        )
+    )
+    total, on_time = db.execute(stmt).one()
+    return int(total or 0), int(on_time or 0)
+
+
+def supplier_quality_sums(db: Session, supplier_id: int) -> Tuple[Decimal, Decimal]:
+    """供应商到货质量汇总：返回（到货总量, 合格总量）。"""
+    stmt = (
+        select(
+            func.coalesce(func.sum(models.PurReceiptItem.quantity), 0),
+            func.coalesce(func.sum(models.PurReceiptItem.qualified_qty), 0),
+        )
+        .join(
+            models.PurReceipt,
+            models.PurReceiptItem.receipt_id == models.PurReceipt.id,
+        )
+        .where(
+            models.PurReceipt.supplier_id == supplier_id,
+            models.PurReceipt.status.in_(_EVAL_RECEIPT_STATUSES),
+        )
+    )
+    total_qty, qualified_qty = db.execute(stmt).one()
+    return Decimal(total_qty or 0), Decimal(qualified_qty or 0)
+
+
+def material_avg_prices(
+    db: Session, supplier_id: Optional[int] = None
+) -> List[Tuple[int, Decimal]]:
+    """按物料汇总订单均价：返回 [(material_id, 平均单价)]。
+
+    不传 `supplier_id` 时统计全部供应商（作为市场价基准）。
+    """
+    stmt = (
+        select(
+            models.PurOrderItem.material_id,
+            func.avg(models.PurOrderItem.unit_price),
+        )
+        .join(
+            models.PurOrder,
+            models.PurOrderItem.order_id == models.PurOrder.id,
+        )
+        .where(models.PurOrder.status.in_(_EVAL_ORDER_STATUSES))
+        .group_by(models.PurOrderItem.material_id)
+    )
+    if supplier_id is not None:
+        stmt = stmt.where(models.PurOrder.supplier_id == supplier_id)
+    return [(row[0], Decimal(row[1])) for row in db.execute(stmt).all()]
 
 
 def evaluation_summary_rows(db: Session) -> List[Tuple]:

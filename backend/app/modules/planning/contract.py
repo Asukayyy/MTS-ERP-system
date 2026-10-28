@@ -27,6 +27,64 @@ from app.modules.planning.service import CODE_CONTRACT_NOT_READY, CODE_NOT_FOUND
 from app.modules.system.contract import get_materials, log_operation
 
 
+def create_sales_demand_from_shortage(
+    db: Session,
+    *,
+    order_id: int,
+    order_no: str,
+    material_id: int,
+    quantity: Decimal,
+    due_date: date,
+    remark: Optional[str] = None,
+    operator_id: Optional[int] = None,
+) -> Dict[str, Any]:
+    """销售订单确认时库存不足，把缺口登记为 `source_type=SALES` 的计划需求。
+
+    - 去重键 = 来源订单 + 物料：同一订单同一物料只保留一条缺口需求，重复受理幂等；
+    - 需求直接置 `CONFIRMED`（订单已确认，缺口是确定需求），可立即进入 MPS 汇总；
+    - **不提交事务**，由调用方（Sales）提交，保证订单状态与需求同时生效。
+    """
+    existing = repository.find_demand_by_source_material(
+        db, "SALES", order_id, order_no, material_id
+    )
+    if existing:
+        return {
+            "demand_id": existing.id,
+            "demand_no": existing.demand_no,
+            "created": False,
+        }
+    demand = service.create_demand(
+        db,
+        source_type="SALES",
+        material_id=material_id,
+        quantity=quantity,
+        due_date=due_date,
+        source_reference_id=order_id,
+        source_no=order_no,
+        remark=remark or f"销售订单 {order_no} 库存不足缺口",
+        operator_id=operator_id,
+    )
+    service.set_demand_status(db, demand.id, "CONFIRMED", operator_id)
+    return {"demand_id": demand.id, "demand_no": demand.demand_no, "created": True}
+
+
+def cancel_sales_demands_for_order(
+    db: Session, order_id: int, operator_id: Optional[int] = None
+) -> Dict[str, Any]:
+    """销售订单取消时回收其缺口需求。
+
+    只取消尚未进入 MPS 的 `DRAFT` / `CONFIRMED` 需求；已 `RELEASED`
+    （已被 MPS 汇总引用）的需求保留，避免破坏已下达的主生产计划。
+    **不提交事务**，由 Sales 与订单状态变更一同提交。
+    """
+    demands = repository.list_open_sales_demands_by_order(db, order_id)
+    cancelled: List[str] = []
+    for demand in demands:
+        service.set_demand_status(db, demand.id, "CANCELLED", operator_id)
+        cancelled.append(demand.demand_no)
+    return {"cancelled_count": len(cancelled), "demand_nos": cancelled}
+
+
 def create_production_plan_from_replenishment(db: Session, request_id: int) -> Dict[str, Any]:
     """受理 Inventory 的生产补库需求：生成正式生产作业计划并返回其引用。
 

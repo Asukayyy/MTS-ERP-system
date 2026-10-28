@@ -22,17 +22,22 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 from sqlalchemy.orm import Session
 
 from app.common.exceptions import BusinessException
-from app.modules.inventory.contract import decrease_stock, increase_stock
+from app.modules.inventory.contract import (
+    decrease_stock,
+    get_available_by_warehouse,
+    increase_stock,
+)
 from app.modules.sales import models, repository
 from app.modules.system.contract import (
-    get_finished_materials,
+    get_sellable_materials,
     get_material,
     get_materials,
     get_personnel_name,
     get_personnel_names,
     log_operation,
+    search_materials,
 )
-from app.shared.enums import MaterialType, RecordStatus
+from app.shared.enums import RecordStatus
 
 # ==================== 错误码（2000~2999） ====================
 
@@ -45,6 +50,7 @@ CODE_NOT_FOUND = 2005  # 资源不存在
 CODE_STATUS_INVALID = 2006  # 单据状态不允许该操作
 CODE_RETURN_QTY_EXCEED = 2007  # 退货数量超过可退数量（已发 - 已退）
 CODE_REFERENCED = 2008  # 资源已被业务单据引用，不可删除
+CODE_CONTRACT_NOT_READY = 2009  # 跨模块契约尚未就绪（库存 / 计划）
 
 MODULE = "sales"
 
@@ -101,11 +107,11 @@ def _current_month_range(today: Optional[date] = None) -> Tuple[date, date]:
     return first_day, (first_day + timedelta(days=32)).replace(day=1)
 
 
-def _is_finished_active(material: Dict[str, Any]) -> bool:
-    """判定物料是否可销售的成品（FINISHED + ACTIVE）。"""
+def _is_sellable_active(material: Dict[str, Any]) -> bool:
+    """判定物料是否可对外销售：启用，且销售类别为整机（MACHINE）或可售备件（SPARE）。"""
     return (
-        material.get("material_type") == MaterialType.FINISHED.value
-        and material.get("status") == RecordStatus.ACTIVE.value
+        material.get("status") == RecordStatus.ACTIVE.value
+        and material.get("sales_category") in ("MACHINE", "SPARE")
     )
 
 
@@ -210,6 +216,8 @@ def _material_fields(material: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     return {
         "material_code": material.get("material_code"),
         "material_name": material.get("material_name"),
+        "material_abc_class": material.get("abc_class"),
+        "material_sales_category": material.get("sales_category"),
     }
 
 
@@ -502,8 +510,8 @@ def delete_customer(
 
 
 def list_products(db: Session, keyword: Optional[str] = None) -> List[Dict[str, Any]]:
-    """可销售成品：直接读取 `system.contract`，不建销售产品表。"""
-    return get_finished_materials(db, keyword)
+    """可销售物料：整机（MACHINE）与可单独售卖备件（SPARE），不建销售产品表。"""
+    return get_sellable_materials(db, keyword)
 
 
 # ==================== 销售预测 ====================
@@ -516,9 +524,12 @@ def list_forecasts(
     material_id: Optional[int] = None,
     status: Optional[str] = None,
     forecast_month: Optional[str] = None,
+    sales_category: Optional[str] = None,
+    abc_class: Optional[str] = None,
 ) -> Tuple[List[Dict[str, Any]], int]:
+    material_ids = _filter_material_ids(db, sales_category, abc_class)
     rows, total = repository.list_forecasts(
-        db, page, page_size, material_id, status, forecast_month
+        db, page, page_size, material_id, status, forecast_month, material_ids
     )
     materials = _material_map(db, [r.material_id for r in rows])
     customers = {
@@ -527,6 +538,51 @@ def list_forecasts(
     }
     items = [_forecast_dict(row, materials, customers.get(row.customer_id)) for row in rows]
     return items, total
+
+
+def _filter_material_ids(
+    db: Session, sales_category: Optional[str], abc_class: Optional[str]
+) -> Optional[List[int]]:
+    """按销售类别 / ABC 分类收敛物料范围；两个条件都为空时返回 None（不过滤）。"""
+    if not sales_category and not abc_class:
+        return None
+    rows = search_materials(
+        db,
+        abc_class=abc_class,
+        sales_category=sales_category,
+        limit=5000,
+    )
+    return [int(row["id"]) for row in rows]
+
+
+def forecast_summary(
+    db: Session,
+    *,
+    material_id: Optional[int] = None,
+    status: Optional[str] = None,
+    forecast_month: Optional[str] = None,
+    sales_category: Optional[str] = None,
+    abc_class: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """按销售类别汇总预测数量：整机与可售备件分开统计，互不混算。"""
+    material_ids = _filter_material_ids(db, sales_category, abc_class)
+    rows = repository.forecast_rows(
+        db,
+        material_id=material_id,
+        status=status,
+        forecast_month=forecast_month,
+        material_ids=material_ids,
+    )
+    materials = _material_map(db, [row.material_id for row in rows])
+    buckets: Dict[str, Dict[str, Any]] = {}
+    for row in rows:
+        category = materials.get(row.material_id, {}).get("sales_category") or "INTERNAL"
+        bucket = buckets.setdefault(
+            category, {"sales_category": category, "forecast_qty": Decimal("0"), "count": 0}
+        )
+        bucket["forecast_qty"] += _as_decimal(row.forecast_qty)
+        bucket["count"] += 1
+    return list(buckets.values())
 
 
 def get_forecast(db: Session, forecast_id: int) -> Dict[str, Any]:
@@ -887,13 +943,161 @@ def _validate_order_confirm(db: Session, order: models.SalOrder) -> None:
         material = get_material(db, item.material_id)
         if not material:
             raise BusinessException(CODE_PARAM_INVALID, f"订单行物料不存在：{item.material_id}")
-        if not _is_finished_active(material):
+        if not _is_sellable_active(material):
             raise BusinessException(
                 CODE_PARAM_INVALID,
-                f"物料 {material.get('material_code')} 不是启用的成品，不能确认订单",
+                f"物料 {material.get('material_code')} 不是可销售的整机或备件，不能确认订单",
             )
         if _as_decimal(item.quantity) <= 0:
             raise BusinessException(CODE_PARAM_INVALID, "订单行数量必须为正数")
+
+
+def _settle_order_from_stock(
+    db: Session, order: models.SalOrder, operator_id: Optional[int] = None
+) -> Dict[str, Any]:
+    """订单确认后按可用库存分流：够的部分生成发货草稿，缺口登记为计划需求。
+
+    - 可用量口径：`现存量 - 锁定量`；安全库存**不参与扣减**，只作为补货触发线；
+    - 跨仓库按可用量从大到小分配，同一订单行可拆成多条仓库发货明细；
+    - 缺口按物料汇总，经 `planning.contract` 登记为 `SALES` 需求（直接 CONFIRMED）；
+    - **不提交事务**，与订单状态变更同一事务，任一步失败整单回滚。
+    """
+    try:
+        from app.modules.planning import contract as planning_contract  # type: ignore
+    except Exception as exc:  # noqa: BLE001 - 契约尚未就绪
+        raise BusinessException(CODE_CONTRACT_NOT_READY, "计划接口尚未就绪") from exc
+
+    items = repository.get_order_items(db, order.id)
+    # 其他草稿发货单已占用的库存要先扣掉（发货确认前不会真正扣减结存）
+    reserved = repository.draft_shipment_allocations(db)
+    # 同一物料可能出现在多行，库存池必须按物料共享，否则会重复分配同一批库存
+    pools: Dict[int, List[Dict[str, Any]]] = {}
+    shipment_lines: List[Dict[str, Any]] = []
+    required: Dict[int, Decimal] = {}
+    allocated: Dict[int, Decimal] = {}
+    for item in items:
+        remaining = _as_decimal(item.quantity) - _as_decimal(item.delivered_qty)
+        if remaining <= 0:
+            continue
+        material_id = item.material_id
+        required[material_id] = required.get(material_id, Decimal("0")) + remaining
+        pool = pools.get(material_id)
+        if pool is None:
+            pool = []
+            for row in get_available_by_warehouse(db, material_id):
+                warehouse_id = int(row["warehouse_id"])
+                free = _as_decimal(row["available"]) - reserved.get(
+                    (warehouse_id, material_id), Decimal("0")
+                )
+                if free > 0:
+                    pool.append({"warehouse_id": warehouse_id, "available": free})
+            pools[material_id] = pool
+        need = remaining
+        for bucket in pool:
+            if need <= 0:
+                break
+            take = min(bucket["available"], need)
+            if take <= 0:
+                continue
+            bucket["available"] -= take
+            need -= take
+            shipment_lines.append(
+                {
+                    "order_item_id": item.id,
+                    "warehouse_id": bucket["warehouse_id"],
+                    "quantity": take,
+                    "remark": "订单确认时按可用库存自动分配",
+                }
+            )
+            allocated[material_id] = allocated.get(material_id, Decimal("0")) + take
+
+    shipment_id: Optional[int] = None
+    shipment_no: Optional[str] = None
+    if shipment_lines:
+        shipment = create_shipment(
+            db,
+            order_id=order.id,
+            shipment_date=order.delivery_date,
+            items=shipment_lines,
+            remark=f"订单 {order.order_no} 确认时按可用库存自动生成",
+            operator_id=operator_id,
+        )
+        shipment_id = shipment.get("id")
+        shipment_no = shipment.get("shipment_no")
+
+    materials = _material_map(db, list(required.keys()))
+    summary_items: List[Dict[str, Any]] = []
+    demand_nos: List[str] = []
+    stock_total = Decimal("0")
+    shortage_total = Decimal("0")
+    for material_id, need_qty in required.items():
+        got = allocated.get(material_id, Decimal("0"))
+        shortage = need_qty - got
+        material = materials.get(material_id, {})
+        summary_items.append(
+            {
+                "material_id": material_id,
+                "material_code": material.get("material_code"),
+                "material_name": material.get("material_name"),
+                "required_qty": need_qty,
+                "stock_qty": got,
+                "shortage_qty": shortage if shortage > 0 else Decimal("0"),
+            }
+        )
+        stock_total += got
+        if shortage > 0:
+            result = planning_contract.create_sales_demand_from_shortage(
+                db,
+                order_id=order.id,
+                order_no=order.order_no,
+                material_id=material_id,
+                quantity=shortage,
+                due_date=order.delivery_date,
+                operator_id=operator_id,
+            )
+            demand_nos.append(result["demand_no"])
+            shortage_total += shortage
+
+    log_operation(
+        db,
+        module=MODULE,
+        action="STOCK_ALLOCATE",
+        target_type="sal_order",
+        target_id=order.id,
+        operator_id=operator_id,
+        detail=(
+            f"销售订单 {order.order_no} 确认后库存分流：库存发货 {stock_total}"
+            f"（发货单 {shipment_no or '无'}），缺口转计划 {shortage_total}"
+            f"（需求 {'、'.join(demand_nos) or '无'}）"
+        ),
+    )
+    return {
+        "shipment_id": shipment_id,
+        "shipment_no": shipment_no,
+        "stock_qty": stock_total,
+        "shortage_qty": shortage_total,
+        "demand_nos": demand_nos,
+        "items": summary_items,
+    }
+
+
+def _release_order_allocation(
+    db: Session, order: models.SalOrder, operator_id: Optional[int] = None
+) -> None:
+    """订单取消时回收库存分流结果：取消自动发货草稿 + 取消未进入 MPS 的缺口需求。
+
+    已确认（出货完成）的发货单不回收，已 `RELEASED` 的需求留在计划侧。
+    **不提交事务**。
+    """
+    shipments, _ = repository.list_shipments(db, page=1, page_size=200, order_id=order.id)
+    for shipment in shipments:
+        if shipment.status == "DRAFT":
+            cancel_shipment(db, shipment.id, operator_id)
+    try:
+        from app.modules.planning import contract as planning_contract  # type: ignore
+    except Exception:  # noqa: BLE001 - 计划模块未就绪时跳过需求回收
+        return
+    planning_contract.cancel_sales_demands_for_order(db, order.id, operator_id)
 
 
 def set_order_status(
@@ -912,6 +1116,11 @@ def set_order_status(
         _validate_order_confirm(db, order)
     order.status = status
     order.updated_by = operator_id
+    db.flush()
+    # 订单确认后立即按可用库存分流：够的生成发货草稿，缺口转计划需求
+    allocation = _settle_order_from_stock(db, order, operator_id) if status == "CONFIRMED" else None
+    if status == "CANCELLED":
+        _release_order_allocation(db, order, operator_id)
     log_operation(
         db,
         module=MODULE,
@@ -921,7 +1130,10 @@ def set_order_status(
         operator_id=operator_id,
         detail=f"销售订单 {order.order_no} 状态改为 {status}",
     )
-    return _order_view(db, order)
+    view = _order_view(db, order)
+    if allocation is not None:
+        view["allocation"] = allocation
+    return view
 
 
 # ==================== 销售发货 ====================

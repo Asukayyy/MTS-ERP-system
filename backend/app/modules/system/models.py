@@ -85,6 +85,12 @@ class SysPersonnel(Base, AuditMixin):
     id: Mapped[BigIntPk]
     employee_no: Mapped[CodeStr] = mapped_column(unique=True, comment="员工工号")
     person_name: Mapped[NameStr] = mapped_column(comment="姓名")
+    gender: Mapped[Optional[str]] = mapped_column(
+        String(10), nullable=True, comment="性别 MALE/FEMALE"
+    )
+    id_card: Mapped[Optional[str]] = mapped_column(
+        String(18), nullable=True, unique=True, comment="身份证号"
+    )
     org_id: Mapped[BigIntFk] = mapped_column(
         ForeignKey("sys_organization.id", ondelete="RESTRICT"), nullable=False, index=True, comment="所属组织ID"
     )
@@ -300,6 +306,16 @@ class SysMaterial(Base, AuditMixin):
     unit_code: Mapped[str] = mapped_column(String(20), nullable=False, default="PCS", comment="计量单位")
     specification: Mapped[Optional[str]] = mapped_column(String(200), nullable=True, comment="规格型号")
     material_group: Mapped[Optional[str]] = mapped_column(String(50), nullable=True, comment="物料分组")
+    abc_class: Mapped[Optional[str]] = mapped_column(
+        String(1), nullable=True, comment="ABC 分类（经典 ABC：A 高价值/B 中等/C 低值）"
+    )
+    sales_category: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default="INTERNAL",
+        index=True,
+        comment="销售类别 MACHINE 整机 / SPARE 可单独售卖备件 / INTERNAL 内部件",
+    )
     lead_time_days: Mapped[int] = mapped_column(Integer, nullable=False, default=0, comment="提前期（天）")
     safety_stock: Mapped[Decimal] = mapped_column(
         Numeric(18, 4), nullable=False, default=0, comment="安全库存"
@@ -317,6 +333,13 @@ class SysMaterial(Base, AuditMixin):
             "material_type IN ('RAW','PURCHASED','SEMI','FINISHED')", name="ck_sys_material_type"
         ),
         CheckConstraint("supply_type IN ('MAKE','BUY')", name="ck_sys_material_supply_type"),
+        CheckConstraint(
+            "abc_class IS NULL OR abc_class IN ('A','B','C')", name="ck_sys_material_abc_class"
+        ),
+        CheckConstraint(
+            "sales_category IN ('MACHINE','SPARE','INTERNAL')",
+            name="ck_sys_material_sales_category",
+        ),
         CheckConstraint("status IN ('ACTIVE','INACTIVE')", name="ck_sys_material_status"),
         CheckConstraint("safety_stock >= 0", name="ck_sys_material_safety_stock"),
         CheckConstraint("lead_time_days >= 0", name="ck_sys_material_lead_time"),

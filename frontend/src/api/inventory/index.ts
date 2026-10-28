@@ -2,6 +2,7 @@ import { get, patch, post, put } from '@/utils/request'
 import type { PageData } from '@/types/api'
 import type {
   Balance,
+  BalanceSummary,
   InitialStockConfirm,
   InitialStockPreview,
   InventoryStats,
@@ -42,6 +43,13 @@ export function setWarehouseStatus(id: number, status: string): Promise<Warehous
 
 export function listBalances(params: Record<string, unknown> = {}): Promise<PageData<Balance>> {
   return get<PageData<Balance>>('/inventory/balances', params)
+}
+
+/** 实时库存按销售类别（整机 / 可售备件 / 内部件）汇总 */
+export function getBalanceSummary(
+  params: Record<string, unknown> = {},
+): Promise<BalanceSummary[]> {
+  return get<BalanceSummary[]>('/inventory/balances/summary', params)
 }
 
 // ---------------- 实时库存 ----------------
