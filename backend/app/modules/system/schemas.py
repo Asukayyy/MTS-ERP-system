@@ -441,7 +441,7 @@ class UserCreate(BaseModel):
     """
 
     username: str = Field(max_length=50, description="登录名（唯一）")
-    password: str = Field(min_length=6, max_length=64, description="明文密码（服务端 sha256 后入库）")
+    password: str = Field(min_length=6, max_length=64, description="明文密码（服务端 PBKDF2 哈希后入库）")
     display_name: str = Field(max_length=100, description="显示名")
     personnel_id: Optional[int] = Field(default=None, description="关联员工ID（可为空，1:1）")
     org_id: Optional[int] = Field(default=None, description="所属组织/部门ID（未关联员工时用于新建档案）")
@@ -455,7 +455,9 @@ class UserUpdate(BaseModel):
     """用户账号修改入参。"""
 
     display_name: Optional[str] = Field(default=None, max_length=100)
-    password: Optional[str] = Field(default=None, description="新密码，留空不改")
+    password: Optional[str] = Field(
+        default=None, min_length=6, max_length=64, description="新密码，留空不改"
+    )
     personnel_id: Optional[int] = None
     status: Optional[str] = None
     remark: Optional[str] = None
