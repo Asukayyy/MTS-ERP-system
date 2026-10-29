@@ -9,6 +9,7 @@ import {
   deleteEvaluation,
   listEvaluations,
   listSuppliers,
+  supplierOptionLabel,
 } from '@/api/procurement'
 import { listPersonnel } from '@/api/system'
 import RemoteSelect from '@/components/common/RemoteSelect.vue'
@@ -23,7 +24,7 @@ const { loading, rows, total, page, pageSize, query, load, search, reset, change
 
 async function loadSupplierOptions(keyword: string): Promise<RemoteOption[]> {
   const data = await listSuppliers({ keyword, status: 'ACTIVE', page: 1, page_size: 50 })
-  return data.items.map((item) => ({ id: item.id, label: `${item.supplier_code} ${item.supplier_name}` }))
+  return data.items.map((item) => ({ id: item.id, label: supplierOptionLabel(item) }))
 }
 
 async function loadEvaluatorOptions(keyword: string): Promise<RemoteOption[]> {

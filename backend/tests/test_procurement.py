@@ -580,6 +580,25 @@ def test_auto_evaluation_without_business_data_rejected(db: Session) -> None:
     db.rollback()
 
 
+def test_list_suppliers_includes_avg_total_score(db: Session) -> None:
+    """供应商列表需透出评价平均综合得分，供前端下拉展示；无评价的供应商为空。"""
+    rated = _create_supplier(db, name="有评价供应商")
+    unrated = _create_supplier(db, name="无评价供应商")
+    service.create_evaluation(
+        db,
+        supplier_id=rated["id"],
+        quality_score=Decimal("90"),
+        delivery_score=Decimal("80"),
+        price_score=Decimal("70"),
+    )
+    db.commit()
+
+    rows, _ = service.list_suppliers(db, page=1, page_size=200, keyword=None, status="ACTIVE")
+    by_id = {int(r["id"]): r for r in rows}
+    assert Decimal(by_id[rated["id"]]["avg_total_score"]) == Decimal("80")
+    assert by_id[unrated["id"]]["avg_total_score"] is None
+
+
 def test_auto_evaluation_api(client: TestClient, db: Session) -> None:
     """自动评价接口：POST /evaluations/auto 返回三项得分与计算依据。"""
     material_id = _create_material(db)

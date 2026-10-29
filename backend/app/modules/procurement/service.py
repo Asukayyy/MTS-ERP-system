@@ -183,7 +183,9 @@ def _require_evaluation(db: Session, evaluation_id: int) -> models.PurSupplierEv
 # ==================== 出参拼装 ====================
 
 
-def _supplier_dict(row: models.PurSupplier) -> Dict[str, Any]:
+def _supplier_dict(
+    row: models.PurSupplier, avg_total_score: Optional[Decimal] = None
+) -> Dict[str, Any]:
     return {
         "id": row.id,
         "supplier_code": row.supplier_code,
@@ -194,6 +196,18 @@ def _supplier_dict(row: models.PurSupplier) -> Dict[str, Any]:
         "address": row.address,
         "status": row.status,
         "remark": row.remark,
+        "avg_total_score": (
+            _as_decimal(avg_total_score) if avg_total_score is not None else None
+        ),
+    }
+
+
+def _supplier_score_map(db: Session) -> Dict[int, Decimal]:
+    """供应商 ID → 平均综合评分；没有评价记录的供应商不在 map 内。"""
+    return {
+        int(row[0]): _as_decimal(row[2])
+        for row in repository.evaluation_summary_rows(db)
+        if row[2] is not None
     }
 
 
@@ -382,7 +396,8 @@ def list_suppliers(
     status: Optional[str] = None,
 ) -> Tuple[List[Dict[str, Any]], int]:
     rows, total = repository.list_suppliers(db, page, page_size, keyword, status)
-    return [_supplier_dict(row) for row in rows], total
+    scores = _supplier_score_map(db)
+    return [_supplier_dict(row, scores.get(int(row.id))) for row in rows], total
 
 
 def get_supplier(db: Session, supplier_id: int) -> Dict[str, Any]:
