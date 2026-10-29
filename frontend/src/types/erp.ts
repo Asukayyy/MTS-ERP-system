@@ -691,6 +691,8 @@ export interface Balance {
   on_hand: Num
   locked_quantity: Num
   available_quantity: Num
+  /** 废品仓等不计入可用量的仓库为 false */
+  is_available_warehouse?: boolean
   safety_stock?: Num
   reorder_point?: Num | null
   reorder_quantity?: Num | null

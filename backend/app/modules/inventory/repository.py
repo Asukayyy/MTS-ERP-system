@@ -9,10 +9,29 @@ from datetime import date
 from decimal import Decimal
 from typing import Dict, List, Optional, Sequence, Tuple
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import case, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.modules.inventory import models
+
+# 不计入可用量的仓库编码：废品仓内的物资已报废，仅作资产登记，
+# 不参与可用量、安全库存判断与补库建议（现存量仍然照实记录）。
+NON_AVAILABLE_WAREHOUSE_CODES: Tuple[str, ...] = ("WH-SCRAP-01",)
+
+
+def _non_available_warehouse_ids():
+    """废品仓等不计入可用量的仓库 ID 子查询。"""
+    return select(models.InvWarehouse.id).where(
+        models.InvWarehouse.warehouse_code.in_(NON_AVAILABLE_WAREHOUSE_CODES)
+    )
+
+
+def _available_expr():
+    """可用量表达式：废品仓一律记 0（物资已报废，不能用于生产/销售）。"""
+    return case(
+        (models.InvBalance.warehouse_id.in_(_non_available_warehouse_ids()), 0),
+        else_=models.InvBalance.quantity - models.InvBalance.locked_quantity,
+    )
 
 
 # ==================== 通用工具 ====================
@@ -194,7 +213,8 @@ def sum_available(
     """某物料的可用量合计（现存量 - 锁定量，可选限制仓库）。"""
     expr = models.InvBalance.quantity - models.InvBalance.locked_quantity
     stmt = select(func.coalesce(func.sum(expr), 0)).where(
-        models.InvBalance.material_id == material_id
+        models.InvBalance.material_id == material_id,
+        models.InvBalance.warehouse_id.notin_(_non_available_warehouse_ids()),
     )
     if warehouse_id is not None:
         stmt = stmt.where(models.InvBalance.warehouse_id == warehouse_id)
@@ -216,6 +236,7 @@ def list_available_by_warehouse(db: Session, material_id: int) -> List[Tuple]:
         .where(
             models.InvBalance.material_id == material_id,
             available_expr > 0,
+            models.InvBalance.warehouse_id.notin_(_non_available_warehouse_ids()),
         )
         .order_by(available_expr.desc(), models.InvBalance.warehouse_id)
     )
@@ -229,7 +250,7 @@ def stock_snapshot(
     ids = [int(i) for i in material_ids]
     if not ids:
         return {}
-    available_expr = models.InvBalance.quantity - models.InvBalance.locked_quantity
+    available_expr = _available_expr()
     stmt = (
         select(
             models.InvBalance.material_id,
@@ -253,8 +274,8 @@ def stock_snapshot(
 def aggregate_by_material(
     db: Session, warehouse_id: Optional[int] = None
 ) -> List[Tuple[int, Decimal, Decimal]]:
-    """按物料汇总现存量/可用量，供库存报表使用。"""
-    available_expr = models.InvBalance.quantity - models.InvBalance.locked_quantity
+    """按物料汇总现存量/可用量，供库存报表使用（废品仓计入现存量、不计入可用量）。"""
+    available_expr = _available_expr()
     stmt = (
         select(
             models.InvBalance.material_id,
