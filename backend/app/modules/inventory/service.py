@@ -29,6 +29,7 @@ from app.modules.system.contract import (
     get_material,
     get_materials,
     log_operation,
+    search_materials,
 )
 
 # ==================== 错误码（5000~5999） ====================
@@ -88,6 +89,12 @@ def _validate_source_type(source_type: str) -> None:
         raise BusinessException(CODE_PARAM_INVALID, f"非法的来源业务类型：{source_type}")
 
 
+def _require_integer_qty(qty: Decimal, field: str) -> None:
+    """库存数量一律按整数管理（件/个/台），拒绝小数输入。"""
+    if qty != qty.to_integral_value():
+        raise BusinessException(CODE_PARAM_INVALID, f"{field}必须为整数，收到：{qty}")
+
+
 def _material_map(db: Session, material_ids: Sequence[int]) -> Dict[int, Dict[str, Any]]:
     return get_materials(db, [int(i) for i in material_ids if i])
 
@@ -98,6 +105,19 @@ def _warehouse_name_map(db: Session, warehouse_ids: Sequence[int]) -> Dict[int, 
         warehouse = repository.get_warehouse(db, wid)
         if warehouse:
             result[wid] = warehouse.warehouse_name
+    return result
+
+
+def _warehouse_map(db: Session, warehouse_ids: Sequence[int]) -> Dict[int, Dict[str, Any]]:
+    """仓库 ID → {warehouse_code, warehouse_name}，用于出参展示编码与名称。"""
+    result: Dict[int, Dict[str, Any]] = {}
+    for wid in {int(i) for i in warehouse_ids if i}:
+        warehouse = repository.get_warehouse(db, wid)
+        if warehouse:
+            result[wid] = {
+                "warehouse_code": warehouse.warehouse_code,
+                "warehouse_name": warehouse.warehouse_name,
+            }
     return result
 
 
@@ -141,6 +161,7 @@ def _validate_stock_args(
     qty = _as_decimal(quantity)
     if qty <= 0:
         raise BusinessException(CODE_PARAM_INVALID, "库存变动数量必须为正数")
+    _require_integer_qty(qty, "库存变动数量")
     if not source_module:
         raise BusinessException(CODE_PARAM_INVALID, "来源模块不能为空")
     _validate_source_type(source_type)
@@ -533,10 +554,11 @@ def list_balances(
         has_reorder_point=has_reorder_point,
     )
     materials = _material_map(db, [r.material_id for r in rows])
-    warehouses = _warehouse_name_map(db, [r.warehouse_id for r in rows])
+    warehouses = _warehouse_map(db, [r.warehouse_id for r in rows])
     items = []
     for row in rows:
         material = materials.get(row.material_id, {})
+        warehouse = warehouses.get(row.warehouse_id, {})
         items.append(
             {
                 "id": row.id,
@@ -546,7 +568,9 @@ def list_balances(
                 "material_abc_class": material.get("abc_class"),
                 "material_sales_category": material.get("sales_category"),
                 "warehouse_id": row.warehouse_id,
-                "warehouse_name": warehouses.get(row.warehouse_id),
+                "warehouse_code": warehouse.get("warehouse_code"),
+                "warehouse_name": warehouse.get("warehouse_name"),
+                "safety_stock": _as_decimal(material.get("safety_stock")),
                 "reorder_point": row.reorder_point,
                 "reorder_quantity": row.reorder_quantity,
                 **_balance_dict(row),
@@ -698,6 +722,7 @@ def create_stock_operation(
             qty = _as_decimal(raw.get("quantity"))
             if qty <= 0:
                 raise BusinessException(CODE_PARAM_INVALID, "移库数量必须为正数")
+            _require_integer_qty(qty, "移库数量")
             repository.add_operation_item(
                 db,
                 models.InvStockOperationItem(
@@ -711,6 +736,7 @@ def create_stock_operation(
             actual = _as_decimal(raw.get("actual_qty"))
             if actual < 0:
                 raise BusinessException(CODE_PARAM_INVALID, "实盘数量不能为负数")
+            _require_integer_qty(actual, "实盘数量")
             book_value = raw.get("book_qty")
             if book_value is None:
                 balance = repository.get_balance(db, warehouse.id, raw["material_id"])
@@ -907,6 +933,8 @@ def list_reorder_suggestions(db: Session) -> List[Dict[str, Any]]:
     """
     suggestions: List[Dict[str, Any]] = []
     balances = list(db.scalars(select(models.InvBalance).order_by(models.InvBalance.id)))
+    materials = _material_map(db, [b.material_id for b in balances])
+    warehouses = _warehouse_map(db, [b.warehouse_id for b in balances])
     for balance in balances:
         if balance.reorder_point is None:
             continue
@@ -917,11 +945,17 @@ def list_reorder_suggestions(db: Session) -> List[Dict[str, Any]]:
         if current >= point:
             continue
         suggested = _as_decimal(balance.reorder_quantity) if balance.reorder_quantity is not None else Decimal("0")
+        material = materials.get(balance.material_id, {})
+        warehouse = warehouses.get(balance.warehouse_id, {})
         suggestions.append(
             {
                 "balance_id": balance.id,
                 "material_id": balance.material_id,
+                "material_code": material.get("material_code"),
+                "material_name": material.get("material_name"),
                 "warehouse_id": balance.warehouse_id,
+                "warehouse_code": warehouse.get("warehouse_code"),
+                "warehouse_name": warehouse.get("warehouse_name"),
                 "reorder_point": point,
                 "current_qty": current,
                 "suggested_qty": suggested,
@@ -1211,6 +1245,208 @@ def low_stock_report(db: Session) -> List[Dict[str, Any]]:
             row["shortage_qty"] = row["safety_stock"] - row["available_quantity"]
             report.append(row)
     return report
+
+
+def _suggestion_warehouse(
+    db: Session, material_id: int
+) -> Optional[models.InvWarehouse]:
+    """补库建议的目标仓库：优先取该物料存量最大的仓库，否则取第一个启用的仓库。"""
+    balance = db.scalars(
+        select(models.InvBalance)
+        .where(models.InvBalance.material_id == material_id)
+        .order_by(models.InvBalance.quantity.desc(), models.InvBalance.id)
+        .limit(1)
+    ).first()
+    if balance is not None:
+        return repository.get_warehouse(db, balance.warehouse_id)
+    return db.scalars(
+        select(models.InvWarehouse)
+        .where(models.InvWarehouse.status == "ACTIVE")
+        .order_by(models.InvWarehouse.id)
+        .limit(1)
+    ).first()
+
+
+def safety_stock_suggestions(db: Session) -> List[Dict[str, Any]]:
+    """按安全库存给出补库建议（替代原订货点口径）。
+
+    口径：物料级可用量（各仓库合计，无结存视为 0）低于物料主数据 `safety_stock`
+    时给出建议，建议量 = safety_stock − 可用量；目标仓库取该物料存量最大的仓库，
+    没有任何结存时取第一个启用仓库。
+    补库方式按 supply_type 区分：BUY → REORDER（转采购），MAKE → PRODUCTION（转生产计划）。
+    """
+    materials = search_materials(db, status="ACTIVE")
+    available_map = {
+        material_id: available
+        for material_id, _, available in repository.aggregate_by_material(db)
+    }
+    suggestions: List[Dict[str, Any]] = []
+    for material in materials:
+        safety = _as_decimal(material.get("safety_stock"))
+        if safety <= 0:
+            continue
+        available = _as_decimal(available_map.get(material["id"]))
+        if available >= safety:
+            continue
+        warehouse = _suggestion_warehouse(db, material["id"])
+        if warehouse is None:
+            continue
+        supply_type = material.get("supply_type") or "BUY"
+        suggestions.append(
+            {
+                "material_id": material["id"],
+                "material_code": material.get("material_code"),
+                "material_name": material.get("material_name"),
+                "supply_type": supply_type,
+                "source_type": "REORDER" if supply_type == "BUY" else "PRODUCTION",
+                "warehouse_id": warehouse.id,
+                "warehouse_code": warehouse.warehouse_code,
+                "warehouse_name": warehouse.warehouse_name,
+                "available_quantity": available,
+                "safety_stock": safety,
+                "suggested_qty": safety - available,
+            }
+        )
+    return suggestions
+
+
+def generate_from_safety_stock(
+    db: Session, operator_id: Optional[int] = None
+) -> Dict[str, Any]:
+    """按安全库存建议批量生成 DRAFT 补库需求（已有在途需求的物料+仓库跳过）。"""
+    created_ids: List[int] = []
+    skipped = 0
+    for suggestion in safety_stock_suggestions(db):
+        pending = repository.count_where(
+            db,
+            models.InvReplenishmentRequest,
+            models.InvReplenishmentRequest.material_id == suggestion["material_id"],
+            models.InvReplenishmentRequest.warehouse_id == suggestion["warehouse_id"],
+            models.InvReplenishmentRequest.status.in_(
+                ["DRAFT", "CONFIRMED", "RELEASED"]
+            ),
+        )
+        if pending:
+            skipped += 1
+            continue
+        result = create_replenishment_request(
+            db,
+            material_id=suggestion["material_id"],
+            warehouse_id=suggestion["warehouse_id"],
+            request_qty=suggestion["suggested_qty"],
+            required_date=date.today(),
+            source_type=suggestion["source_type"],
+            current_qty=suggestion["available_quantity"],
+            target_qty=suggestion["safety_stock"],
+            remark="安全库存自动生成",
+            operator_id=operator_id,
+        )
+        created_ids.append(result["id"])
+    return {
+        "created_count": len(created_ids),
+        "request_ids": created_ids,
+        "skipped_count": skipped,
+    }
+
+
+def stocktake_summary(
+    db: Session,
+    date_from: Optional[date] = None,
+    date_to: Optional[date] = None,
+    warehouse_id: Optional[int] = None,
+) -> Dict[str, Any]:
+    """盘点汇总（盘盈盘亏报表）。
+
+    只统计**已确认**（COMPLETED）的盘点单（DRAFT 尚未调整结存，计入会失真）。
+    差异口径：`difference = actual_qty - book_qty`，正数=盘盈，负数=盘亏；
+    差异金额 = 差异数量 × 物料标准成本。
+    """
+    stmt = select(models.InvStockOperation).where(
+        models.InvStockOperation.op_type == "STOCKTAKE",
+        models.InvStockOperation.status == "COMPLETED",
+    )
+    if date_from is not None:
+        stmt = stmt.where(models.InvStockOperation.op_date >= date_from)
+    if date_to is not None:
+        stmt = stmt.where(models.InvStockOperation.op_date <= date_to)
+    if warehouse_id is not None:
+        stmt = stmt.where(models.InvStockOperation.warehouse_id == warehouse_id)
+    operations = list(
+        db.scalars(
+            stmt.order_by(
+                models.InvStockOperation.op_date.desc(), models.InvStockOperation.id.desc()
+            )
+        )
+    )
+
+    materials = _material_map(
+        db,
+        [item.material_id for op in operations for item in op.items],
+    )
+    warehouses = _warehouse_map(db, [op.warehouse_id for op in operations if op.warehouse_id])
+
+    items: List[Dict[str, Any]] = []
+    line_count = matched_count = gain_count = loss_count = 0
+    gain_qty = loss_qty = Decimal("0")
+    gain_amount = loss_amount = Decimal("0")
+
+    for op in operations:
+        warehouse = warehouses.get(op.warehouse_id, {}) if op.warehouse_id else {}
+        for item in op.items:
+            book = _as_decimal(item.book_qty)
+            actual = _as_decimal(item.actual_qty)
+            difference = actual - book
+            material = materials.get(item.material_id, {})
+            cost = _as_decimal(material.get("standard_cost"))
+            diff_amount = difference * cost
+            line_count += 1
+            if difference == 0:
+                matched_count += 1
+            elif difference > 0:
+                gain_count += 1
+                gain_qty += difference
+                gain_amount += diff_amount
+            else:
+                loss_count += 1
+                loss_qty += -difference
+                loss_amount += -diff_amount
+            items.append(
+                {
+                    "operation_id": op.id,
+                    "operation_no": op.operation_no,
+                    "op_date": op.op_date,
+                    "warehouse_id": op.warehouse_id,
+                    "warehouse_code": warehouse.get("warehouse_code"),
+                    "warehouse_name": warehouse.get("warehouse_name"),
+                    "material_id": item.material_id,
+                    "material_code": material.get("material_code"),
+                    "material_name": material.get("material_name"),
+                    "book_qty": book,
+                    "actual_qty": actual,
+                    "difference": difference,
+                    "standard_cost": cost,
+                    "diff_amount": diff_amount,
+                    "result": "GAIN" if difference > 0 else ("LOSS" if difference < 0 else "MATCH"),
+                }
+            )
+
+    return {
+        "operation_count": len(operations),
+        "line_count": line_count,
+        "matched_count": matched_count,
+        "gain_count": gain_count,
+        "gain_qty": gain_qty,
+        "loss_count": loss_count,
+        "loss_qty": loss_qty,
+        "net_qty": gain_qty - loss_qty,
+        "gain_amount": gain_amount,
+        "loss_amount": loss_amount,
+        "net_amount": gain_amount - loss_amount,
+        "accuracy_rate": (Decimal(matched_count) / Decimal(line_count))
+        if line_count
+        else Decimal("0"),
+        "items": items,
+    }
 
 
 def flow_summary(db: Session, date_from: date, date_to: date) -> List[Dict[str, Any]]:
