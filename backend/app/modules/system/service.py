@@ -13,7 +13,7 @@
 
 import hashlib
 import json
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
@@ -22,6 +22,8 @@ from sqlalchemy.orm import Session
 
 from app.common.exceptions import BusinessException
 from app.modules.inventory import contract as inventory_contract
+from app.modules.procurement import contract as procurement_contract
+from app.modules.sales import contract as sales_contract
 from app.modules.system import models, repository as repo
 from app.modules.system.contract import log_operation
 from app.modules.system.schemas import (
@@ -268,53 +270,74 @@ def auto_classify_abc(
     *,
     a_threshold: int = ABC_A_THRESHOLD,
     b_threshold: int = ABC_B_THRESHOLD,
+    months: int = 12,
 ):
-    """按价值累计占比自动划分 ABC 类（帕累托分类）。
+    """按企业实际经营数据自动划分 ABC 类（帕累托分类）。
 
     分类依据优先级：
-    1. 库存金额 = 标准成本 × 现有库存（有库存金额时）；
-    2. 标准成本（无库存数据但有成本时）；
-    3. 库存数量（既无库存金额也无成本时）。
+    1. **近 N 个月采购 + 销售金额**（实时汇总，首选）：
+       - 采购到货金额 = 已到货数量 × 采购单价；
+       - 销售出库金额 = 已发货数量 × 销售单价；
+       - 同一物料的经营金额为两者之和，反映其真实业务吞吐；
+    2. 若窗口内没有任何采购/销售数据（如刚导入的课程案例）：
+       库存金额 = 标准成本 × 现有库存；
+    3. 无库存金额时依次回退标准成本、库存数量。
 
     按依据值倒序累计，累计占比 < A 阈值的为 A 类，< B 阈值的为 B 类，
     其余为 C 类；依据值为 0 的物料直接归 C 类。
     """
     _require(0 < a_threshold < b_threshold <= 100, CODE_INVALID_PARAM, "ABC 阈值不合法")
+    _require(1 <= months <= 36, CODE_INVALID_PARAM, "统计月份需在 1~36 之间")
+
+    since = date.today() - timedelta(days=months * 30)
+    purchase_values = procurement_contract.get_material_received_values(db, since)
+    sales_values = sales_contract.get_material_delivered_values(db, since)
 
     materials = repo.list_active_materials(db)
     material_ids = [item.id for item in materials]
     snapshot = inventory_contract.get_stock_snapshot(db, material_ids) if material_ids else {}
 
+    purchase_total = sum(purchase_values.values(), Decimal("0"))
+    sales_total = sum(sales_values.values(), Decimal("0"))
+    business_total = purchase_total + sales_total
+
     rows = []
     total_qty = Decimal("0")
-    total_value = Decimal("0")
+    total_stock_value = Decimal("0")
+    business_values = []
     for material in materials:
         on_hand = Decimal(snapshot.get(material.id, {}).get("on_hand", 0) or 0)
         cost = Decimal(material.standard_cost or 0)
         rows.append((material, on_hand, cost))
         total_qty += abs(on_hand)
-        total_value += abs(on_hand * cost)
+        total_stock_value += abs(on_hand * cost)
+        business_values.append(
+            purchase_values.get(material.id, Decimal("0"))
+            + sales_values.get(material.id, Decimal("0"))
+        )
 
-    if total_value > 0:
-        basis = "库存金额"
-        total = total_value
+    if business_total > 0:
+        basis = f"近 {months} 个月采购+销售金额"
+        total = business_total
+        weights = business_values
+    elif total_stock_value > 0:
+        basis = "库存金额（窗口内无采购销售数据）"
+        total = total_stock_value
         weights = [abs(qty * cost) for _, qty, cost in rows]
     elif any(cost > 0 for _, _, cost in rows):
-        basis = "标准成本"
+        basis = "标准成本（无采购销售及库存数据）"
         total = sum(cost for _, _, cost in rows)
         weights = [cost for _, _, cost in rows]
     elif total_qty > 0:
-        basis = "库存数量"
+        basis = "库存数量（无采购销售及成本数据）"
         total = total_qty
         weights = [abs(qty) for _, qty, _ in rows]
     else:
-        basis = "库存数量"
+        basis = "库存数量（无业务数据）"
         total = Decimal("0")
         weights = [Decimal("0") for _ in rows]
 
-    ranked = sorted(
-        zip(rows, weights), key=lambda item: item[1], reverse=True
-    )
+    ranked = sorted(zip(rows, weights), key=lambda item: item[1], reverse=True)
 
     counts = {"A": 0, "B": 0, "C": 0}
     cumulative = Decimal("0")
@@ -343,7 +366,8 @@ def auto_classify_abc(
         target_id=None,
         detail=(
             f"自动 ABC 分类：A={counts['A']} B={counts['B']} C={counts['C']}"
-            f"（依据 {basis}，阈值 {a_threshold}/{b_threshold}）"
+            f"（依据 {basis}，阈值 {a_threshold}/{b_threshold}，"
+            f"采购 {purchase_total} / 销售 {sales_total}）"
         ),
     )
 
@@ -356,6 +380,9 @@ def auto_classify_abc(
         "basis": basis,
         "a_threshold": a_threshold,
         "b_threshold": b_threshold,
+        "purchase_value": purchase_total,
+        "sales_value": sales_total,
+        "months": months,
     }
 
 
@@ -1101,8 +1128,9 @@ def get_personnel(db: Session, personnel_id: int) -> models.SysPersonnel:
 
 
 def create_personnel(db: Session, payload: PersonnelCreate) -> models.SysPersonnel:
-    """新增员工：工号唯一、组织存在。"""
-    if repo.get_personnel_by_no(db, payload.employee_no):
+    """新增员工：工号留空时自动生成，手工填写的工号需要唯一。"""
+    employee_no = (payload.employee_no or "").strip() or repo.next_employee_no(db)
+    if repo.get_personnel_by_no(db, employee_no):
         raise BusinessException(CODE_EMPLOYEE_NO_EXISTS, "员工工号已存在")
     if payload.id_card and repo.get_personnel_by_id_card(db, payload.id_card):
         raise BusinessException(CODE_EMPLOYEE_NO_EXISTS, "身份证号已存在")
@@ -1111,7 +1139,7 @@ def create_personnel(db: Session, payload: PersonnelCreate) -> models.SysPersonn
     _validate_status(payload.status)
 
     personnel = models.SysPersonnel(
-        employee_no=payload.employee_no,
+        employee_no=employee_no,
         person_name=payload.person_name,
         gender=payload.gender,
         id_card=payload.id_card,

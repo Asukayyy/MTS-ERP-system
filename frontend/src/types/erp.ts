@@ -63,6 +63,9 @@ export interface BomItem {
   id: number
   bom_id: number
   material_id: number
+  material_code?: string | null
+  material_name?: string | null
+  unit_code?: string | null
   quantity: Num
   lead_time_offset: number
   scrap_rate: Num

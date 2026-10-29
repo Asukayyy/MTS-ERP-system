@@ -27,6 +27,26 @@ def count_all(db: Session, model) -> int:
     return db.scalar(select(func.count()).select_from(model)) or 0
 
 
+def material_delivered_value_rows(db: Session, since: date) -> List[Tuple[int, Decimal]]:
+    """按物料汇总 `since` 之后的销售出库金额（已发货数量 × 销售单价）。
+
+    ABC 自动分类使用：只统计非作废销售订单，金额反映物料真实销售吞吐。
+    """
+    stmt = (
+        select(
+            models.SalOrderItem.material_id,
+            func.sum(models.SalOrderItem.delivered_qty * models.SalOrderItem.unit_price),
+        )
+        .join(models.SalOrder, models.SalOrder.id == models.SalOrderItem.order_id)
+        .where(
+            models.SalOrder.order_date >= since,
+            models.SalOrder.status != "CANCELLED",
+        )
+        .group_by(models.SalOrderItem.material_id)
+    )
+    return [(int(row[0]), Decimal(str(row[1] or 0))) for row in db.execute(stmt).all()]
+
+
 def count_where(db: Session, model, *criteria) -> int:
     """按条件统计行数。"""
     return db.scalar(select(func.count()).select_from(model).where(*criteria)) or 0

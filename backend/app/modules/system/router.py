@@ -294,9 +294,12 @@ def change_material_status(
     response_model=ApiResponse[AbcClassifyResult],
     summary="自动 ABC 分类",
 )
-def classify_materials_abc(db: Session = Depends(get_db)) -> ApiResponse[AbcClassifyResult]:
-    """按价值累计占比自动重算全部启用物料的 A/B/C 分类。"""
-    result = service.auto_classify_abc(db)
+def classify_materials_abc(
+    months: int = Query(default=12, ge=1, le=36, description="采购/销售统计窗口（月）"),
+    db: Session = Depends(get_db),
+) -> ApiResponse[AbcClassifyResult]:
+    """按近 N 个月采购 + 销售金额实时重算全部启用物料的 A/B/C 分类。"""
+    result = service.auto_classify_abc(db, months=months)
     db.commit()
     return success(AbcClassifyResult(**result))
 

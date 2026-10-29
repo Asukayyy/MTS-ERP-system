@@ -1725,3 +1725,7 @@ def stats(db: Session) -> Dict[str, Any]:
             db, models.SalReturn, models.SalReturn.return_date, month_start, next_month_start
         ),
     }
+
+def get_material_delivered_values(db: Session, since: date) -> Dict[int, Decimal]:
+    """按物料汇总指定日期之后的销售出库金额（供 ABC 自动分类使用）。"""
+    return dict(repository.material_delivered_value_rows(db, since))
