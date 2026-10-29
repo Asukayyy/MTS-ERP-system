@@ -442,6 +442,53 @@ def test_receipt_confirm_pushes_inbound_then_warehouse_confirm_increases_stock(
     assert inventory_service.get_on_hand_qty(db, material_id, warehouse_id) == Decimal("40.0000")
 
 
+def test_create_receipt_api_without_warehouse(
+    client: TestClient, db: Session
+) -> None:
+    """回归：采购订单「生成到货单」不再传仓库，接口仍应成功（warehouse_id 为空）。"""
+    material_id = _create_material(db)
+    supplier = _create_supplier(db)
+    order = service.create_order(
+        db,
+        supplier_id=supplier["id"],
+        order_date=date.today(),
+        expected_date=date.today() + timedelta(days=5),
+        items=[{"material_id": material_id, "quantity": Decimal("10"), "unit_price": Decimal("1")}],
+    )
+    db.commit()
+    service.set_order_status(db, order["id"], "CONFIRMED")
+    db.commit()
+    order_item_id = order["items"][0]["id"]
+
+    created = client.post(
+        "/api/v1/procurement/receipts",
+        json={
+            "purchase_order_id": order["id"],
+            "receipt_date": date.today().isoformat(),
+            "items": [{"order_item_id": order_item_id, "quantity": "10", "qualified_qty": "10"}],
+        },
+    )
+    assert created.status_code == 200, created.text
+    body = created.json()
+    assert body["code"] == 0, body
+    assert body["data"]["warehouse_id"] is None
+
+    # 确认到货：仍不改结存，只推送待入库单
+    confirmed = client.post(
+        f"/api/v1/procurement/receipts/{body['data']['id']}/confirm"
+    )
+    assert confirmed.status_code == 200, confirmed.text
+    assert confirmed.json()["data"]["status"] == "COMPLETED"
+
+    # 列表 / 详情接口遇到空仓库也不能报错
+    listed = client.get("/api/v1/procurement/receipts?page=1&page_size=20")
+    assert listed.status_code == 200, listed.text
+    hit = [row for row in listed.json()["data"]["items"] if row["id"] == body["data"]["id"]]
+    assert hit and hit[0]["warehouse_id"] is None
+    detail = client.get(f"/api/v1/procurement/receipts/{body['data']['id']}")
+    assert detail.status_code == 200, detail.text
+
+
 # ==================== 7. 到货超量拒绝 ====================
 
 
