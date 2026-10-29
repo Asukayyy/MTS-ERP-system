@@ -18,6 +18,7 @@ import { listMaterials } from '@/api/system'
 import RemoteSelect from '@/components/common/RemoteSelect.vue'
 import StatusTag from '@/components/common/StatusTag.vue'
 import { usePagedTable, toNumber } from '@/composables/usePagedTable'
+import { fmtQty } from '@/utils/format'
 import type { RemoteOption, ReplenishmentRequest, SafetyStockSuggestion } from '@/types/erp'
 
 const SOURCE_LABELS: Record<string, string> = {
@@ -223,9 +224,9 @@ onMounted(() => {
         <el-table-column label="仓库" min-width="150" show-overflow-tooltip>
           <template #default="{ row }">{{ row.warehouse_code }} {{ row.warehouse_name }}</template>
         </el-table-column>
-        <el-table-column label="可用量" prop="available_quantity" width="100" align="right" />
-        <el-table-column label="安全库存" prop="safety_stock" width="100" align="right" />
-        <el-table-column label="建议补库量" prop="suggested_qty" width="110" align="right" />
+        <el-table-column label="可用量" width="100" align="right"><template #default="{ row }">{{ fmtQty(row.available_quantity) }}</template></el-table-column>
+        <el-table-column label="安全库存" width="100" align="right"><template #default="{ row }">{{ fmtQty(row.safety_stock) }}</template></el-table-column>
+        <el-table-column label="建议补库量" width="110" align="right"><template #default="{ row }">{{ fmtQty(row.suggested_qty) }}</template></el-table-column>
         <el-table-column label="补库方式" width="100">
           <template #default="{ row }">{{ SOURCE_LABELS[row.source_type] || row.source_type }}</template>
         </el-table-column>
@@ -271,9 +272,9 @@ onMounted(() => {
         <el-table-column label="物料编码" prop="material_code" min-width="120" />
         <el-table-column label="物料名称" prop="material_name" min-width="150" />
         <el-table-column label="仓库ID" prop="warehouse_id" width="90" align="right" />
-        <el-table-column label="补库数量" prop="request_qty" width="110" align="right" />
-        <el-table-column label="当前库存" prop="current_qty" width="110" align="right" />
-        <el-table-column label="目标库存" prop="target_qty" width="110" align="right" />
+        <el-table-column label="补库数量" width="110" align="right"><template #default="{ row }">{{ fmtQty(row.request_qty) }}</template></el-table-column>
+        <el-table-column label="当前库存" width="110" align="right"><template #default="{ row }">{{ fmtQty(row.current_qty) }}</template></el-table-column>
+        <el-table-column label="目标库存" width="110" align="right"><template #default="{ row }">{{ fmtQty(row.target_qty) }}</template></el-table-column>
         <el-table-column label="需求日期" prop="required_date" width="110" />
         <el-table-column label="来源" width="100">
           <template #default="{ row }">{{ SOURCE_LABELS[row.source_type] || row.source_type }}</template>

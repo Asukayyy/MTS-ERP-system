@@ -4,6 +4,7 @@ import { onMounted } from 'vue'
 import { listBalances, listWarehouses } from '@/api/inventory'
 import RemoteSelect from '@/components/common/RemoteSelect.vue'
 import { usePagedTable, toNumber } from '@/composables/usePagedTable'
+import { fmtQty } from '@/utils/format'
 import type { Balance, RemoteOption } from '@/types/erp'
 
 const { loading, rows, total, page, pageSize, query, load, search, reset, changePage, changeSize } =
@@ -52,16 +53,18 @@ onMounted(() => {
         <el-table-column label="仓库" min-width="150">
           <template #default="{ row }">{{ row.warehouse_name || `ID ${row.warehouse_id}` }}</template>
         </el-table-column>
-        <el-table-column label="现有量" prop="on_hand" width="110" align="right" />
+        <el-table-column label="现有量" width="110" align="right">
+          <template #default="{ row }">{{ fmtQty(row.on_hand) }}</template>
+        </el-table-column>
         <el-table-column label="可用量" width="110" align="right">
           <template #default="{ row }">
-            <span :class="{ 'qty-zero': toNumber(row.available_quantity) <= 0 }">{{ row.available_quantity }}</span>
+            <span :class="{ 'qty-zero': toNumber(row.available_quantity) <= 0 }">{{ fmtQty(row.available_quantity) }}</span>
           </template>
         </el-table-column>
         <el-table-column label="安全库存" width="110" align="right">
           <template #default="{ row }">
             <span :class="{ 'qty-zero': toNumber(row.available_quantity) < toNumber(row.safety_stock) }">{{
-              row.safety_stock
+              fmtQty(row.safety_stock)
             }}</span>
           </template>
         </el-table-column>

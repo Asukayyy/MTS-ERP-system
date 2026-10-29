@@ -5,6 +5,7 @@ import { ElMessage } from 'element-plus'
 import { getStocktakeSummary, listWarehouses } from '@/api/inventory'
 import RemoteSelect from '@/components/common/RemoteSelect.vue'
 import StockOperations from '@/views/inventory/stock-operations/index.vue'
+import { fmtQty } from '@/utils/format'
 import type { RemoteOption, StocktakeSummary } from '@/types/erp'
 
 /**
@@ -58,6 +59,12 @@ function signed(value: unknown, digits = 2): string {
 
 function percent(value: unknown): string {
   return `${(Number(value ?? 0) * 100).toFixed(2)}%`
+}
+
+/** 数量带正负号展示（整数），金额仍走 signed() 保留两位小数 */
+function signedQty(value: unknown): string {
+  const n = Number(value ?? 0)
+  return `${n > 0 ? '+' : ''}${fmtQty(n)}`
 }
 
 function resultType(result: string): 'success' | 'danger' | 'info' {
@@ -115,15 +122,15 @@ onMounted(load)
         <el-descriptions-item label="账实相符率">{{ percent(summary?.accuracy_rate) }}</el-descriptions-item>
 
         <el-descriptions-item label="盘盈（行 / 数量）">
-          {{ summary?.gain_count ?? 0 }} 行 / +{{ num(summary?.gain_qty) }}
+          {{ summary?.gain_count ?? 0 }} 行 / +{{ fmtQty(summary?.gain_qty) }}
         </el-descriptions-item>
         <el-descriptions-item label="盘亏（行 / 数量）">
-          {{ summary?.loss_count ?? 0 }} 行 / -{{ num(summary?.loss_qty) }}
+          {{ summary?.loss_count ?? 0 }} 行 / -{{ fmtQty(summary?.loss_qty) }}
         </el-descriptions-item>
         <el-descriptions-item label="盘盈金额">+{{ num(summary?.gain_amount) }}</el-descriptions-item>
         <el-descriptions-item label="盘亏金额">-{{ num(summary?.loss_amount) }}</el-descriptions-item>
 
-        <el-descriptions-item label="净盈亏数量">{{ signed(summary?.net_qty) }}</el-descriptions-item>
+        <el-descriptions-item label="净盈亏数量">{{ signedQty(summary?.net_qty) }}</el-descriptions-item>
         <el-descriptions-item label="净差异金额">{{ signed(summary?.net_amount) }}</el-descriptions-item>
       </el-descriptions>
       <div style="margin-top: 8px; font-size: 12px; color: #909399">
@@ -138,10 +145,10 @@ onMounted(load)
         </el-table-column>
         <el-table-column label="物料编码" prop="material_code" min-width="130" />
         <el-table-column label="物料名称" prop="material_name" min-width="150" />
-        <el-table-column label="账面数" prop="book_qty" width="100" align="right" />
-        <el-table-column label="实盘数" prop="actual_qty" width="100" align="right" />
+        <el-table-column label="账面数" width="100" align="right"><template #default="{ row }">{{ fmtQty(row.book_qty) }}</template></el-table-column>
+        <el-table-column label="实盘数" width="100" align="right"><template #default="{ row }">{{ fmtQty(row.actual_qty) }}</template></el-table-column>
         <el-table-column label="差异" width="100" align="right">
-          <template #default="{ row }">{{ signed(row.difference) }}</template>
+          <template #default="{ row }">{{ signedQty(row.difference) }}</template>
         </el-table-column>
         <el-table-column label="结果" width="90">
           <template #default="{ row }">
