@@ -304,7 +304,11 @@ def test_confirm_order_allocates_stock_and_creates_shipment(
 def test_confirm_order_sends_available_stock_and_converts_shortage(
     client: TestClient, db: Session
 ) -> None:
-    """库存不足：可用部分生成发货草稿，缺口转计划需求（CONFIRMED）。"""
+    """库存不足：可用部分生成发货草稿，缺口触发计划需求。
+
+    需求数量登记**订单未交付总量**（50）而不是缺口（30）：库存已分配的 20 由
+    MRP 净算抵扣，需求侧若只记 30，同一批库存会被抵扣两次。
+    """
     material_id = _create_material(db)
     warehouse_id = _create_warehouse(client)
     _set_stock(db, material_id, warehouse_id, "20")
@@ -329,14 +333,14 @@ def test_confirm_order_sends_available_stock_and_converts_shortage(
         ),
         {"o": order["id"], "m": material_id},
     ).one()
-    assert Decimal(str(row[0])) == Decimal("30")
+    assert Decimal(str(row[0])) == Decimal("50")
     assert row[1] == "CONFIRMED"
 
 
-def test_contract_open_order_demand_excludes_stock_allocated(
+def test_contract_open_order_demand_includes_stock_allocated(
     client: TestClient, db: Session
 ) -> None:
-    """已分配库存的发货草稿不再计入未交付需求，只剩缺口部分。"""
+    """未交付需求取订单未交付总量，已分配库存的发货草稿不扣减（由 MRP 净算抵扣）。"""
     material_id = _create_material(db)
     warehouse_id = _create_warehouse(client)
     _set_stock(db, material_id, warehouse_id, "20")
@@ -350,7 +354,7 @@ def test_contract_open_order_demand_excludes_stock_allocated(
         if row["order_id"] == order["id"]
     ]
     assert len(rows) == 1
-    assert Decimal(str(rows[0]["quantity"])) == Decimal("30")
+    assert Decimal(str(rows[0]["quantity"])) == Decimal("50")
 
 
 def test_confirm_order_does_not_double_allocate_stock(

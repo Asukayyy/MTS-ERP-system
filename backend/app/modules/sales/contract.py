@@ -27,7 +27,8 @@ from app.modules.sales import repository
 def get_open_order_demand(db: Session, on_date: Optional[date] = None) -> List[Dict[str, Any]]:
     """未交付需求行（供 MRP / 计划展开）。
 
-    只统计状态 ∈ CONFIRMED/IN_PROGRESS 的订单，且 `quantity = quantity - delivered_qty > 0`。
+    只统计状态 ∈ CONFIRMED/IN_PROGRESS 的订单，且 `quantity - delivered_qty > 0`。
+    数量取**订单未交付总量**，不扣减尚未确认的发货草稿（草稿占用由 MRP 净算抵扣）。
     传入 `on_date` 时只返回要求交货日期不晚于该日的需求。
 
     返回 `[{"order_id", "order_no", "customer_id", "material_id", "quantity", "due_date"}]`。
