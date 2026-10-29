@@ -895,6 +895,8 @@ export interface Supplier {
   address?: string | null
   status: string
   remark?: string | null
+  /** 评价平均综合得分，未评价为空 */
+  avg_total_score?: number | string | null
 }
 
 /** 供应商-物料供货关系（含供货价与提前期） */

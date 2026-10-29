@@ -8,8 +8,10 @@ import {
   createPurchasePlan,
   getPurchasePlan,
   listPurchasePlans,
+  listSupplierMaterials,
   listSuppliers,
   setPurchasePlanStatus,
+  supplierOptionLabel,
   updatePurchasePlan,
 } from '@/api/procurement'
 import { listMaterials } from '@/api/system'
@@ -32,9 +34,41 @@ async function loadMaterialOptions(keyword: string): Promise<RemoteOption[]> {
   return data.items.map((item) => ({ id: item.id, label: `${item.material_code} ${item.material_name}` }))
 }
 
-async function loadSupplierOptions(keyword: string): Promise<RemoteOption[]> {
+/**
+ * 供应商下拉：展示评价平均得分，并把给定物料的主供应商置顶标记【主供】。
+ * 计划明细行传该行物料；「由计划生成订单」传整单涉及的全部物料。
+ */
+async function loadSupplierOptionsForMaterials(
+  keyword: string,
+  materialIds: (number | undefined)[] = [],
+): Promise<RemoteOption[]> {
   const data = await listSuppliers({ keyword, status: 'ACTIVE', page: 1, page_size: 50 })
-  return data.items.map((item) => ({ id: item.id, label: `${item.supplier_code} ${item.supplier_name}` }))
+  const ids = materialIds.filter((id): id is number => typeof id === 'number' && id > 0)
+  const primaryIds = new Set<number>()
+  if (ids.length) {
+    const pages = await Promise.all(
+      ids.map((id) => listSupplierMaterials({ material_id: id, page: 1, page_size: 100 })),
+    )
+    pages.forEach((page) =>
+      page.items.forEach((link) => {
+        if (link.is_primary) primaryIds.add(link.supplier_id)
+      }),
+    )
+  }
+  return data.items
+    .map((item) => ({
+      id: item.id,
+      label: supplierOptionLabel(item, primaryIds.has(item.id)),
+    }))
+    .sort((a, b) => Number(primaryIds.has(b.id)) - Number(primaryIds.has(a.id)))
+}
+
+function loadSupplierOptions(keyword: string): Promise<RemoteOption[]> {
+  return loadSupplierOptionsForMaterials(keyword)
+}
+
+function loadOrderSupplierOptions(keyword: string): Promise<RemoteOption[]> {
+  return loadSupplierOptionsForMaterials(keyword, orderPlan.value?.items.map((i) => i.material_id) ?? [])
 }
 
 interface PlanLineForm {
@@ -362,7 +396,12 @@ onMounted(load)
           </el-table-column>
           <el-table-column label="建议供应商" min-width="180">
             <template #default="{ row }">
-              <RemoteSelect v-model="row.supplier_id" :loader="loadSupplierOptions" placeholder="可选" style="width: 100%" />
+              <RemoteSelect
+                v-model="row.supplier_id"
+                :loader="(kw: string) => loadSupplierOptionsForMaterials(kw, [row.material_id])"
+                placeholder="可选"
+                style="width: 100%"
+              />
             </template>
           </el-table-column>
           <el-table-column label="操作" width="80" align="center">
@@ -419,7 +458,7 @@ onMounted(load)
         <el-form-item label="供应商" required>
           <RemoteSelect
             v-model="orderForm.supplier_id"
-            :loader="loadSupplierOptions"
+            :loader="loadOrderSupplierOptions"
             placeholder="请选择供应商（决定供货价）"
             style="width: 100%"
           />
