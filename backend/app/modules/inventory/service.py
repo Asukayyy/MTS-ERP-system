@@ -281,6 +281,7 @@ def _decrease_stock(
         raise BusinessException(CODE_STOCK_INSUFFICIENT, "库存不足：出库后将出现负库存")
     balance.quantity = new_qty
     balance.updated_at_txn = datetime.now()
+    _auto_replenish_if_needed(db, material_id, operator_id)
     return {
         "quantity_after": new_qty,
     }
@@ -345,6 +346,8 @@ def _apply_adjust(
         )
     balance.quantity = new_qty
     balance.updated_at_txn = datetime.now()
+    if delta < 0:
+        _auto_replenish_if_needed(db, material_id, operator_id)
     return new_qty
 
 
@@ -1267,6 +1270,59 @@ def _suggestion_warehouse(
     ).first()
 
 
+def _auto_replenish_if_needed(
+    db: Session, material_id: int, operator_id: Optional[int] = None
+) -> Optional[int]:
+    """库存低于安全库存时**自动生成** DRAFT 补库需求，返回新单 ID。
+
+    在出库 / 盘点调减后触发，属系统自动行为而非人工点击（规格：低于安全库存
+    自动生成补库需求）。幂等性保障：同一物料已存在在途需求
+    （DRAFT / CONFIRMED / RELEASED）时直接跳过，重复触发不会产生多张单。
+    自动生成失败不影响主业务（出库 / 盘点仍然成功），因此此处吞掉异常。
+    """
+    try:
+        material = get_material(db, material_id)
+        if not material:
+            return None
+        safety = _as_decimal(material.get("safety_stock"))
+        if safety <= 0:
+            return None
+        db.flush()  # 让本次结存变动对后续查询可见（SessionLocal autoflush=False）
+        available = repository.sum_available(db, material_id)
+        if available >= safety:
+            return None
+        pending = repository.count_where(
+            db,
+            models.InvReplenishmentRequest,
+            models.InvReplenishmentRequest.material_id == material_id,
+            models.InvReplenishmentRequest.status.in_(
+                ["DRAFT", "CONFIRMED", "RELEASED"]
+            ),
+        )
+        if pending:
+            return None
+        warehouse = _suggestion_warehouse(db, material_id)
+        if warehouse is None:
+            return None
+        supply_type = material.get("supply_type") or "BUY"
+        result = create_replenishment_request(
+            db,
+            material_id=material_id,
+            warehouse_id=warehouse.id,
+            request_qty=safety - available,
+            required_date=date.today(),
+            source_type="REORDER" if supply_type == "BUY" else "PRODUCTION",
+            current_qty=available,
+            target_qty=safety,
+            remark="安全库存自动生成",
+            operator_id=operator_id,
+        )
+        db.flush()  # 让新建单据对同事务内的后续去重查询可见
+        return result["id"]
+    except Exception:  # noqa: BLE001 - 自动补库失败不阻断出库 / 盘点
+        return None
+
+
 def safety_stock_suggestions(db: Session) -> List[Dict[str, Any]]:
     """按安全库存给出补库建议（替代原订货点口径）。
 
@@ -1313,7 +1369,7 @@ def safety_stock_suggestions(db: Session) -> List[Dict[str, Any]]:
 def generate_from_safety_stock(
     db: Session, operator_id: Optional[int] = None
 ) -> Dict[str, Any]:
-    """按安全库存建议批量生成 DRAFT 补库需求（已有在途需求的物料+仓库跳过）。"""
+    """按安全库存建议批量生成 DRAFT 补库需求（同一物料已有在途需求则跳过）。"""
     created_ids: List[int] = []
     skipped = 0
     for suggestion in safety_stock_suggestions(db):
@@ -1321,7 +1377,6 @@ def generate_from_safety_stock(
             db,
             models.InvReplenishmentRequest,
             models.InvReplenishmentRequest.material_id == suggestion["material_id"],
-            models.InvReplenishmentRequest.warehouse_id == suggestion["warehouse_id"],
             models.InvReplenishmentRequest.status.in_(
                 ["DRAFT", "CONFIRMED", "RELEASED"]
             ),

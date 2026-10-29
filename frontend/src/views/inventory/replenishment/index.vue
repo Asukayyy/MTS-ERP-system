@@ -210,11 +210,11 @@ onMounted(() => {
     <el-card shadow="never">
       <template #header>
         <div class="table-toolbar">
-          <span class="page-title">安全库存补库建议（可用量低于安全库存）</span>
+          <span class="page-title">安全库存补库建议（低于安全库存时系统自动生成补库需求）</span>
           <span class="table-toolbar__spacer" />
           <el-button @click="loadSuggestions">刷新</el-button>
           <el-button type="primary" :disabled="!suggestions.length" @click="doGenerateFromSafetyStock">
-            一键生成补库需求
+            补生成缺失需求
           </el-button>
         </div>
       </template>
