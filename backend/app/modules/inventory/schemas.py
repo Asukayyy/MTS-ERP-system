@@ -101,6 +101,10 @@ class BalanceOut(_IdOut):
     safety_stock: Decimal = Field(default=Decimal("0"), description="安全库存（取物料主数据）")
     reorder_point: Optional[Decimal] = Field(default=None, description="订货点（仅 A 类物料配置，未配置为 null）")
     reorder_quantity: Optional[Decimal] = Field(default=None, description="建议订货量（仅 A 类物料配置）")
+    is_available_warehouse: bool = Field(
+        default=True,
+        description="所在仓库是否计入可用量（废品仓为 false，可用量固定 0）",
+    )
 
 
 class BalanceSummaryOut(BaseModel):
