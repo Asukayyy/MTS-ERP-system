@@ -16,8 +16,6 @@ type SortQuery = {
   sort_order?: 'asc' | 'desc'
 }
 
-const sortQuery = ref<SortQuery>({ sort_by: undefined, sort_order: undefined })
-
 const { loading, rows, total, page, pageSize, query, load, search, reset, changePage, changeSize } =
   usePagedTable<
     Balance,
