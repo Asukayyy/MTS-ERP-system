@@ -89,6 +89,12 @@ def _validate_source_type(source_type: str) -> None:
         raise BusinessException(CODE_PARAM_INVALID, f"非法的来源业务类型：{source_type}")
 
 
+def _require_integer_qty(qty: Decimal, field: str) -> None:
+    """库存数量一律按整数管理（件/个/台），拒绝小数输入。"""
+    if qty != qty.to_integral_value():
+        raise BusinessException(CODE_PARAM_INVALID, f"{field}必须为整数，收到：{qty}")
+
+
 def _material_map(db: Session, material_ids: Sequence[int]) -> Dict[int, Dict[str, Any]]:
     return get_materials(db, [int(i) for i in material_ids if i])
 
@@ -155,6 +161,7 @@ def _validate_stock_args(
     qty = _as_decimal(quantity)
     if qty <= 0:
         raise BusinessException(CODE_PARAM_INVALID, "库存变动数量必须为正数")
+    _require_integer_qty(qty, "库存变动数量")
     if not source_module:
         raise BusinessException(CODE_PARAM_INVALID, "来源模块不能为空")
     _validate_source_type(source_type)
@@ -634,6 +641,7 @@ def create_stock_operation(
             qty = _as_decimal(raw.get("quantity"))
             if qty <= 0:
                 raise BusinessException(CODE_PARAM_INVALID, "移库数量必须为正数")
+            _require_integer_qty(qty, "移库数量")
             repository.add_operation_item(
                 db,
                 models.InvStockOperationItem(
@@ -647,6 +655,7 @@ def create_stock_operation(
             actual = _as_decimal(raw.get("actual_qty"))
             if actual < 0:
                 raise BusinessException(CODE_PARAM_INVALID, "实盘数量不能为负数")
+            _require_integer_qty(actual, "实盘数量")
             book_value = raw.get("book_qty")
             if book_value is None:
                 balance = repository.get_balance(db, warehouse.id, raw["material_id"])
