@@ -11,8 +11,11 @@
 - 既有数据不回填：历史派工单保留原工序与作业人员信息，仅新单据使用承接单位。
 
 Revision ID: f2b7c41d9e83
-Revises: c9a5e2f71b64
+Revises: d1f7a3c9b260
 Create Date: 2026-10-29
+
+说明：`d1f7a3c9b260`（销售产品价格）已先合入 develop，本迁移顺延挂在其后，
+保持单 head，避免 `alembic upgrade head` 因分叉失败。
 """
 
 from typing import Sequence, Union
@@ -23,7 +26,7 @@ from sqlalchemy import text
 
 # revision identifiers, used by Alembic.
 revision: str = "f2b7c41d9e83"
-down_revision: Union[str, None] = "c9a5e2f71b64"
+down_revision: Union[str, None] = "d1f7a3c9b260"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
