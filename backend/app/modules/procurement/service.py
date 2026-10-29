@@ -22,7 +22,6 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 from sqlalchemy.orm import Session
 
 from app.common.exceptions import BusinessException
-from app.modules.inventory.contract import increase_stock
 from app.modules.procurement import models, repository
 from app.modules.system.contract import (
     get_material,
@@ -49,13 +48,12 @@ MODULE = "procurement"
 
 _SUPPLIER_STATUSES = {RecordStatus.ACTIVE.value, RecordStatus.INACTIVE.value}
 _PLAN_SOURCE_TYPES = {"MRP", "REORDER", "MANUAL"}
-_PLAN_STATUSES = {"DRAFT", "CONFIRMED", "RELEASED", "COMPLETED", "CANCELLED"}
+_PLAN_STATUSES = {"DRAFT", "CONFIRMED", "COMPLETED", "CANCELLED"}
 _PLAN_TERMINAL = {"COMPLETED", "CANCELLED"}
-# 采购计划状态机：DRAFT → CONFIRMED → RELEASED → COMPLETED，另可从非终态取消
+# 采购计划状态机：DRAFT → CONFIRMED → COMPLETED，另可从非终态取消
 _PLAN_TRANSITIONS: Dict[str, set] = {
     "DRAFT": {"CONFIRMED", "CANCELLED"},
-    "CONFIRMED": {"RELEASED", "CANCELLED"},
-    "RELEASED": {"COMPLETED", "CANCELLED"},
+    "CONFIRMED": {"COMPLETED", "CANCELLED"},
     "COMPLETED": set(),
     "CANCELLED": set(),
 }
@@ -77,7 +75,14 @@ _ORDER_TRANSITIONS: Dict[str, set] = {
     "COMPLETED": set(),
     "CANCELLED": set(),
 }
-_RECEIPT_STATUSES = {"DRAFT", "CONFIRMED", "COMPLETED", "CANCELLED"}
+_RECEIPT_STATUSES = {"DRAFT", "WAIT_INBOUND", "INBOUND_CONFIRMED", "CANCELLED"}
+# 到货单状态机：DRAFT → WAIT_INBOUND（采购确认到货）→ INBOUND_CONFIRMED（库存完成上架）；非终态可取消
+_RECEIPT_TRANSITIONS: Dict[str, set] = {
+    "DRAFT": {"WAIT_INBOUND", "CANCELLED"},
+    "WAIT_INBOUND": {"INBOUND_CONFIRMED", "CANCELLED"},
+    "INBOUND_CONFIRMED": set(),
+    "CANCELLED": set(),
+}
 # 允许到货 / 收货的订单状态（规格：CONFIRMED / RELEASED / IN_PROGRESS）
 _RECEIVABLE_ORDER_STATUSES = {"CONFIRMED", "RELEASED", "IN_PROGRESS"}
 _CENT = Decimal("0.01")
@@ -320,7 +325,6 @@ def _receipt_dict(
         "order_no": order_no,
         "supplier_id": receipt.supplier_id,
         "supplier_name": supplier_name,
-        "warehouse_id": receipt.warehouse_id,
         "receipt_date": receipt.receipt_date,
         "status": receipt.status,
         "remark": receipt.remark,
@@ -814,8 +818,17 @@ def set_plan_status(
         raise BusinessException(
             CODE_STATUS_INVALID, f"计划状态不允许从 {plan.status} 流转到 {status}"
         )
+    items = repository.get_plan_items(db, plan.id)
+    if status == "COMPLETED":
+        # 已完成 = 全部需求均已下单，仍有剩余量时不允许手工完结
+        if not items or any(
+            _as_decimal(item.ordered_qty) < _as_decimal(item.required_qty) for item in items
+        ):
+            raise BusinessException(
+                CODE_STATUS_INVALID, "采购计划仍有未下单数量，不能标记为已完成"
+            )
     plan.status = status
-    for item in repository.get_plan_items(db, plan.id):
+    for item in items:
         item.status = status
     plan.updated_by = operator_id
     log_operation(
@@ -1051,13 +1064,18 @@ def create_order_from_plan(
 ) -> Dict[str, Any]:
     """按采购计划生成 DRAFT 采购订单，并回写计划行已下单数量。
 
+    - 只有「已确认」的计划才能下单，草稿需先确认（审批卡点）；
     - 单价优先取供应商-物料关系的 `supply_price`，缺失时取 0；
     - 预计到货日期未指定时取下单日期（采购不涉及提前期，由采购员自行填写）；
-    - 仅取「未下单数量 = required_qty − ordered_qty > 0」的计划行。
+    - 仅取「未下单数量 = required_qty − ordered_qty > 0」的计划行；
+    - 全部计划行下单完毕时，计划自动置「已完成」。
     """
     plan = _require_plan(db, plan_id)
-    if plan.status in _PLAN_TERMINAL:
-        raise BusinessException(CODE_IMMUTABLE, f"采购计划已 {plan.status}，不可生成订单")
+    if plan.status != "CONFIRMED":
+        raise BusinessException(
+            CODE_STATUS_INVALID,
+            f"采购计划 {plan.plan_no} 当前为 {plan.status}，需先确认后才能生成采购订单",
+        )
     _require_supplier(db, supplier_id, require_active=True)
     if buyer_id:
         _require_personnel(db, buyer_id)
@@ -1118,6 +1136,13 @@ def create_order_from_plan(
             ),
         )
         plan_item.ordered_qty = _as_decimal(plan_item.ordered_qty) + qty
+    if all(
+        _as_decimal(item.ordered_qty) >= _as_decimal(item.required_qty) for item in plan_items
+    ):
+        # 需求已全部转为订单，计划自动完成
+        plan.status = "COMPLETED"
+        for item in plan_items:
+            item.status = "COMPLETED"
     order.total_amount = _money(total)
     log_operation(
         db,
@@ -1138,13 +1163,13 @@ def create_receipt(
     db: Session,
     *,
     purchase_order_id: int,
-    warehouse_id: int,
     receipt_date: date,
     items: Sequence[Dict[str, Any]],
     receipt_no: Optional[str] = None,
     remark: Optional[str] = None,
     operator_id: Optional[int] = None,
 ) -> Dict[str, Any]:
+    """新增到货单。职责分离：采购只登记单据与到货/合格数量，不选仓库、不入库存。"""
     order = _require_order(db, purchase_order_id)
     if order.status not in _RECEIVABLE_ORDER_STATUSES:
         raise BusinessException(
@@ -1163,7 +1188,6 @@ def create_receipt(
         receipt_no=receipt_no,
         purchase_order_id=order.id,
         supplier_id=order.supplier_id,
-        warehouse_id=warehouse_id,
         receipt_date=receipt_date,
         status="DRAFT",
         remark=remark,
@@ -1243,16 +1267,20 @@ def get_receipt(db: Session, receipt_id: int) -> Dict[str, Any]:
 def confirm_receipt(
     db: Session, receipt_id: int, operator_id: Optional[int] = None
 ) -> Dict[str, Any]:
-    """确认到货（原子，单事务）：
+    """采购员确认到货（原子，单事务）。职责分离：
 
     1. 校验到货数量不超过订单行未到货数量；
-    2. 逐行调用 `inventory.contract.increase_stock`（`PURCHASE_RECEIPT` 流水 + 结存）；
-    3. 回写订单行已到货数量 → 单据 COMPLETED → 订单 IN_PROGRESS / COMPLETED。
+    2. 回写订单行已到货数量 → 订单 IN_PROGRESS / COMPLETED；
+    3. 到货单置 `WAIT_INBOUND`（待上架）。
+
+    **本步骤不入库存**：库存的增加由库存模块在仓管员选定库位上架后，
+    写 `inv_transaction` 流水并更新 `inv_balance`，再回调
+    `procurement.contract.confirm_inbound` 把到货单置 `INBOUND_CONFIRMED`。
     """
     receipt = _require_receipt(db, receipt_id)
     if receipt.status != "DRAFT":
         raise BusinessException(
-            CODE_STATUS_INVALID, f"到货单当前状态为 {receipt.status}，不能确认"
+            CODE_STATUS_INVALID, f"到货单当前状态为 {receipt.status}，不能确认到货"
         )
     order = _require_order(db, receipt.purchase_order_id)
     if order.status not in _RECEIVABLE_ORDER_STATUSES:
@@ -1273,23 +1301,8 @@ def confirm_receipt(
                 CODE_RECEIPT_QTY_EXCEED,
                 f"到货数量超过未到货数量：物料 {item.material_id} 未到货 {remaining}，本次 {qty}",
             )
-        # 库存契约写 PURCHASE_RECEIPT 流水 + 加结存；本层不吞异常，整单事务回滚
-        increase_stock(
-            db,
-            material_id=item.material_id,
-            quantity=_as_decimal(item.qualified_qty),
-            warehouse_id=receipt.warehouse_id,
-            source_module=MODULE,
-            source_type="PURCHASE_RECEIPT",
-            source_reference_id=receipt.id,
-            source_no=receipt.receipt_no,
-            unit_cost=_as_decimal(order_item.unit_price),
-            biz_date=receipt.receipt_date,
-            operator_id=operator_id,
-            remark=f"采购到货 {receipt.receipt_no}",
-        )
         order_item.received_qty = _as_decimal(order_item.received_qty) + qty
-    receipt.status = "COMPLETED"
+    receipt.status = "WAIT_INBOUND"
     receipt.updated_by = operator_id
     order_items = repository.get_order_items(db, order.id)
     if all(
@@ -1306,7 +1319,51 @@ def confirm_receipt(
         target_type="pur_receipt",
         target_id=receipt.id,
         operator_id=operator_id,
-        detail=f"确认到货单 {receipt.receipt_no}，订单 {order.order_no} → {order.status}",
+        detail=f"确认到货单 {receipt.receipt_no} → 待上架，订单 {order.order_no} → {order.status}",
+    )
+    return _receipt_view(db, receipt)
+
+
+def list_pending_inbound_receipts(db: Session) -> List[Dict[str, Any]]:
+    """待上架到货单（`WAIT_INBOUND`），供库存模块入库管理页取数。"""
+    rows, _ = repository.list_receipts(db, 1, 1000, None, "WAIT_INBOUND")
+    suppliers = _supplier_name_map(db, [r.supplier_id for r in rows])
+    orders = repository.get_orders(db, [r.purchase_order_id for r in rows])
+    return [
+        _receipt_dict(
+            db,
+            row,
+            suppliers.get(row.supplier_id),
+            orders[row.purchase_order_id].order_no if row.purchase_order_id in orders else None,
+        )
+        for row in rows
+    ]
+
+
+def complete_receipt_inbound(
+    db: Session, receipt_id: int, operator_id: Optional[int] = None
+) -> Dict[str, Any]:
+    """库存模块完成上架后回调：到货单 `WAIT_INBOUND` → `INBOUND_CONFIRMED`。
+
+    仅供库存模块（contract）调用。库存流水与结存的写入发生在库存模块侧，
+    本函数只负责推进到货单终态，不再触碰库存。
+    """
+    receipt = _require_receipt(db, receipt_id)
+    if receipt.status != "WAIT_INBOUND":
+        raise BusinessException(
+            CODE_STATUS_INVALID,
+            f"到货单当前状态为 {receipt.status}，仅待上架（WAIT_INBOUND）可确认入库",
+        )
+    receipt.status = "INBOUND_CONFIRMED"
+    receipt.updated_by = operator_id
+    log_operation(
+        db,
+        module=MODULE,
+        action="INBOUND",
+        target_type="pur_receipt",
+        target_id=receipt.id,
+        operator_id=operator_id,
+        detail=f"到货单 {receipt.receipt_no} 完成上架入库",
     )
     return _receipt_view(db, receipt)
 
@@ -1314,11 +1371,34 @@ def confirm_receipt(
 def cancel_receipt(
     db: Session, receipt_id: int, operator_id: Optional[int] = None
 ) -> Dict[str, Any]:
+    """取消到货单。DRAFT 直接取消；WAIT_INBOUND（已确认到货但未上架）取消时
+    需回滚订单行已到货数量；已入库（INBOUND_CONFIRMED）不可取消。"""
     receipt = _require_receipt(db, receipt_id)
-    if receipt.status != "DRAFT":
+    if receipt.status == "INBOUND_CONFIRMED":
         raise BusinessException(
-            CODE_STATUS_INVALID, f"到货单当前状态为 {receipt.status}，不能取消"
+            CODE_STATUS_INVALID, "到货单已完成入库，不能取消"
         )
+    if receipt.status == "CANCELLED":
+        raise BusinessException(CODE_STATUS_INVALID, "到货单已取消")
+    if receipt.status == "WAIT_INBOUND":
+        # 已回写过订单行 received_qty，取消时需回滚
+        order = _require_order(db, receipt.purchase_order_id)
+        for item in repository.get_receipt_items(db, receipt.id):
+            order_item = repository.get_order_item(db, item.order_item_id)
+            if order_item:
+                order_item.received_qty = _as_decimal(order_item.received_qty) - _as_decimal(
+                    item.quantity
+                )
+        order_items = repository.get_order_items(db, order.id)
+        if all(
+            _as_decimal(it.received_qty) >= _as_decimal(it.quantity) for it in order_items
+        ):
+            order.status = "COMPLETED"
+        elif any(_as_decimal(it.received_qty) > 0 for it in order_items):
+            order.status = "IN_PROGRESS"
+        else:
+            order.status = "CONFIRMED"
+        order.updated_by = operator_id
     receipt.status = "CANCELLED"
     receipt.updated_by = operator_id
     log_operation(

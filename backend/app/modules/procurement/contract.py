@@ -55,3 +55,25 @@ def create_purchase_plan_from_replenishment(db: Session, request_id: int) -> Dic
 def get_pending_receipt_qty(db: Session, material_id: int) -> Decimal:
     """该物料所有在途未到货采购订单行的剩余数量合计，供 Planning / 库存预警参考。"""
     return service.get_pending_receipt_qty(db, material_id)
+
+
+# ==================== 到货回调（供 Inventory 调用） ====================
+
+
+def get_receipt(db: Session, receipt_id: int) -> Dict[str, Any]:
+    """按 ID 读取到货单详情（只读）。库存模块上架时取单据信息。"""
+    return service.get_receipt(db, receipt_id)
+
+
+def list_pending_inbound(db: Session) -> list:
+    """待上架到货单列表（`WAIT_INBOUND`），供库存模块入库管理页取数。"""
+    return service.list_pending_inbound_receipts(db)
+
+
+def confirm_inbound(db: Session, receipt_id: int, operator_id: int | None = None) -> Dict[str, Any]:
+    """库存模块完成上架后回调：把到货单从 WAIT_INBOUND 置 INBOUND_CONFIRMED。
+
+    库存流水的写入和结存更新由库存模块自己完成；本函数只推进到货单终态。
+    事务不 commit，由调用方（inventory）统一控制。
+    """
+    return service.complete_receipt_inbound(db, receipt_id, operator_id)

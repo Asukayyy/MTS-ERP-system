@@ -619,3 +619,226 @@ def test_auto_evaluation_api(client: TestClient, db: Session) -> None:
     assert data["remark"].startswith("[自动评价]")
     assert data["on_time_rate"] is not None
     assert data["receipt_total"] == 1
+
+
+# ==================== 7. 计划状态机收敛 ====================
+
+
+def test_order_from_plan_requires_confirmed_plan(db: Session) -> None:
+    """草稿计划不允许下单（审批卡点），只有 CONFIRMED 才可生成订单。"""
+    material_id = _create_material(db)
+    supplier = _create_supplier(db)
+    plan = service.create_plan(
+        db,
+        items=[
+            {
+                "material_id": material_id,
+                "required_qty": Decimal("5"),
+                "required_date": date.today() + timedelta(days=3),
+                "source_type": "MANUAL",
+            }
+        ],
+    )
+    db.commit()
+
+    with pytest.raises(BusinessException) as exc:
+        service.create_order_from_plan(db, plan_id=plan["id"], supplier_id=supplier["id"])
+    assert exc.value.code == 4006
+    db.rollback()
+
+    service.set_plan_status(db, plan["id"], "CONFIRMED")
+    db.commit()
+    order = service.create_order_from_plan(db, plan_id=plan["id"], supplier_id=supplier["id"])
+    assert order["status"] == "DRAFT"
+
+
+def test_order_from_plan_auto_completes_when_fully_ordered(db: Session) -> None:
+    """全部计划行下单完毕后，计划自动置「已完成」。"""
+    material_id = _create_material(db)
+    supplier = _create_supplier(db)
+    plan = service.create_plan(
+        db,
+        items=[
+            {
+                "material_id": material_id,
+                "required_qty": Decimal("8"),
+                "required_date": date.today() + timedelta(days=3),
+                "source_type": "MANUAL",
+            }
+        ],
+    )
+    db.commit()
+    service.set_plan_status(db, plan["id"], "CONFIRMED")
+    db.commit()
+
+    service.create_order_from_plan(
+        db, plan_id=plan["id"], supplier_id=supplier["id"]
+    )
+    db.commit()
+    refreshed = service.get_plan(db, plan["id"])
+    assert refreshed["status"] == "COMPLETED"
+
+
+def test_plan_completed_rejects_if_still_unordered(db: Session) -> None:
+    """手工标记 COMPLETED 前必须全部行已下单。"""
+    material_id = _create_material(db)
+    plan = service.create_plan(
+        db,
+        items=[
+            {
+                "material_id": material_id,
+                "required_qty": Decimal("5"),
+                "required_date": date.today() + timedelta(days=3),
+                "source_type": "MANUAL",
+            }
+        ],
+    )
+    db.commit()
+    service.set_plan_status(db, plan["id"], "CONFIRMED")
+    db.commit()
+
+    with pytest.raises(BusinessException) as exc:
+        service.set_plan_status(db, plan["id"], "COMPLETED")
+    assert exc.value.code == 4006
+
+
+# ==================== 8. 到货职责分离（不选仓库，状态 WAIT_INBOUND） ====================
+
+
+def test_receipt_does_not_require_warehouse(db: Session) -> None:
+    """create_receipt 不再需要 warehouse_id 入参。"""
+    material_id = _create_material(db)
+    supplier = _create_supplier(db)
+    order = service.create_order(
+        db,
+        supplier_id=supplier["id"],
+        buyer_id=None,
+        order_date=date.today(),
+        expected_date=date.today() + timedelta(days=5),
+        items=[
+            {"material_id": material_id, "quantity": Decimal("10"), "unit_price": Decimal("15")}
+        ],
+    )
+    db.commit()
+
+    item_id = order["items"][0]["id"]
+    receipt = service.create_receipt(
+        db,
+        purchase_order_id=order["id"],
+        receipt_date=date.today(),
+        items=[{"order_item_id": item_id, "quantity": Decimal("5"), "qualified_qty": Decimal("5")}],
+    )
+    db.commit()
+    assert receipt["status"] == "DRAFT"
+    assert "warehouse_id" not in receipt or receipt.get("warehouse_id") is None
+
+
+def test_receipt_confirm_marks_wait_inbound_and_rewrites_order(db: Session) -> None:
+    """confirm_receipt 不入库存（不再调 increase_stock），只置 WAIT_INBOUND + 回写 received_qty。"""
+    material_id = _create_material(db)
+    supplier = _create_supplier(db)
+    order = service.create_order(
+        db,
+        supplier_id=supplier["id"],
+        order_date=date.today(),
+        expected_date=date.today() + timedelta(days=5),
+        items=[
+            {"material_id": material_id, "quantity": Decimal("10"), "unit_price": Decimal("15")}
+        ],
+    )
+    service.set_order_status(db, order["id"], "CONFIRMED")
+    db.commit()
+
+    item_id = order["items"][0]["id"]
+    receipt = service.create_receipt(
+        db,
+        purchase_order_id=order["id"],
+        receipt_date=date.today(),
+        items=[{"order_item_id": item_id, "quantity": Decimal("6"), "qualified_qty": Decimal("6")}],
+    )
+    db.commit()
+
+    service.confirm_receipt(db, receipt["id"])
+    db.commit()
+    refreshed = service.get_receipt(db, receipt["id"])
+    assert refreshed["status"] == "WAIT_INBOUND"
+
+    order_items = db.execute(
+        text("SELECT received_qty FROM pur_order_item WHERE id = :i"), {"i": item_id}
+    ).scalar()
+    assert Decimal(order_items) == Decimal("6")
+
+
+def test_receipt_confirm_inbound_completes_receipt_via_contract(db: Session) -> None:
+    """库存模块上架后调用 contract.confirm_inbound，到货单从 WAIT_INBOUND 置 INBOUND_CONFIRMED。"""
+    material_id = _create_material(db)
+    supplier = _create_supplier(db)
+    order = service.create_order(
+        db,
+        supplier_id=supplier["id"],
+        order_date=date.today(),
+        expected_date=date.today() + timedelta(days=5),
+        items=[
+            {"material_id": material_id, "quantity": Decimal("10"), "unit_price": Decimal("15")}
+        ],
+    )
+    service.set_order_status(db, order["id"], "CONFIRMED")
+    db.commit()
+
+    item_id = order["items"][0]["id"]
+    receipt = service.create_receipt(
+        db,
+        purchase_order_id=order["id"],
+        receipt_date=date.today(),
+        items=[{"order_item_id": item_id, "quantity": Decimal("10"), "qualified_qty": Decimal("10")}],
+    )
+    db.commit()
+    service.confirm_receipt(db, receipt["id"])
+    db.commit()
+    assert service.get_receipt(db, receipt["id"])["status"] == "WAIT_INBOUND"
+
+    # contract 调用：库存模块回调
+    done = contract.confirm_inbound(db, receipt_id=receipt["id"], operator_id=None)
+    db.commit()
+    assert done["status"] == "INBOUND_CONFIRMED"
+
+
+def test_cancel_wait_inbound_receipt_rolls_back_received_qty(db: Session) -> None:
+    """WAIT_INBOUND 状态的到货单取消时，必须回滚订单行 received_qty。"""
+    material_id = _create_material(db)
+    supplier = _create_supplier(db)
+    order = service.create_order(
+        db,
+        supplier_id=supplier["id"],
+        order_date=date.today(),
+        expected_date=date.today() + timedelta(days=5),
+        items=[
+            {"material_id": material_id, "quantity": Decimal("10"), "unit_price": Decimal("15")}
+        ],
+    )
+    service.set_order_status(db, order["id"], "CONFIRMED")
+    db.commit()
+
+    item_id = order["items"][0]["id"]
+    receipt = service.create_receipt(
+        db,
+        purchase_order_id=order["id"],
+        receipt_date=date.today(),
+        items=[{"order_item_id": item_id, "quantity": Decimal("7"), "qualified_qty": Decimal("7")}],
+    )
+    db.commit()
+    service.confirm_receipt(db, receipt["id"])
+    db.commit()
+
+    # 已回写 received_qty=7
+    assert Decimal(
+        db.execute(text("SELECT received_qty FROM pur_order_item WHERE id = :i"), {"i": item_id}).scalar()
+    ) == Decimal("7")
+
+    service.cancel_receipt(db, receipt["id"])
+    db.commit()
+    assert service.get_receipt(db, receipt["id"])["status"] == "CANCELLED"
+    # 回滚后 received_qty 应为 0
+    assert Decimal(
+        db.execute(text("SELECT received_qty FROM pur_order_item WHERE id = :i"), {"i": item_id}).scalar()
+    ) == Decimal("0")

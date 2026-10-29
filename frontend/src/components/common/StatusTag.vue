@@ -17,6 +17,8 @@ const LABELS: Record<string, string> = {
   IN_PROGRESS: '执行中',
   COMPLETED: '已完成',
   CANCELLED: '已取消',
+  WAIT_INBOUND: '待上架',
+  INBOUND_CONFIRMED: '已入库',
   // 启用状态
   ACTIVE: '启用',
   INACTIVE: '停用',
@@ -65,6 +67,8 @@ const TYPES: Record<string, 'success' | 'info' | 'warning' | 'danger' | 'primary
   IN_PROGRESS: 'warning',
   COMPLETED: 'success',
   CANCELLED: 'danger',
+  WAIT_INBOUND: 'warning',
+  INBOUND_CONFIRMED: 'success',
   ACTIVE: 'success',
   INACTIVE: 'info',
   MAKE: 'warning',

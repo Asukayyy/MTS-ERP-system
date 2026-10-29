@@ -457,7 +457,7 @@ def delete_evaluation(db: Session, evaluation: models.PurSupplierEvaluation) -> 
 # ---- 自动评价统计查询（只 JOIN 本模块 pur_* 表） ----
 
 #: 参与评价的到货单状态（草稿/已取消不计）
-_EVAL_RECEIPT_STATUSES = ("CONFIRMED", "COMPLETED")
+_EVAL_RECEIPT_STATUSES = ("WAIT_INBOUND", "INBOUND_CONFIRMED")
 #: 参与价格统计的订单状态（草稿/已取消的价格不具参考性）
 _EVAL_ORDER_STATUSES = ("CONFIRMED", "RELEASED", "IN_PROGRESS", "COMPLETED")
 
@@ -616,7 +616,6 @@ def receipt_report_rows(db: Session, date_from: date, date_to: date) -> List[Tup
             models.PurOrder.order_no,
             models.PurReceipt.supplier_id,
             models.PurReceiptItem.material_id,
-            models.PurReceipt.warehouse_id,
             models.PurReceiptItem.quantity,
             models.PurReceiptItem.qualified_qty,
         )

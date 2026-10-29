@@ -277,11 +277,10 @@ class ReceiptItemCreate(BaseModel):
 
 
 class ReceiptCreate(BaseModel):
-    """到货单新增入参（单头 + 行明细）。"""
+    """到货单新增入参（单头 + 行明细）。职责分离：不选仓库，库位由库存模块上架时决定。"""
 
     receipt_no: Optional[str] = Field(default=None, max_length=50, description="到货单号，留空自动生成")
     purchase_order_id: int = Field(description="采购订单ID")
-    warehouse_id: int = Field(description="收货仓库ID")
     receipt_date: date = Field(description="到货日期")
     remark: Optional[str] = None
     operator_id: Optional[int] = None
@@ -305,7 +304,6 @@ class ReceiptOut(_IdOut):
     order_no: Optional[str] = None
     supplier_id: int
     supplier_name: Optional[str] = None
-    warehouse_id: int
     receipt_date: date
     status: str
     remark: Optional[str] = None
@@ -418,7 +416,6 @@ class ReceiptReportOut(BaseModel):
     material_id: int
     material_code: Optional[str] = None
     material_name: Optional[str] = None
-    warehouse_id: int
     quantity: Decimal
     qualified_qty: Decimal
 

@@ -242,7 +242,6 @@ onMounted(load)
           <el-select v-model="query.status" clearable placeholder="全部" style="width: 130px">
             <el-option label="草稿" value="DRAFT" />
             <el-option label="已确认" value="CONFIRMED" />
-            <el-option label="已下达" value="RELEASED" />
             <el-option label="已完成" value="COMPLETED" />
             <el-option label="已取消" value="CANCELLED" />
           </el-select>
@@ -270,22 +269,24 @@ onMounted(load)
             <el-button v-if="row.status === 'DRAFT'" link type="primary" @click="changeStatus(row, 'CONFIRMED')">
               确认
             </el-button>
-            <el-button v-if="row.status === 'CONFIRMED'" link type="primary" @click="changeStatus(row, 'RELEASED')">
-              下达
-            </el-button>
-            <el-button v-if="row.status === 'RELEASED'" link type="success" @click="changeStatus(row, 'COMPLETED')">
+            <el-button
+              v-if="row.status === 'CONFIRMED'"
+              link
+              type="success"
+              @click="changeStatus(row, 'COMPLETED')"
+            >
               完成
             </el-button>
             <el-button
-              v-if="!['COMPLETED', 'CANCELLED'].includes(row.status)"
+              v-if="row.status === 'CONFIRMED'"
               link
               type="warning"
               @click="openOrder(row)"
             >
-              生成采购订单
+              生成订单
             </el-button>
             <el-button
-              v-if="['DRAFT', 'CONFIRMED', 'RELEASED'].includes(row.status)"
+              v-if="['DRAFT', 'CONFIRMED'].includes(row.status)"
               link
               type="danger"
               @click="changeStatus(row, 'CANCELLED')"

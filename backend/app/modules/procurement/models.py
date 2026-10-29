@@ -253,7 +253,7 @@ class PurOrderItem(Base, AuditMixin):
 
 
 class PurReceipt(Base, AuditMixin):
-    """到货登记单头。确认后必须调用 inventory 入库并生成库存流水。"""
+    """到货登记单头。职责分离：采购登记到货数量，仓库选库位上架。"""
 
     __tablename__ = "pur_receipt"
 
@@ -264,9 +264,6 @@ class PurReceipt(Base, AuditMixin):
     )
     supplier_id: Mapped[BigIntFk] = mapped_column(
         ForeignKey("pur_supplier.id", ondelete="RESTRICT"), nullable=False, index=True, comment="供应商ID"
-    )
-    warehouse_id: Mapped[BigIntFk] = mapped_column(
-        ForeignKey("inv_warehouse.id", ondelete="RESTRICT"), nullable=False, comment="收货仓库ID"
     )
     receipt_date: Mapped[date] = mapped_column(Date, nullable=False, comment="到货日期")
     status: Mapped[str] = mapped_column(
@@ -280,7 +277,7 @@ class PurReceipt(Base, AuditMixin):
 
     __table_args__ = (
         CheckConstraint(
-            "status IN ('DRAFT','CONFIRMED','COMPLETED','CANCELLED')", name="ck_pur_receipt_status"
+            "status IN ('DRAFT','WAIT_INBOUND','INBOUND_CONFIRMED','CANCELLED')", name="ck_pur_receipt_status"
         ),
     )
 

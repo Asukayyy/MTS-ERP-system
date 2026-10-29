@@ -532,11 +532,10 @@ def list_receipts(
 def create_receipt(
     payload: schemas.ReceiptCreate, db: Session = Depends(get_db)
 ) -> ApiResponse[schemas.ReceiptOut]:
-    """新增到货单（DRAFT）；到货数量超过未到货数量返回 4004。"""
+    """新增到货单（DRAFT）；到货数量超过未到货数量返回 4004。职责分离：不选仓库。"""
     receipt = service.create_receipt(
         db,
         purchase_order_id=payload.purchase_order_id,
-        warehouse_id=payload.warehouse_id,
         receipt_date=payload.receipt_date,
         receipt_no=payload.receipt_no,
         remark=payload.remark,
@@ -562,15 +561,31 @@ def get_receipt(
 @router.post(
     "/receipts/{receipt_id}/confirm",
     response_model=ApiResponse[schemas.ReceiptOut],
-    summary="确认到货（调用库存入库）",
+    summary="确认到货（待上架）",
 )
 def confirm_receipt(
     receipt_id: int,
     operator_id: Optional[int] = Query(default=None),
     db: Session = Depends(get_db),
 ) -> ApiResponse[schemas.ReceiptOut]:
-    """确认到货：调用 `inventory.contract.increase_stock` 写 PURCHASE_RECEIPT 流水并回写已到货数量。"""
+    """采购员确认到货：回写订单已到货数量并置 WAIT_INBOUND。不入库存，库位由库存模块上架时决定。"""
     receipt = service.confirm_receipt(db, receipt_id, operator_id)
+    db.commit()
+    return success(receipt)
+
+
+@router.post(
+    "/receipts/{receipt_id}/confirm-inbound",
+    response_model=ApiResponse[schemas.ReceiptOut],
+    summary="完成入库（库存模块回调）",
+)
+def confirm_receipt_inbound(
+    receipt_id: int,
+    operator_id: Optional[int] = Query(default=None),
+    db: Session = Depends(get_db),
+) -> ApiResponse[schemas.ReceiptOut]:
+    """库存模块完成上架后回调：到货单 WAIT_INBOUND → INBOUND_CONFIRMED。库存流水由库存模块写入。"""
+    receipt = service.complete_receipt_inbound(db, receipt_id, operator_id)
     db.commit()
     return success(receipt)
 
@@ -578,14 +593,14 @@ def confirm_receipt(
 @router.post(
     "/receipts/{receipt_id}/cancel",
     response_model=ApiResponse[schemas.ReceiptOut],
-    summary="取消到货单（仅 DRAFT）",
+    summary="取消到货单（DRAFT/WAIT_INBOUND）",
 )
 def cancel_receipt(
     receipt_id: int,
     operator_id: Optional[int] = Query(default=None),
     db: Session = Depends(get_db),
 ) -> ApiResponse[schemas.ReceiptOut]:
-    """取消到货单，仅 DRAFT 允许。"""
+    """取消到货单：DRAFT 直接取消；WAIT_INBOUND 取消时回滚订单已到货数量；已入库不可取消。"""
     receipt = service.cancel_receipt(db, receipt_id, operator_id)
     db.commit()
     return success(receipt)

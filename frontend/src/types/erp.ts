@@ -968,7 +968,6 @@ export interface Receipt {
   order_no?: string | null
   supplier_id: number
   supplier_name?: string | null
-  warehouse_id: number
   receipt_date: string
   status: string
   remark?: string | null
@@ -1048,7 +1047,6 @@ export interface ReceiptReportRow {
   material_id: number
   material_code?: string | null
   material_name?: string | null
-  warehouse_id: number
   quantity: Num
   qualified_qty: Num
 }
