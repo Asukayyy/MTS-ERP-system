@@ -302,6 +302,151 @@ def test_stock_increase_api(client: TestClient, db: Session) -> None:
     assert Decimal(str(body["data"]["quantity_after"])) == Decimal("20.0000")
 
 
+# ==================== 实时库存：后端全量排序（跨分页） ====================
+
+
+def _create_material_with_exact_code(db: Session, code: str, name: str) -> int:
+    """按指定编码写入物料（用于验证按物料编码排序）。"""
+    db.execute(
+        text(
+            "INSERT INTO sys_material (material_code, material_name, material_type, "
+            "supply_type, unit_code, lead_time_days, safety_stock, standard_cost, status, "
+            "created_at, updated_at) "
+            "VALUES (:code, :name, 'PURCHASED', 'BUY', 'PCS', 0, 0, 0, 'ACTIVE', "
+            "NOW(), NOW())"
+        ),
+        {"code": code, "name": name},
+    )
+    db.flush()
+    return int(
+        db.execute(
+            text("SELECT id FROM sys_material WHERE material_code = :c"), {"c": code}
+        ).scalar()
+    )
+
+
+def _seed_sort_materials(
+    db: Session, prefix: str, quantities: list[Decimal]
+) -> tuple[int, list[str]]:
+    """建一个仓库 + 若干物料并入库指定数量，返回 (仓库ID, 物料编码列表)。"""
+    tag = _tag()
+    warehouse_id = _create_warehouse(db)
+    codes = [f"{prefix}{tag}{chr(ord('A') + i)}" for i in range(len(quantities))]
+    for code, qty in zip(codes, quantities):
+        material_id = _create_material_with_exact_code(db, code, f"排序测试物料{code}")
+        service.increase_stock(
+            db,
+            material_id=material_id,
+            quantity=qty,
+            warehouse_id=warehouse_id,
+            source_module="inventory",
+            source_type="MANUAL",
+        )
+    db.commit()
+    return warehouse_id, codes
+
+
+def test_balances_api_sorts_by_quantity_across_pages(
+    client: TestClient, db: Session
+) -> None:
+    """按现存量排序：第 1 页取全局最大两行，第 2 页仍是全局剩余，而不是只排当前页。"""
+    warehouse_id, codes = _seed_sort_materials(
+        db, "SRTQ", [Decimal("10"), Decimal("30"), Decimal("20")]
+    )
+    params = {
+        "keyword": codes[0][:9],  # 共用前缀，收敛到本次测试的三条结存
+        "warehouse_id": warehouse_id,
+        "quantity_gt": 0,
+        "page_size": 2,
+        "sort_by": "quantity",
+        "sort_order": "desc",
+    }
+    first = client.get("/api/v1/inventory/balances", params={**params, "page": 1})
+    assert first.status_code == 200
+    body = first.json()
+    assert body["code"] == 0
+    assert body["data"]["total"] == 3
+    assert [Decimal(str(i["on_hand"])) for i in body["data"]["items"]] == [
+        Decimal("30.0000"),
+        Decimal("20.0000"),
+    ]
+
+    second = client.get("/api/v1/inventory/balances", params={**params, "page": 2})
+    assert [Decimal(str(i["on_hand"])) for i in second.json()["data"]["items"]] == [
+        Decimal("10.0000")
+    ]
+
+
+def test_balances_api_sorts_by_material_code_with_join(
+    client: TestClient, db: Session
+) -> None:
+    """按物料编码（跨模块 JOIN sys_material）排序：倒序时编码最大的排在第 1 页。"""
+    warehouse_id, codes = _seed_sort_materials(
+        db, "SRTC", [Decimal("1"), Decimal("2"), Decimal("3")]
+    )
+    params = {
+        "keyword": codes[0][:9],
+        "warehouse_id": warehouse_id,
+        "quantity_gt": 0,
+        "page_size": 2,
+        "sort_by": "material_code",
+        "sort_order": "desc",
+    }
+    first = client.get("/api/v1/inventory/balances", params={**params, "page": 1})
+    assert first.status_code == 200
+    items = first.json()["data"]["items"]
+    assert [i["material_code"] for i in items] == [codes[2], codes[1]]
+
+    second = client.get("/api/v1/inventory/balances", params={**params, "page": 2})
+    assert [i["material_code"] for i in second.json()["data"]["items"]] == [codes[0]]
+
+
+# ==================== 库存流水：接口可查到刚发生的出入库 ====================
+
+
+def test_stock_journal_api_lists_changes_newest_first(
+    client: TestClient, db: Session
+) -> None:
+    """库存流水接口：入库 / 出库后各写一条流水，按 id 倒序返回且字段完整。"""
+    material_id, material_code = _create_material_with_code(db)
+    warehouse_id = _create_warehouse(db)
+    service.increase_stock(
+        db,
+        material_id=material_id,
+        quantity=Decimal("5"),
+        warehouse_id=warehouse_id,
+        source_module="inventory",
+        source_type="MANUAL",
+    )
+    service.decrease_stock(
+        db,
+        material_id=material_id,
+        quantity=Decimal("2"),
+        warehouse_id=warehouse_id,
+        source_module="inventory",
+        source_type="MANUAL",
+    )
+    db.commit()
+
+    response = client.get(
+        "/api/v1/inventory/stock-journal",
+        params={"material_id": material_id, "page": 1, "page_size": 10},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["code"] == 0
+    assert body["data"]["total"] == 2
+
+    newest = body["data"]["items"][0]
+    assert newest["direction"] == "OUT"
+    assert Decimal(str(newest["delta_qty"])) == Decimal("-2.0000")
+    assert Decimal(str(newest["qty_before"])) == Decimal("5.0000")
+    assert Decimal(str(newest["qty_after"])) == Decimal("3.0000")
+    assert newest["material_code"] == material_code
+    assert newest["warehouse_id"] == warehouse_id
+
+
+
 # ==================== 契约：补库需求只读读取 ====================
 
 

@@ -224,8 +224,8 @@ PERMISSION_SEEDS: list[dict[str, Any]] = [
      "parent": "inventory", "path": "/inventory/inbound", "module": "inventory", "sort_no": 20},
     {"code": "inventory:outbound", "name": "出库管理", "perm_type": "MENU",
      "parent": "inventory", "path": "/inventory/outbound", "module": "inventory", "sort_no": 30},
-    {"code": "inventory:ledger", "name": "库存流水与结存", "perm_type": "MENU",
-     "parent": "inventory", "path": "/inventory/transaction", "module": "inventory", "sort_no": 40},
+    {"code": "inventory:ledger", "name": "库存流水", "perm_type": "MENU",
+     "parent": "inventory", "path": "/inventory/stock-journal", "module": "inventory", "sort_no": 40},
     # ---- 补充：与前端实际路由逐一比对后新增的页面权限（原权限树遗漏） ----
     # 前端菜单按权限编码过滤，因此每个真实页面都必须有对应的 MENU 权限码。
     {"code": "sales:customer", "name": "客户管理", "perm_type": "MENU",

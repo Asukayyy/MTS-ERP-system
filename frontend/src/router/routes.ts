@@ -225,7 +225,7 @@ export const constantRoutes: RouteRecordRaw[] = [
         path: 'inventory/stock-journal',
         name: 'InventoryStockJournal',
         component: () => import('@/views/inventory/stock-journal/index.vue'),
-        meta: { title: '库存流水', perm: 'inventory:balance' },
+        meta: { title: '库存流水', perm: 'inventory:ledger' },
       },
 
       // ---------- 人事管理 ----------
