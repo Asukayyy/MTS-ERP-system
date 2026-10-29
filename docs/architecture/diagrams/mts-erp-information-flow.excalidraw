@@ -1,0 +1,1883 @@
+{
+  "type": "excalidraw",
+  "version": 2,
+  "source": "mcp-excalidraw-server",
+  "elements": [
+    {
+      "id": "title",
+      "type": "text",
+      "x": 60,
+      "y": 40,
+      "width": 1100,
+      "height": 40,
+      "strokeColor": "#0A0A0A",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "text": "MTS-ERP 信息流（单据与数据对象）",
+      "fontSize": 28,
+      "fontFamily": 2,
+      "createdAt": "2026-10-29T07:45:25.168Z",
+      "updatedAt": "2026-10-29T07:45:25.168Z",
+      "version": 1,
+      "textAlign": "left",
+      "verticalAlign": "top",
+      "lineHeight": 1.25,
+      "autoResize": true,
+      "originalText": "MTS-ERP 信息流（单据与数据对象）"
+    },
+    {
+      "id": "intro",
+      "type": "text",
+      "x": 60,
+      "y": 92,
+      "width": 1400,
+      "height": 26,
+      "strokeColor": "#404040",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "text": "箭头标注流转的关键数据；MRP 以 MPS、BOM、可用库存与在途量为输入，输出采购建议与自制建议。",
+      "fontSize": 16,
+      "fontFamily": 2,
+      "createdAt": "2026-10-29T07:45:25.168Z",
+      "updatedAt": "2026-10-29T07:45:25.168Z",
+      "version": 1,
+      "textAlign": "left",
+      "verticalAlign": "top",
+      "lineHeight": 1.25,
+      "autoResize": true,
+      "originalText": "箭头标注流转的关键数据；MRP 以 MPS、BOM、可用库存与在途量为输入，输出采购建议与自制建议。"
+    },
+    {
+      "id": "z1",
+      "type": "rectangle",
+      "x": 60,
+      "y": 180,
+      "width": 1480,
+      "height": 200,
+      "backgroundColor": "#FAFAFA",
+      "strokeColor": "#7373732E",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "roundness": {
+        "type": 3,
+        "value": 8
+      },
+      "createdAt": "2026-10-29T07:45:25.168Z",
+      "updatedAt": "2026-10-29T07:45:25.168Z",
+      "version": 1,
+      "fillStyle": "solid"
+    },
+    {
+      "id": "z1-h",
+      "type": "text",
+      "x": 84,
+      "y": 196,
+      "width": 600,
+      "height": 28,
+      "strokeColor": "#404040",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "text": "销售数据",
+      "fontSize": 20,
+      "fontFamily": 2,
+      "createdAt": "2026-10-29T07:45:25.168Z",
+      "updatedAt": "2026-10-29T07:45:25.168Z",
+      "version": 1,
+      "textAlign": "left",
+      "verticalAlign": "top",
+      "lineHeight": 1.25,
+      "autoResize": true,
+      "originalText": "销售数据"
+    },
+    {
+      "id": "z2",
+      "type": "rectangle",
+      "x": 60,
+      "y": 420,
+      "width": 1480,
+      "height": 200,
+      "backgroundColor": "#FAFAFA",
+      "strokeColor": "#7373732E",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "roundness": {
+        "type": 3,
+        "value": 8
+      },
+      "createdAt": "2026-10-29T07:45:25.168Z",
+      "updatedAt": "2026-10-29T07:45:25.168Z",
+      "version": 1,
+      "fillStyle": "solid"
+    },
+    {
+      "id": "z2-h",
+      "type": "text",
+      "x": 84,
+      "y": 436,
+      "width": 600,
+      "height": 28,
+      "strokeColor": "#404040",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "text": "计划数据",
+      "fontSize": 20,
+      "fontFamily": 2,
+      "createdAt": "2026-10-29T07:45:25.168Z",
+      "updatedAt": "2026-10-29T07:45:25.168Z",
+      "version": 1,
+      "textAlign": "left",
+      "verticalAlign": "top",
+      "lineHeight": 1.25,
+      "autoResize": true,
+      "originalText": "计划数据"
+    },
+    {
+      "id": "z3",
+      "type": "rectangle",
+      "x": 60,
+      "y": 660,
+      "width": 1480,
+      "height": 200,
+      "backgroundColor": "#FAFAFA",
+      "strokeColor": "#7373732E",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "roundness": {
+        "type": 3,
+        "value": 8
+      },
+      "createdAt": "2026-10-29T07:45:25.168Z",
+      "updatedAt": "2026-10-29T07:45:25.168Z",
+      "version": 1,
+      "fillStyle": "solid"
+    },
+    {
+      "id": "z3-h",
+      "type": "text",
+      "x": 84,
+      "y": 676,
+      "width": 600,
+      "height": 28,
+      "strokeColor": "#404040",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "text": "采购数据",
+      "fontSize": 20,
+      "fontFamily": 2,
+      "createdAt": "2026-10-29T07:45:25.168Z",
+      "updatedAt": "2026-10-29T07:45:25.168Z",
+      "version": 1,
+      "textAlign": "left",
+      "verticalAlign": "top",
+      "lineHeight": 1.25,
+      "autoResize": true,
+      "originalText": "采购数据"
+    },
+    {
+      "id": "z4",
+      "type": "rectangle",
+      "x": 60,
+      "y": 900,
+      "width": 1480,
+      "height": 200,
+      "backgroundColor": "#FAFAFA",
+      "strokeColor": "#7373732E",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "roundness": {
+        "type": 3,
+        "value": 8
+      },
+      "createdAt": "2026-10-29T07:45:25.168Z",
+      "updatedAt": "2026-10-29T07:45:25.168Z",
+      "version": 1,
+      "fillStyle": "solid"
+    },
+    {
+      "id": "z4-h",
+      "type": "text",
+      "x": 84,
+      "y": 916,
+      "width": 600,
+      "height": 28,
+      "strokeColor": "#404040",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "text": "生产数据",
+      "fontSize": 20,
+      "fontFamily": 2,
+      "createdAt": "2026-10-29T07:45:25.168Z",
+      "updatedAt": "2026-10-29T07:45:25.168Z",
+      "version": 1,
+      "textAlign": "left",
+      "verticalAlign": "top",
+      "lineHeight": 1.25,
+      "autoResize": true,
+      "originalText": "生产数据"
+    },
+    {
+      "id": "z5",
+      "type": "rectangle",
+      "x": 60,
+      "y": 1140,
+      "width": 1480,
+      "height": 200,
+      "backgroundColor": "#FAFAFA",
+      "strokeColor": "#7373732E",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "roundness": {
+        "type": 3,
+        "value": 8
+      },
+      "createdAt": "2026-10-29T07:45:25.168Z",
+      "updatedAt": "2026-10-29T07:45:25.168Z",
+      "version": 1,
+      "fillStyle": "solid"
+    },
+    {
+      "id": "z5-h",
+      "type": "text",
+      "x": 84,
+      "y": 1156,
+      "width": 600,
+      "height": 28,
+      "strokeColor": "#404040",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "text": "库存数据",
+      "fontSize": 20,
+      "fontFamily": 2,
+      "createdAt": "2026-10-29T07:45:25.168Z",
+      "updatedAt": "2026-10-29T07:45:25.168Z",
+      "version": 1,
+      "textAlign": "left",
+      "verticalAlign": "top",
+      "lineHeight": 1.25,
+      "autoResize": true,
+      "originalText": "库存数据"
+    },
+    {
+      "id": "s1",
+      "type": "rectangle",
+      "x": 100,
+      "y": 260,
+      "width": 180,
+      "height": 80,
+      "backgroundColor": "#FFFFFF",
+      "strokeColor": "#7373735C",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "label": {
+        "text": "销售预测"
+      },
+      "fontSize": 16,
+      "fontFamily": 2,
+      "roundness": {
+        "type": 3,
+        "value": 8
+      },
+      "createdAt": "2026-10-29T07:45:25.168Z",
+      "updatedAt": "2026-10-29T07:45:25.168Z",
+      "version": 1,
+      "boundElements": [
+        {
+          "type": "arrow",
+          "id": "k1"
+        },
+        {
+          "type": "arrow",
+          "id": "k4"
+        }
+      ],
+      "fillStyle": "solid"
+    },
+    {
+      "id": "s2",
+      "type": "rectangle",
+      "x": 400,
+      "y": 260,
+      "width": 180,
+      "height": 80,
+      "backgroundColor": "#654ACB",
+      "strokeColor": "#654ACB",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "label": {
+        "text": "销售订单"
+      },
+      "fontSize": 16,
+      "fontFamily": 2,
+      "roundness": {
+        "type": 3,
+        "value": 8
+      },
+      "createdAt": "2026-10-29T07:45:25.168Z",
+      "updatedAt": "2026-10-29T07:45:25.168Z",
+      "version": 1,
+      "boundElements": [
+        {
+          "type": "arrow",
+          "id": "k1"
+        },
+        {
+          "type": "arrow",
+          "id": "k2"
+        },
+        {
+          "type": "arrow",
+          "id": "k5"
+        }
+      ],
+      "fillStyle": "solid"
+    },
+    {
+      "id": "s3",
+      "type": "rectangle",
+      "x": 700,
+      "y": 260,
+      "width": 180,
+      "height": 80,
+      "backgroundColor": "#FFFFFF",
+      "strokeColor": "#7373735C",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "label": {
+        "text": "订单明细"
+      },
+      "fontSize": 16,
+      "fontFamily": 2,
+      "roundness": {
+        "type": 3,
+        "value": 8
+      },
+      "createdAt": "2026-10-29T07:45:25.168Z",
+      "updatedAt": "2026-10-29T07:45:25.168Z",
+      "version": 1,
+      "boundElements": [
+        {
+          "type": "arrow",
+          "id": "k2"
+        },
+        {
+          "type": "arrow",
+          "id": "k3"
+        },
+        {
+          "type": "arrow",
+          "id": "k6"
+        }
+      ],
+      "fillStyle": "solid"
+    },
+    {
+      "id": "s4",
+      "type": "rectangle",
+      "x": 1000,
+      "y": 260,
+      "width": 180,
+      "height": 80,
+      "backgroundColor": "#FFFFFF",
+      "strokeColor": "#7373735C",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "label": {
+        "text": "发货单"
+      },
+      "fontSize": 16,
+      "fontFamily": 2,
+      "roundness": {
+        "type": 3,
+        "value": 8
+      },
+      "createdAt": "2026-10-29T07:45:25.168Z",
+      "updatedAt": "2026-10-29T07:45:25.168Z",
+      "version": 1,
+      "boundElements": [
+        {
+          "type": "arrow",
+          "id": "k3"
+        }
+      ],
+      "fillStyle": "solid"
+    },
+    {
+      "id": "p1",
+      "type": "rectangle",
+      "x": 100,
+      "y": 500,
+      "width": 180,
+      "height": 80,
+      "backgroundColor": "#FFFFFF",
+      "strokeColor": "#7373735C",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "label": {
+        "text": "需求汇总"
+      },
+      "fontSize": 16,
+      "fontFamily": 2,
+      "roundness": {
+        "type": 3,
+        "value": 8
+      },
+      "createdAt": "2026-10-29T07:45:25.168Z",
+      "updatedAt": "2026-10-29T07:45:25.168Z",
+      "version": 1,
+      "boundElements": [
+        {
+          "type": "arrow",
+          "id": "k4"
+        },
+        {
+          "type": "arrow",
+          "id": "k5"
+        },
+        {
+          "type": "arrow",
+          "id": "k7"
+        }
+      ],
+      "fillStyle": "solid"
+    },
+    {
+      "id": "p2",
+      "type": "rectangle",
+      "x": 400,
+      "y": 500,
+      "width": 180,
+      "height": 80,
+      "backgroundColor": "#FFFFFF",
+      "strokeColor": "#7373735C",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "label": {
+        "text": "MPS 主生产计划"
+      },
+      "fontSize": 16,
+      "fontFamily": 2,
+      "roundness": {
+        "type": 3,
+        "value": 8
+      },
+      "createdAt": "2026-10-29T07:45:25.168Z",
+      "updatedAt": "2026-10-29T07:45:25.168Z",
+      "version": 1,
+      "boundElements": [
+        {
+          "type": "arrow",
+          "id": "k6"
+        },
+        {
+          "type": "arrow",
+          "id": "k7"
+        },
+        {
+          "type": "arrow",
+          "id": "k8"
+        }
+      ],
+      "fillStyle": "solid"
+    },
+    {
+      "id": "p3",
+      "type": "rectangle",
+      "x": 700,
+      "y": 500,
+      "width": 180,
+      "height": 80,
+      "backgroundColor": "#EEEFFF",
+      "strokeColor": "#654ACB",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "label": {
+        "text": "MRP 结果"
+      },
+      "fontSize": 16,
+      "fontFamily": 2,
+      "roundness": {
+        "type": 3,
+        "value": 8
+      },
+      "createdAt": "2026-10-29T07:45:25.168Z",
+      "updatedAt": "2026-10-29T07:45:25.168Z",
+      "version": 1,
+      "boundElements": [
+        {
+          "type": "arrow",
+          "id": "k8"
+        },
+        {
+          "type": "arrow",
+          "id": "k9"
+        },
+        {
+          "type": "arrow",
+          "id": "k10"
+        },
+        {
+          "type": "arrow",
+          "id": "k11"
+        }
+      ],
+      "fillStyle": "solid"
+    },
+    {
+      "id": "p4",
+      "type": "rectangle",
+      "x": 1000,
+      "y": 500,
+      "width": 180,
+      "height": 80,
+      "backgroundColor": "#FFFFFF",
+      "strokeColor": "#7373735C",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "label": {
+        "text": "采购计划"
+      },
+      "fontSize": 16,
+      "fontFamily": 2,
+      "roundness": {
+        "type": 3,
+        "value": 8
+      },
+      "createdAt": "2026-10-29T07:45:25.168Z",
+      "updatedAt": "2026-10-29T07:45:25.168Z",
+      "version": 1,
+      "boundElements": [
+        {
+          "type": "arrow",
+          "id": "k9"
+        }
+      ],
+      "fillStyle": "solid"
+    },
+    {
+      "id": "q1",
+      "type": "rectangle",
+      "x": 1000,
+      "y": 740,
+      "width": 180,
+      "height": 80,
+      "backgroundColor": "#FFFFFF",
+      "strokeColor": "#7373735C",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "label": {
+        "text": "采购订单"
+      },
+      "fontSize": 16,
+      "fontFamily": 2,
+      "roundness": {
+        "type": 3,
+        "value": 8
+      },
+      "createdAt": "2026-10-29T07:45:25.168Z",
+      "updatedAt": "2026-10-29T07:45:25.168Z",
+      "version": 1,
+      "boundElements": [
+        {
+          "type": "arrow",
+          "id": "k10"
+        },
+        {
+          "type": "arrow",
+          "id": "k12"
+        }
+      ],
+      "fillStyle": "solid"
+    },
+    {
+      "id": "q2",
+      "type": "rectangle",
+      "x": 1300,
+      "y": 740,
+      "width": 180,
+      "height": 80,
+      "backgroundColor": "#FFFFFF",
+      "strokeColor": "#7373735C",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "label": {
+        "text": "到货单"
+      },
+      "fontSize": 16,
+      "fontFamily": 2,
+      "roundness": {
+        "type": 3,
+        "value": 8
+      },
+      "createdAt": "2026-10-29T07:45:25.168Z",
+      "updatedAt": "2026-10-29T07:45:25.168Z",
+      "version": 1,
+      "boundElements": [
+        {
+          "type": "arrow",
+          "id": "k12"
+        },
+        {
+          "type": "arrow",
+          "id": "k13"
+        }
+      ],
+      "fillStyle": "solid"
+    },
+    {
+      "id": "m1",
+      "type": "rectangle",
+      "x": 100,
+      "y": 980,
+      "width": 180,
+      "height": 80,
+      "backgroundColor": "#FFFFFF",
+      "strokeColor": "#7373735C",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "label": {
+        "text": "生产计划"
+      },
+      "fontSize": 16,
+      "fontFamily": 2,
+      "roundness": {
+        "type": 3,
+        "value": 8
+      },
+      "createdAt": "2026-10-29T07:45:25.168Z",
+      "updatedAt": "2026-10-29T07:45:25.168Z",
+      "version": 1,
+      "boundElements": [
+        {
+          "type": "arrow",
+          "id": "k11"
+        },
+        {
+          "type": "arrow",
+          "id": "k14"
+        }
+      ],
+      "fillStyle": "solid"
+    },
+    {
+      "id": "m2",
+      "type": "rectangle",
+      "x": 400,
+      "y": 980,
+      "width": 180,
+      "height": 80,
+      "backgroundColor": "#FFFFFF",
+      "strokeColor": "#7373735C",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "label": {
+        "text": "派工单"
+      },
+      "fontSize": 16,
+      "fontFamily": 2,
+      "roundness": {
+        "type": 3,
+        "value": 8
+      },
+      "createdAt": "2026-10-29T07:45:25.168Z",
+      "updatedAt": "2026-10-29T07:45:25.168Z",
+      "version": 1,
+      "boundElements": [
+        {
+          "type": "arrow",
+          "id": "k14"
+        },
+        {
+          "type": "arrow",
+          "id": "k15"
+        }
+      ],
+      "fillStyle": "solid"
+    },
+    {
+      "id": "m3",
+      "type": "rectangle",
+      "x": 700,
+      "y": 980,
+      "width": 180,
+      "height": 80,
+      "backgroundColor": "#FFFFFF",
+      "strokeColor": "#7373735C",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "label": {
+        "text": "完工报告"
+      },
+      "fontSize": 16,
+      "fontFamily": 2,
+      "roundness": {
+        "type": 3,
+        "value": 8
+      },
+      "createdAt": "2026-10-29T07:45:25.168Z",
+      "updatedAt": "2026-10-29T07:45:25.168Z",
+      "version": 1,
+      "boundElements": [
+        {
+          "type": "arrow",
+          "id": "k15"
+        },
+        {
+          "type": "arrow",
+          "id": "k16"
+        }
+      ],
+      "fillStyle": "solid"
+    },
+    {
+      "id": "i1",
+      "type": "rectangle",
+      "x": 400,
+      "y": 1220,
+      "width": 180,
+      "height": 80,
+      "backgroundColor": "#FFFFFF",
+      "strokeColor": "#7373735C",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "label": {
+        "text": "退货单"
+      },
+      "fontSize": 16,
+      "fontFamily": 2,
+      "roundness": {
+        "type": 3,
+        "value": 8
+      },
+      "createdAt": "2026-10-29T07:45:25.168Z",
+      "updatedAt": "2026-10-29T07:45:25.168Z",
+      "version": 1,
+      "boundElements": [
+        {
+          "type": "arrow",
+          "id": "k19"
+        }
+      ],
+      "fillStyle": "solid"
+    },
+    {
+      "id": "i2",
+      "type": "rectangle",
+      "x": 700,
+      "y": 1220,
+      "width": 180,
+      "height": 80,
+      "backgroundColor": "#FFFFFF",
+      "strokeColor": "#7373735C",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "label": {
+        "text": "库存流水"
+      },
+      "fontSize": 16,
+      "fontFamily": 2,
+      "roundness": {
+        "type": 3,
+        "value": 8
+      },
+      "createdAt": "2026-10-29T07:45:25.168Z",
+      "updatedAt": "2026-10-29T07:45:25.168Z",
+      "version": 1,
+      "boundElements": [
+        {
+          "type": "arrow",
+          "id": "k18"
+        },
+        {
+          "type": "arrow",
+          "id": "k19"
+        }
+      ],
+      "fillStyle": "solid"
+    },
+    {
+      "id": "i3",
+      "type": "rectangle",
+      "x": 1000,
+      "y": 1220,
+      "width": 180,
+      "height": 80,
+      "backgroundColor": "#654ACB",
+      "strokeColor": "#654ACB",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "label": {
+        "text": "实时库存"
+      },
+      "fontSize": 16,
+      "fontFamily": 2,
+      "roundness": {
+        "type": 3,
+        "value": 8
+      },
+      "createdAt": "2026-10-29T07:45:25.168Z",
+      "updatedAt": "2026-10-29T07:45:25.168Z",
+      "version": 1,
+      "boundElements": [
+        {
+          "type": "arrow",
+          "id": "k17"
+        },
+        {
+          "type": "arrow",
+          "id": "k18"
+        }
+      ],
+      "fillStyle": "solid"
+    },
+    {
+      "id": "i4",
+      "type": "rectangle",
+      "x": 1300,
+      "y": 1220,
+      "width": 180,
+      "height": 80,
+      "backgroundColor": "#FFFFFF",
+      "strokeColor": "#7373735C",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "label": {
+        "text": "出入库单"
+      },
+      "fontSize": 16,
+      "fontFamily": 2,
+      "roundness": {
+        "type": 3,
+        "value": 8
+      },
+      "createdAt": "2026-10-29T07:45:25.168Z",
+      "updatedAt": "2026-10-29T07:45:25.168Z",
+      "version": 1,
+      "boundElements": [
+        {
+          "type": "arrow",
+          "id": "k13"
+        },
+        {
+          "type": "arrow",
+          "id": "k16"
+        },
+        {
+          "type": "arrow",
+          "id": "k17"
+        }
+      ],
+      "fillStyle": "solid"
+    },
+    {
+      "id": "k1",
+      "type": "arrow",
+      "x": 288,
+      "y": 300,
+      "width": 104,
+      "height": 0,
+      "strokeColor": "#737373",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "roundness": null,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          104,
+          0
+        ]
+      ],
+      "start": {
+        "id": "s1"
+      },
+      "end": {
+        "id": "s2"
+      },
+      "startArrowhead": null,
+      "endArrowhead": "triangle",
+      "elbowed": false,
+      "createdAt": "2026-10-29T07:45:25.168Z",
+      "updatedAt": "2026-10-29T07:45:25.168Z",
+      "version": 1,
+      "startBinding": {
+        "elementId": "s1",
+        "focus": 0,
+        "gap": 8
+      },
+      "endBinding": {
+        "elementId": "s2",
+        "focus": 0,
+        "gap": 8
+      }
+    },
+    {
+      "id": "k2",
+      "type": "arrow",
+      "x": 588,
+      "y": 300,
+      "width": 104,
+      "height": 0,
+      "strokeColor": "#737373",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "label": {
+        "text": "订单明细"
+      },
+      "fontSize": 16,
+      "fontFamily": 2,
+      "roundness": null,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          104,
+          0
+        ]
+      ],
+      "start": {
+        "id": "s2"
+      },
+      "end": {
+        "id": "s3"
+      },
+      "startArrowhead": null,
+      "endArrowhead": "triangle",
+      "elbowed": false,
+      "createdAt": "2026-10-29T07:45:25.169Z",
+      "updatedAt": "2026-10-29T07:45:25.169Z",
+      "version": 1,
+      "startBinding": {
+        "elementId": "s2",
+        "focus": 0,
+        "gap": 8
+      },
+      "endBinding": {
+        "elementId": "s3",
+        "focus": 0,
+        "gap": 8
+      }
+    },
+    {
+      "id": "k3",
+      "type": "arrow",
+      "x": 888,
+      "y": 300,
+      "width": 104,
+      "height": 0,
+      "strokeColor": "#737373",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "label": {
+        "text": "发货执行"
+      },
+      "fontSize": 16,
+      "fontFamily": 2,
+      "roundness": null,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          104,
+          0
+        ]
+      ],
+      "start": {
+        "id": "s3"
+      },
+      "end": {
+        "id": "s4"
+      },
+      "startArrowhead": null,
+      "endArrowhead": "triangle",
+      "elbowed": false,
+      "createdAt": "2026-10-29T07:45:25.169Z",
+      "updatedAt": "2026-10-29T07:45:25.169Z",
+      "version": 1,
+      "startBinding": {
+        "elementId": "s3",
+        "focus": 0,
+        "gap": 8
+      },
+      "endBinding": {
+        "elementId": "s4",
+        "focus": 0,
+        "gap": 8
+      }
+    },
+    {
+      "id": "k4",
+      "type": "arrow",
+      "x": 190,
+      "y": 348,
+      "width": 0,
+      "height": 144,
+      "strokeColor": "#737373",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "label": {
+        "text": "预测数量"
+      },
+      "fontSize": 16,
+      "fontFamily": 2,
+      "roundness": null,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          144
+        ]
+      ],
+      "start": {
+        "id": "s1"
+      },
+      "end": {
+        "id": "p1"
+      },
+      "startArrowhead": null,
+      "endArrowhead": "triangle",
+      "elbowed": false,
+      "createdAt": "2026-10-29T07:45:25.169Z",
+      "updatedAt": "2026-10-29T07:45:25.169Z",
+      "version": 1,
+      "startBinding": {
+        "elementId": "s1",
+        "focus": 0,
+        "gap": 8
+      },
+      "endBinding": {
+        "elementId": "p1",
+        "focus": 0,
+        "gap": 8
+      }
+    },
+    {
+      "id": "k5",
+      "type": "arrow",
+      "x": 433.7530495244558,
+      "y": 344.9975603804354,
+      "width": 187.50609904891152,
+      "height": 150.0048792391292,
+      "strokeColor": "#737373",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "label": {
+        "text": "订单未交量"
+      },
+      "fontSize": 16,
+      "fontFamily": 2,
+      "roundness": null,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          -187.50609904891152,
+          150.0048792391292
+        ]
+      ],
+      "start": {
+        "id": "s2"
+      },
+      "end": {
+        "id": "p1"
+      },
+      "startArrowhead": null,
+      "endArrowhead": "triangle",
+      "elbowed": false,
+      "createdAt": "2026-10-29T07:45:25.169Z",
+      "updatedAt": "2026-10-29T07:45:25.169Z",
+      "version": 1,
+      "startBinding": {
+        "elementId": "s2",
+        "focus": 0,
+        "gap": 8
+      },
+      "endBinding": {
+        "elementId": "p1",
+        "focus": 0,
+        "gap": 8
+      }
+    },
+    {
+      "id": "k6",
+      "type": "arrow",
+      "x": 733.7530495244557,
+      "y": 344.9975603804354,
+      "width": 187.50609904891144,
+      "height": 150.0048792391292,
+      "strokeColor": "#737373",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "label": {
+        "text": "需求明细"
+      },
+      "fontSize": 16,
+      "fontFamily": 2,
+      "roundness": null,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          -187.50609904891144,
+          150.0048792391292
+        ]
+      ],
+      "start": {
+        "id": "s3"
+      },
+      "end": {
+        "id": "p2"
+      },
+      "startArrowhead": null,
+      "endArrowhead": "triangle",
+      "elbowed": false,
+      "createdAt": "2026-10-29T07:45:25.169Z",
+      "updatedAt": "2026-10-29T07:45:25.169Z",
+      "version": 1,
+      "startBinding": {
+        "elementId": "s3",
+        "focus": 0,
+        "gap": 8
+      },
+      "endBinding": {
+        "elementId": "p2",
+        "focus": 0,
+        "gap": 8
+      }
+    },
+    {
+      "id": "k7",
+      "type": "arrow",
+      "x": 288,
+      "y": 540,
+      "width": 104,
+      "height": 0,
+      "strokeColor": "#737373",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "roundness": null,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          104,
+          0
+        ]
+      ],
+      "start": {
+        "id": "p1"
+      },
+      "end": {
+        "id": "p2"
+      },
+      "startArrowhead": null,
+      "endArrowhead": "triangle",
+      "elbowed": false,
+      "createdAt": "2026-10-29T07:45:25.169Z",
+      "updatedAt": "2026-10-29T07:45:25.169Z",
+      "version": 1,
+      "startBinding": {
+        "elementId": "p1",
+        "focus": 0,
+        "gap": 8
+      },
+      "endBinding": {
+        "elementId": "p2",
+        "focus": 0,
+        "gap": 8
+      }
+    },
+    {
+      "id": "k8",
+      "type": "arrow",
+      "x": 588,
+      "y": 540,
+      "width": 104,
+      "height": 0,
+      "strokeColor": "#737373",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "label": {
+        "text": "独立需求"
+      },
+      "fontSize": 16,
+      "fontFamily": 2,
+      "roundness": null,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          104,
+          0
+        ]
+      ],
+      "start": {
+        "id": "p2"
+      },
+      "end": {
+        "id": "p3"
+      },
+      "startArrowhead": null,
+      "endArrowhead": "triangle",
+      "elbowed": false,
+      "createdAt": "2026-10-29T07:45:25.169Z",
+      "updatedAt": "2026-10-29T07:45:25.169Z",
+      "version": 1,
+      "startBinding": {
+        "elementId": "p2",
+        "focus": 0,
+        "gap": 8
+      },
+      "endBinding": {
+        "elementId": "p3",
+        "focus": 0,
+        "gap": 8
+      }
+    },
+    {
+      "id": "k9",
+      "type": "arrow",
+      "x": 888,
+      "y": 540,
+      "width": 104,
+      "height": 0,
+      "strokeColor": "#737373",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "label": {
+        "text": "净需求"
+      },
+      "fontSize": 16,
+      "fontFamily": 2,
+      "roundness": null,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          104,
+          0
+        ]
+      ],
+      "start": {
+        "id": "p3"
+      },
+      "end": {
+        "id": "p4"
+      },
+      "startArrowhead": null,
+      "endArrowhead": "triangle",
+      "elbowed": false,
+      "createdAt": "2026-10-29T07:45:25.169Z",
+      "updatedAt": "2026-10-29T07:45:25.169Z",
+      "version": 1,
+      "startBinding": {
+        "elementId": "p3",
+        "focus": 0,
+        "gap": 8
+      },
+      "endBinding": {
+        "elementId": "p4",
+        "focus": 0,
+        "gap": 8
+      }
+    },
+    {
+      "id": "k10",
+      "type": "arrow",
+      "x": 846.2469504755443,
+      "y": 584.9975603804354,
+      "width": 187.50609904891144,
+      "height": 150.0048792391292,
+      "strokeColor": "#737373",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "label": {
+        "text": "采购建议"
+      },
+      "fontSize": 16,
+      "fontFamily": 2,
+      "roundness": null,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          187.50609904891144,
+          150.0048792391292
+        ]
+      ],
+      "start": {
+        "id": "p3"
+      },
+      "end": {
+        "id": "q1"
+      },
+      "startArrowhead": null,
+      "endArrowhead": "triangle",
+      "elbowed": false,
+      "createdAt": "2026-10-29T07:45:25.169Z",
+      "updatedAt": "2026-10-29T07:45:25.169Z",
+      "version": 1,
+      "startBinding": {
+        "elementId": "p3",
+        "focus": 0,
+        "gap": 8
+      },
+      "endBinding": {
+        "elementId": "q1",
+        "focus": 0,
+        "gap": 8
+      }
+    },
+    {
+      "id": "k11",
+      "type": "arrow",
+      "x": 733.7530495244557,
+      "y": 584.9975603804354,
+      "width": 487.50609904891144,
+      "height": 390.0048792391292,
+      "strokeColor": "#737373",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "label": {
+        "text": "自制建议"
+      },
+      "fontSize": 16,
+      "fontFamily": 2,
+      "roundness": null,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          -487.50609904891144,
+          390.0048792391292
+        ]
+      ],
+      "start": {
+        "id": "p3"
+      },
+      "end": {
+        "id": "m1"
+      },
+      "startArrowhead": null,
+      "endArrowhead": "triangle",
+      "elbowed": false,
+      "createdAt": "2026-10-29T07:45:25.169Z",
+      "updatedAt": "2026-10-29T07:45:25.169Z",
+      "version": 1,
+      "startBinding": {
+        "elementId": "p3",
+        "focus": 0,
+        "gap": 8
+      },
+      "endBinding": {
+        "elementId": "m1",
+        "focus": 0,
+        "gap": 8
+      }
+    },
+    {
+      "id": "k12",
+      "type": "arrow",
+      "x": 1188,
+      "y": 780,
+      "width": 104,
+      "height": 0,
+      "strokeColor": "#737373",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "label": {
+        "text": "到货数量"
+      },
+      "fontSize": 16,
+      "fontFamily": 2,
+      "roundness": null,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          104,
+          0
+        ]
+      ],
+      "start": {
+        "id": "q1"
+      },
+      "end": {
+        "id": "q2"
+      },
+      "startArrowhead": null,
+      "endArrowhead": "triangle",
+      "elbowed": false,
+      "createdAt": "2026-10-29T07:45:25.169Z",
+      "updatedAt": "2026-10-29T07:45:25.169Z",
+      "version": 1,
+      "startBinding": {
+        "elementId": "q1",
+        "focus": 0,
+        "gap": 8
+      },
+      "endBinding": {
+        "elementId": "q2",
+        "focus": 0,
+        "gap": 8
+      }
+    },
+    {
+      "id": "k13",
+      "type": "arrow",
+      "x": 1390,
+      "y": 828,
+      "width": 0,
+      "height": 384,
+      "strokeColor": "#737373",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "label": {
+        "text": "到货入库"
+      },
+      "fontSize": 16,
+      "fontFamily": 2,
+      "roundness": null,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          384
+        ]
+      ],
+      "start": {
+        "id": "q2"
+      },
+      "end": {
+        "id": "i4"
+      },
+      "startArrowhead": null,
+      "endArrowhead": "triangle",
+      "elbowed": false,
+      "createdAt": "2026-10-29T07:45:25.169Z",
+      "updatedAt": "2026-10-29T07:45:25.169Z",
+      "version": 1,
+      "startBinding": {
+        "elementId": "q2",
+        "focus": 0,
+        "gap": 8
+      },
+      "endBinding": {
+        "elementId": "i4",
+        "focus": 0,
+        "gap": 8
+      }
+    },
+    {
+      "id": "k14",
+      "type": "arrow",
+      "x": 288,
+      "y": 1020,
+      "width": 104,
+      "height": 0,
+      "strokeColor": "#737373",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "roundness": null,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          104,
+          0
+        ]
+      ],
+      "start": {
+        "id": "m1"
+      },
+      "end": {
+        "id": "m2"
+      },
+      "startArrowhead": null,
+      "endArrowhead": "triangle",
+      "elbowed": false,
+      "createdAt": "2026-10-29T07:45:25.169Z",
+      "updatedAt": "2026-10-29T07:45:25.169Z",
+      "version": 1,
+      "startBinding": {
+        "elementId": "m1",
+        "focus": 0,
+        "gap": 8
+      },
+      "endBinding": {
+        "elementId": "m2",
+        "focus": 0,
+        "gap": 8
+      }
+    },
+    {
+      "id": "k15",
+      "type": "arrow",
+      "x": 588,
+      "y": 1020,
+      "width": 104,
+      "height": 0,
+      "strokeColor": "#737373",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "roundness": null,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          104,
+          0
+        ]
+      ],
+      "start": {
+        "id": "m2"
+      },
+      "end": {
+        "id": "m3"
+      },
+      "startArrowhead": null,
+      "endArrowhead": "triangle",
+      "elbowed": false,
+      "createdAt": "2026-10-29T07:45:25.169Z",
+      "updatedAt": "2026-10-29T07:45:25.169Z",
+      "version": 1,
+      "startBinding": {
+        "elementId": "m2",
+        "focus": 0,
+        "gap": 8
+      },
+      "endBinding": {
+        "elementId": "m3",
+        "focus": 0,
+        "gap": 8
+      }
+    },
+    {
+      "id": "k16",
+      "type": "arrow",
+      "x": 887.4278135270821,
+      "y": 1058.9711254108329,
+      "width": 405.1443729458359,
+      "height": 162.05774917833423,
+      "strokeColor": "#737373",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "label": {
+        "text": "完工入库"
+      },
+      "fontSize": 16,
+      "fontFamily": 2,
+      "roundness": null,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          405.1443729458359,
+          162.05774917833423
+        ]
+      ],
+      "start": {
+        "id": "m3"
+      },
+      "end": {
+        "id": "i4"
+      },
+      "startArrowhead": null,
+      "endArrowhead": "triangle",
+      "elbowed": false,
+      "createdAt": "2026-10-29T07:45:25.169Z",
+      "updatedAt": "2026-10-29T07:45:25.169Z",
+      "version": 1,
+      "startBinding": {
+        "elementId": "m3",
+        "focus": 0,
+        "gap": 8
+      },
+      "endBinding": {
+        "elementId": "i4",
+        "focus": 0,
+        "gap": 8
+      }
+    },
+    {
+      "id": "k17",
+      "type": "arrow",
+      "x": 1292,
+      "y": 1260,
+      "width": 104,
+      "height": 0,
+      "strokeColor": "#737373",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "label": {
+        "text": "库存增减"
+      },
+      "fontSize": 16,
+      "fontFamily": 2,
+      "roundness": null,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          -104,
+          0
+        ]
+      ],
+      "start": {
+        "id": "i4"
+      },
+      "end": {
+        "id": "i3"
+      },
+      "startArrowhead": null,
+      "endArrowhead": "triangle",
+      "elbowed": false,
+      "createdAt": "2026-10-29T07:45:25.169Z",
+      "updatedAt": "2026-10-29T07:45:25.169Z",
+      "version": 1,
+      "startBinding": {
+        "elementId": "i4",
+        "focus": 0,
+        "gap": 8
+      },
+      "endBinding": {
+        "elementId": "i3",
+        "focus": 0,
+        "gap": 8
+      }
+    },
+    {
+      "id": "k18",
+      "type": "arrow",
+      "x": 992,
+      "y": 1260,
+      "width": 104,
+      "height": 0,
+      "strokeColor": "#737373",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "label": {
+        "text": "结存快照"
+      },
+      "fontSize": 16,
+      "fontFamily": 2,
+      "roundness": null,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          -104,
+          0
+        ]
+      ],
+      "start": {
+        "id": "i3"
+      },
+      "end": {
+        "id": "i2"
+      },
+      "startArrowhead": null,
+      "endArrowhead": "triangle",
+      "elbowed": false,
+      "createdAt": "2026-10-29T07:45:25.170Z",
+      "updatedAt": "2026-10-29T07:45:25.170Z",
+      "version": 1,
+      "startBinding": {
+        "elementId": "i3",
+        "focus": 0,
+        "gap": 8
+      },
+      "endBinding": {
+        "elementId": "i2",
+        "focus": 0,
+        "gap": 8
+      }
+    },
+    {
+      "id": "k19",
+      "type": "arrow",
+      "x": 588,
+      "y": 1260,
+      "width": 104,
+      "height": 0,
+      "strokeColor": "#737373",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "label": {
+        "text": "退货入库"
+      },
+      "fontSize": 16,
+      "fontFamily": 2,
+      "roundness": null,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          104,
+          0
+        ]
+      ],
+      "start": {
+        "id": "i1"
+      },
+      "end": {
+        "id": "i2"
+      },
+      "startArrowhead": null,
+      "endArrowhead": "triangle",
+      "elbowed": false,
+      "createdAt": "2026-10-29T07:45:25.170Z",
+      "updatedAt": "2026-10-29T07:45:25.170Z",
+      "version": 1,
+      "startBinding": {
+        "elementId": "i1",
+        "focus": 0,
+        "gap": 8
+      },
+      "endBinding": {
+        "elementId": "i2",
+        "focus": 0,
+        "gap": 8
+      }
+    }
+  ],
+  "appState": {
+    "viewBackgroundColor": "#F7F6F5",
+    "gridSize": null
+  }
+}

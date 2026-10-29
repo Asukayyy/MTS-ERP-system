@@ -1,0 +1,1153 @@
+{
+  "type": "excalidraw",
+  "version": 2,
+  "source": "mcp-excalidraw-server",
+  "elements": [
+    {
+      "id": "title",
+      "type": "text",
+      "x": 60,
+      "y": 40,
+      "width": 1100,
+      "height": 40,
+      "strokeColor": "#0A0A0A",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "text": "MTS-ERP 数据模型（ER 图）",
+      "fontSize": 28,
+      "fontFamily": 2,
+      "createdAt": "2026-10-29T07:48:07.539Z",
+      "updatedAt": "2026-10-29T07:48:07.539Z",
+      "version": 1,
+      "textAlign": "left",
+      "verticalAlign": "top",
+      "lineHeight": 1.25,
+      "autoResize": true,
+      "originalText": "MTS-ERP 数据模型（ER 图）"
+    },
+    {
+      "id": "intro",
+      "type": "text",
+      "x": 60,
+      "y": 92,
+      "width": 2000,
+      "height": 26,
+      "strokeColor": "#404040",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "text": "按五个业务域分组：PK = 主键，FK = 外键；跨组同名 material_id 为逻辑引用，用字段说明代替连线以避免过密。",
+      "fontSize": 16,
+      "fontFamily": 2,
+      "createdAt": "2026-10-29T07:48:07.539Z",
+      "updatedAt": "2026-10-29T07:48:07.539Z",
+      "version": 1,
+      "textAlign": "left",
+      "verticalAlign": "top",
+      "lineHeight": 1.25,
+      "autoResize": true,
+      "originalText": "按五个业务域分组：PK = 主键，FK = 外键；跨组同名 material_id 为逻辑引用，用字段说明代替连线以避免过密。"
+    },
+    {
+      "id": "g1-z",
+      "type": "rectangle",
+      "x": 60,
+      "y": 180,
+      "width": 400,
+      "height": 810,
+      "backgroundColor": "#FAFAFA",
+      "strokeColor": "#7373732E",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "roundness": {
+        "type": 3,
+        "value": 8
+      },
+      "createdAt": "2026-10-29T07:48:07.539Z",
+      "updatedAt": "2026-10-29T07:48:07.539Z",
+      "version": 1,
+      "fillStyle": "solid"
+    },
+    {
+      "id": "g1-h",
+      "type": "text",
+      "x": 84,
+      "y": 196,
+      "width": 360,
+      "height": 28,
+      "strokeColor": "#404040",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "text": "组织 · 人员 · 权限",
+      "fontSize": 20,
+      "fontFamily": 2,
+      "createdAt": "2026-10-29T07:48:07.539Z",
+      "updatedAt": "2026-10-29T07:48:07.539Z",
+      "version": 1,
+      "textAlign": "left",
+      "verticalAlign": "top",
+      "lineHeight": 1.25,
+      "autoResize": true,
+      "originalText": "组织 · 人员 · 权限"
+    },
+    {
+      "id": "g1-c1",
+      "type": "rectangle",
+      "x": 80,
+      "y": 250,
+      "width": 360,
+      "height": 100,
+      "backgroundColor": "#FFFFFF",
+      "strokeColor": "#7373735C",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "label": {
+        "text": "sys_organization\nparent_id｜manager_personnel_id"
+      },
+      "fontSize": 16,
+      "fontFamily": 2,
+      "roundness": {
+        "type": 3,
+        "value": 8
+      },
+      "createdAt": "2026-10-29T07:48:07.539Z",
+      "updatedAt": "2026-10-29T07:48:07.539Z",
+      "version": 1,
+      "fillStyle": "solid"
+    },
+    {
+      "id": "g1-c2",
+      "type": "rectangle",
+      "x": 80,
+      "y": 370,
+      "width": 360,
+      "height": 100,
+      "backgroundColor": "#FFFFFF",
+      "strokeColor": "#7373735C",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "label": {
+        "text": "sys_personnel\norg_id｜status（离职停用）"
+      },
+      "fontSize": 16,
+      "fontFamily": 2,
+      "roundness": {
+        "type": 3,
+        "value": 8
+      },
+      "createdAt": "2026-10-29T07:48:07.539Z",
+      "updatedAt": "2026-10-29T07:48:07.539Z",
+      "version": 1,
+      "fillStyle": "solid"
+    },
+    {
+      "id": "g1-c3",
+      "type": "rectangle",
+      "x": 80,
+      "y": 490,
+      "width": 360,
+      "height": 100,
+      "backgroundColor": "#EEEFFF",
+      "strokeColor": "#654ACB",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "label": {
+        "text": "sys_user\npersonnel_id｜PBKDF2 密码"
+      },
+      "fontSize": 16,
+      "fontFamily": 2,
+      "roundness": {
+        "type": 3,
+        "value": 8
+      },
+      "createdAt": "2026-10-29T07:48:07.539Z",
+      "updatedAt": "2026-10-29T07:48:07.539Z",
+      "version": 1,
+      "fillStyle": "solid"
+    },
+    {
+      "id": "g1-c4",
+      "type": "rectangle",
+      "x": 80,
+      "y": 610,
+      "width": 360,
+      "height": 100,
+      "backgroundColor": "#FFFFFF",
+      "strokeColor": "#7373735C",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "label": {
+        "text": "sys_role\nrole_code｜status"
+      },
+      "fontSize": 16,
+      "fontFamily": 2,
+      "roundness": {
+        "type": 3,
+        "value": 8
+      },
+      "createdAt": "2026-10-29T07:48:07.539Z",
+      "updatedAt": "2026-10-29T07:48:07.539Z",
+      "version": 1,
+      "fillStyle": "solid"
+    },
+    {
+      "id": "g1-c5",
+      "type": "rectangle",
+      "x": 80,
+      "y": 730,
+      "width": 360,
+      "height": 100,
+      "backgroundColor": "#FFFFFF",
+      "strokeColor": "#7373735C",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "label": {
+        "text": "sys_permission\nparent_id｜perm_type｜code"
+      },
+      "fontSize": 16,
+      "fontFamily": 2,
+      "roundness": {
+        "type": 3,
+        "value": 8
+      },
+      "createdAt": "2026-10-29T07:48:07.539Z",
+      "updatedAt": "2026-10-29T07:48:07.539Z",
+      "version": 1,
+      "fillStyle": "solid"
+    },
+    {
+      "id": "g1-c6",
+      "type": "rectangle",
+      "x": 80,
+      "y": 850,
+      "width": 360,
+      "height": 100,
+      "backgroundColor": "#FFFFFF",
+      "strokeColor": "#7373735C",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "label": {
+        "text": "sys_user_role｜sys_role_permission\n(user_id,role_id)｜(role_id,perm_id)"
+      },
+      "fontSize": 16,
+      "fontFamily": 2,
+      "roundness": {
+        "type": 3,
+        "value": 8
+      },
+      "createdAt": "2026-10-29T07:48:07.539Z",
+      "updatedAt": "2026-10-29T07:48:07.539Z",
+      "version": 1,
+      "fillStyle": "solid"
+    },
+    {
+      "id": "g2-z",
+      "type": "rectangle",
+      "x": 500,
+      "y": 180,
+      "width": 400,
+      "height": 690,
+      "backgroundColor": "#FAFAFA",
+      "strokeColor": "#7373732E",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "roundness": {
+        "type": 3,
+        "value": 8
+      },
+      "createdAt": "2026-10-29T07:48:07.539Z",
+      "updatedAt": "2026-10-29T07:48:07.539Z",
+      "version": 1,
+      "fillStyle": "solid"
+    },
+    {
+      "id": "g2-h",
+      "type": "text",
+      "x": 524,
+      "y": 196,
+      "width": 360,
+      "height": 28,
+      "strokeColor": "#404040",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "text": "物料 · BOM · 工艺",
+      "fontSize": 20,
+      "fontFamily": 2,
+      "createdAt": "2026-10-29T07:48:07.539Z",
+      "updatedAt": "2026-10-29T07:48:07.539Z",
+      "version": 1,
+      "textAlign": "left",
+      "verticalAlign": "top",
+      "lineHeight": 1.25,
+      "autoResize": true,
+      "originalText": "物料 · BOM · 工艺"
+    },
+    {
+      "id": "g2-c1",
+      "type": "rectangle",
+      "x": 520,
+      "y": 250,
+      "width": 360,
+      "height": 100,
+      "backgroundColor": "#654ACB",
+      "strokeColor": "#654ACB",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "label": {
+        "text": "sys_material\ncode｜type｜abc｜sales_category"
+      },
+      "fontSize": 16,
+      "fontFamily": 2,
+      "roundness": {
+        "type": 3,
+        "value": 8
+      },
+      "createdAt": "2026-10-29T07:48:07.539Z",
+      "updatedAt": "2026-10-29T07:48:07.539Z",
+      "version": 1,
+      "fillStyle": "solid"
+    },
+    {
+      "id": "g2-c2",
+      "type": "rectangle",
+      "x": 520,
+      "y": 370,
+      "width": 360,
+      "height": 100,
+      "backgroundColor": "#FFFFFF",
+      "strokeColor": "#7373735C",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "label": {
+        "text": "sys_bom\nmaterial_id FK｜version｜is_active"
+      },
+      "fontSize": 16,
+      "fontFamily": 2,
+      "roundness": {
+        "type": 3,
+        "value": 8
+      },
+      "createdAt": "2026-10-29T07:48:07.539Z",
+      "updatedAt": "2026-10-29T07:48:07.539Z",
+      "version": 1,
+      "fillStyle": "solid"
+    },
+    {
+      "id": "g2-c3",
+      "type": "rectangle",
+      "x": 520,
+      "y": 490,
+      "width": 360,
+      "height": 100,
+      "backgroundColor": "#FFFFFF",
+      "strokeColor": "#7373735C",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "label": {
+        "text": "sys_bom_item\nbom_id｜component_material_id"
+      },
+      "fontSize": 16,
+      "fontFamily": 2,
+      "roundness": {
+        "type": 3,
+        "value": 8
+      },
+      "createdAt": "2026-10-29T07:48:07.539Z",
+      "updatedAt": "2026-10-29T07:48:07.539Z",
+      "version": 1,
+      "fillStyle": "solid"
+    },
+    {
+      "id": "g2-c4",
+      "type": "rectangle",
+      "x": 520,
+      "y": 610,
+      "width": 360,
+      "height": 100,
+      "backgroundColor": "#FFFFFF",
+      "strokeColor": "#7373735C",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "label": {
+        "text": "sys_routing\nmaterial_id｜routing_code"
+      },
+      "fontSize": 16,
+      "fontFamily": 2,
+      "roundness": {
+        "type": 3,
+        "value": 8
+      },
+      "createdAt": "2026-10-29T07:48:07.539Z",
+      "updatedAt": "2026-10-29T07:48:07.539Z",
+      "version": 1,
+      "fillStyle": "solid"
+    },
+    {
+      "id": "g2-c5",
+      "type": "rectangle",
+      "x": 520,
+      "y": 730,
+      "width": 360,
+      "height": 100,
+      "backgroundColor": "#FFFFFF",
+      "strokeColor": "#7373735C",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "label": {
+        "text": "sys_routing_operation\nrouting_id｜sequence_no"
+      },
+      "fontSize": 16,
+      "fontFamily": 2,
+      "roundness": {
+        "type": 3,
+        "value": 8
+      },
+      "createdAt": "2026-10-29T07:48:07.539Z",
+      "updatedAt": "2026-10-29T07:48:07.539Z",
+      "version": 1,
+      "fillStyle": "solid"
+    },
+    {
+      "id": "g3-z",
+      "type": "rectangle",
+      "x": 940,
+      "y": 180,
+      "width": 400,
+      "height": 810,
+      "backgroundColor": "#FAFAFA",
+      "strokeColor": "#7373732E",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "roundness": {
+        "type": 3,
+        "value": 8
+      },
+      "createdAt": "2026-10-29T07:48:07.539Z",
+      "updatedAt": "2026-10-29T07:48:07.539Z",
+      "version": 1,
+      "fillStyle": "solid"
+    },
+    {
+      "id": "g3-h",
+      "type": "text",
+      "x": 964,
+      "y": 196,
+      "width": 360,
+      "height": 28,
+      "strokeColor": "#404040",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "text": "销售",
+      "fontSize": 20,
+      "fontFamily": 2,
+      "createdAt": "2026-10-29T07:48:07.539Z",
+      "updatedAt": "2026-10-29T07:48:07.539Z",
+      "version": 1,
+      "textAlign": "left",
+      "verticalAlign": "top",
+      "lineHeight": 1.25,
+      "autoResize": true,
+      "originalText": "销售"
+    },
+    {
+      "id": "g3-c1",
+      "type": "rectangle",
+      "x": 960,
+      "y": 250,
+      "width": 360,
+      "height": 100,
+      "backgroundColor": "#FFFFFF",
+      "strokeColor": "#7373735C",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "label": {
+        "text": "sal_customer\ncustomer_code｜credit_limit"
+      },
+      "fontSize": 16,
+      "fontFamily": 2,
+      "roundness": {
+        "type": 3,
+        "value": 8
+      },
+      "createdAt": "2026-10-29T07:48:07.540Z",
+      "updatedAt": "2026-10-29T07:48:07.540Z",
+      "version": 1,
+      "fillStyle": "solid"
+    },
+    {
+      "id": "g3-c2",
+      "type": "rectangle",
+      "x": 960,
+      "y": 370,
+      "width": 360,
+      "height": 100,
+      "backgroundColor": "#FFFFFF",
+      "strokeColor": "#7373735C",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "label": {
+        "text": "sal_forecast\ncustomer_id｜material_id"
+      },
+      "fontSize": 16,
+      "fontFamily": 2,
+      "roundness": {
+        "type": 3,
+        "value": 8
+      },
+      "createdAt": "2026-10-29T07:48:07.540Z",
+      "updatedAt": "2026-10-29T07:48:07.540Z",
+      "version": 1,
+      "fillStyle": "solid"
+    },
+    {
+      "id": "g3-c3",
+      "type": "rectangle",
+      "x": 960,
+      "y": 490,
+      "width": 360,
+      "height": 100,
+      "backgroundColor": "#EEEFFF",
+      "strokeColor": "#654ACB",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "label": {
+        "text": "sal_order\norder_no｜customer_id｜status"
+      },
+      "fontSize": 16,
+      "fontFamily": 2,
+      "roundness": {
+        "type": 3,
+        "value": 8
+      },
+      "createdAt": "2026-10-29T07:48:07.540Z",
+      "updatedAt": "2026-10-29T07:48:07.540Z",
+      "version": 1,
+      "fillStyle": "solid"
+    },
+    {
+      "id": "g3-c4",
+      "type": "rectangle",
+      "x": 960,
+      "y": 610,
+      "width": 360,
+      "height": 100,
+      "backgroundColor": "#FFFFFF",
+      "strokeColor": "#7373735C",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "label": {
+        "text": "sal_order_item\norder_id｜material_id｜qty"
+      },
+      "fontSize": 16,
+      "fontFamily": 2,
+      "roundness": {
+        "type": 3,
+        "value": 8
+      },
+      "createdAt": "2026-10-29T07:48:07.540Z",
+      "updatedAt": "2026-10-29T07:48:07.540Z",
+      "version": 1,
+      "fillStyle": "solid"
+    },
+    {
+      "id": "g3-c5",
+      "type": "rectangle",
+      "x": 960,
+      "y": 730,
+      "width": 360,
+      "height": 100,
+      "backgroundColor": "#FFFFFF",
+      "strokeColor": "#7373735C",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "label": {
+        "text": "sal_shipment\norder_item_id｜ship_date"
+      },
+      "fontSize": 16,
+      "fontFamily": 2,
+      "roundness": {
+        "type": 3,
+        "value": 8
+      },
+      "createdAt": "2026-10-29T07:48:07.540Z",
+      "updatedAt": "2026-10-29T07:48:07.540Z",
+      "version": 1,
+      "fillStyle": "solid"
+    },
+    {
+      "id": "g3-c6",
+      "type": "rectangle",
+      "x": 960,
+      "y": 850,
+      "width": 360,
+      "height": 100,
+      "backgroundColor": "#FFFFFF",
+      "strokeColor": "#7373735C",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "label": {
+        "text": "sal_return\nshipment_id｜quantity"
+      },
+      "fontSize": 16,
+      "fontFamily": 2,
+      "roundness": {
+        "type": 3,
+        "value": 8
+      },
+      "createdAt": "2026-10-29T07:48:07.540Z",
+      "updatedAt": "2026-10-29T07:48:07.540Z",
+      "version": 1,
+      "fillStyle": "solid"
+    },
+    {
+      "id": "g4-z",
+      "type": "rectangle",
+      "x": 1380,
+      "y": 180,
+      "width": 400,
+      "height": 930,
+      "backgroundColor": "#FAFAFA",
+      "strokeColor": "#7373732E",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "roundness": {
+        "type": 3,
+        "value": 8
+      },
+      "createdAt": "2026-10-29T07:48:07.540Z",
+      "updatedAt": "2026-10-29T07:48:07.540Z",
+      "version": 1,
+      "fillStyle": "solid"
+    },
+    {
+      "id": "g4-h",
+      "type": "text",
+      "x": 1404,
+      "y": 196,
+      "width": 360,
+      "height": 28,
+      "strokeColor": "#404040",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "text": "计划",
+      "fontSize": 20,
+      "fontFamily": 2,
+      "createdAt": "2026-10-29T07:48:07.540Z",
+      "updatedAt": "2026-10-29T07:48:07.540Z",
+      "version": 1,
+      "textAlign": "left",
+      "verticalAlign": "top",
+      "lineHeight": 1.25,
+      "autoResize": true,
+      "originalText": "计划"
+    },
+    {
+      "id": "g4-c1",
+      "type": "rectangle",
+      "x": 1400,
+      "y": 250,
+      "width": 360,
+      "height": 100,
+      "backgroundColor": "#FFFFFF",
+      "strokeColor": "#7373735C",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "label": {
+        "text": "pln_demand\nmaterial_id｜demand_date｜qty"
+      },
+      "fontSize": 16,
+      "fontFamily": 2,
+      "roundness": {
+        "type": 3,
+        "value": 8
+      },
+      "createdAt": "2026-10-29T07:48:07.540Z",
+      "updatedAt": "2026-10-29T07:48:07.540Z",
+      "version": 1,
+      "fillStyle": "solid"
+    },
+    {
+      "id": "g4-c2",
+      "type": "rectangle",
+      "x": 1400,
+      "y": 370,
+      "width": 360,
+      "height": 100,
+      "backgroundColor": "#FFFFFF",
+      "strokeColor": "#7373735C",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "label": {
+        "text": "pln_mps\nmaterial_id｜plan_month"
+      },
+      "fontSize": 16,
+      "fontFamily": 2,
+      "roundness": {
+        "type": 3,
+        "value": 8
+      },
+      "createdAt": "2026-10-29T07:48:07.540Z",
+      "updatedAt": "2026-10-29T07:48:07.540Z",
+      "version": 1,
+      "fillStyle": "solid"
+    },
+    {
+      "id": "g4-c3",
+      "type": "rectangle",
+      "x": 1400,
+      "y": 490,
+      "width": 360,
+      "height": 100,
+      "backgroundColor": "#EEEFFF",
+      "strokeColor": "#654ACB",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "label": {
+        "text": "pln_mrp_run\nrun_no｜status｜mrp_result"
+      },
+      "fontSize": 16,
+      "fontFamily": 2,
+      "roundness": {
+        "type": 3,
+        "value": 8
+      },
+      "createdAt": "2026-10-29T07:48:07.540Z",
+      "updatedAt": "2026-10-29T07:48:07.540Z",
+      "version": 1,
+      "fillStyle": "solid"
+    },
+    {
+      "id": "g4-c4",
+      "type": "rectangle",
+      "x": 1400,
+      "y": 610,
+      "width": 360,
+      "height": 100,
+      "backgroundColor": "#FFFFFF",
+      "strokeColor": "#7373735C",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "label": {
+        "text": "pln_production_plan\nmaterial_id｜plan_qty"
+      },
+      "fontSize": 16,
+      "fontFamily": 2,
+      "roundness": {
+        "type": 3,
+        "value": 8
+      },
+      "createdAt": "2026-10-29T07:48:07.540Z",
+      "updatedAt": "2026-10-29T07:48:07.540Z",
+      "version": 1,
+      "fillStyle": "solid"
+    },
+    {
+      "id": "g4-c5",
+      "type": "rectangle",
+      "x": 1400,
+      "y": 730,
+      "width": 360,
+      "height": 100,
+      "backgroundColor": "#FFFFFF",
+      "strokeColor": "#7373735C",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "label": {
+        "text": "pln_dispatch_order\nproduction_plan_id｜qty"
+      },
+      "fontSize": 16,
+      "fontFamily": 2,
+      "roundness": {
+        "type": 3,
+        "value": 8
+      },
+      "createdAt": "2026-10-29T07:48:07.540Z",
+      "updatedAt": "2026-10-29T07:48:07.540Z",
+      "version": 1,
+      "fillStyle": "solid"
+    },
+    {
+      "id": "g4-c6",
+      "type": "rectangle",
+      "x": 1400,
+      "y": 850,
+      "width": 360,
+      "height": 100,
+      "backgroundColor": "#FFFFFF",
+      "strokeColor": "#7373735C",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "label": {
+        "text": "pln_material_requisition\ndispatch_id｜material_id"
+      },
+      "fontSize": 16,
+      "fontFamily": 2,
+      "roundness": {
+        "type": 3,
+        "value": 8
+      },
+      "createdAt": "2026-10-29T07:48:07.540Z",
+      "updatedAt": "2026-10-29T07:48:07.540Z",
+      "version": 1,
+      "fillStyle": "solid"
+    },
+    {
+      "id": "g4-c7",
+      "type": "rectangle",
+      "x": 1400,
+      "y": 970,
+      "width": 360,
+      "height": 100,
+      "backgroundColor": "#FFFFFF",
+      "strokeColor": "#7373735C",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "label": {
+        "text": "pln_completion_report\ndispatch_id｜completed_qty"
+      },
+      "fontSize": 16,
+      "fontFamily": 2,
+      "roundness": {
+        "type": 3,
+        "value": 8
+      },
+      "createdAt": "2026-10-29T07:48:07.540Z",
+      "updatedAt": "2026-10-29T07:48:07.540Z",
+      "version": 1,
+      "fillStyle": "solid"
+    },
+    {
+      "id": "g5-z",
+      "type": "rectangle",
+      "x": 1820,
+      "y": 180,
+      "width": 400,
+      "height": 1050,
+      "backgroundColor": "#FAFAFA",
+      "strokeColor": "#7373732E",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "roundness": {
+        "type": 3,
+        "value": 8
+      },
+      "createdAt": "2026-10-29T07:48:07.540Z",
+      "updatedAt": "2026-10-29T07:48:07.540Z",
+      "version": 1,
+      "fillStyle": "solid"
+    },
+    {
+      "id": "g5-h",
+      "type": "text",
+      "x": 1844,
+      "y": 196,
+      "width": 360,
+      "height": 28,
+      "strokeColor": "#404040",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "text": "采购与库存",
+      "fontSize": 20,
+      "fontFamily": 2,
+      "createdAt": "2026-10-29T07:48:07.540Z",
+      "updatedAt": "2026-10-29T07:48:07.540Z",
+      "version": 1,
+      "textAlign": "left",
+      "verticalAlign": "top",
+      "lineHeight": 1.25,
+      "autoResize": true,
+      "originalText": "采购与库存"
+    },
+    {
+      "id": "g5-c1",
+      "type": "rectangle",
+      "x": 1840,
+      "y": 250,
+      "width": 360,
+      "height": 100,
+      "backgroundColor": "#FFFFFF",
+      "strokeColor": "#7373735C",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "label": {
+        "text": "pur_supplier\nsupplier_code｜lead_time"
+      },
+      "fontSize": 16,
+      "fontFamily": 2,
+      "roundness": {
+        "type": 3,
+        "value": 8
+      },
+      "createdAt": "2026-10-29T07:48:07.540Z",
+      "updatedAt": "2026-10-29T07:48:07.540Z",
+      "version": 1,
+      "fillStyle": "solid"
+    },
+    {
+      "id": "g5-c2",
+      "type": "rectangle",
+      "x": 1840,
+      "y": 370,
+      "width": 360,
+      "height": 100,
+      "backgroundColor": "#FFFFFF",
+      "strokeColor": "#7373735C",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "label": {
+        "text": "pur_purchase_plan\nmaterial_id｜plan_qty"
+      },
+      "fontSize": 16,
+      "fontFamily": 2,
+      "roundness": {
+        "type": 3,
+        "value": 8
+      },
+      "createdAt": "2026-10-29T07:48:07.540Z",
+      "updatedAt": "2026-10-29T07:48:07.540Z",
+      "version": 1,
+      "fillStyle": "solid"
+    },
+    {
+      "id": "g5-c3",
+      "type": "rectangle",
+      "x": 1840,
+      "y": 490,
+      "width": 360,
+      "height": 100,
+      "backgroundColor": "#FFFFFF",
+      "strokeColor": "#7373735C",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "label": {
+        "text": "pur_order\norder_no｜supplier_id｜status"
+      },
+      "fontSize": 16,
+      "fontFamily": 2,
+      "roundness": {
+        "type": 3,
+        "value": 8
+      },
+      "createdAt": "2026-10-29T07:48:07.540Z",
+      "updatedAt": "2026-10-29T07:48:07.540Z",
+      "version": 1,
+      "fillStyle": "solid"
+    },
+    {
+      "id": "g5-c4",
+      "type": "rectangle",
+      "x": 1840,
+      "y": 610,
+      "width": 360,
+      "height": 100,
+      "backgroundColor": "#FFFFFF",
+      "strokeColor": "#7373735C",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "label": {
+        "text": "pur_receipt\norder_item_id｜received_qty"
+      },
+      "fontSize": 16,
+      "fontFamily": 2,
+      "roundness": {
+        "type": 3,
+        "value": 8
+      },
+      "createdAt": "2026-10-29T07:48:07.540Z",
+      "updatedAt": "2026-10-29T07:48:07.540Z",
+      "version": 1,
+      "fillStyle": "solid"
+    },
+    {
+      "id": "g5-c5",
+      "type": "rectangle",
+      "x": 1840,
+      "y": 730,
+      "width": 360,
+      "height": 100,
+      "backgroundColor": "#FFFFFF",
+      "strokeColor": "#7373735C",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "label": {
+        "text": "inv_warehouse\nwarehouse_code｜org_id"
+      },
+      "fontSize": 16,
+      "fontFamily": 2,
+      "roundness": {
+        "type": 3,
+        "value": 8
+      },
+      "createdAt": "2026-10-29T07:48:07.540Z",
+      "updatedAt": "2026-10-29T07:48:07.540Z",
+      "version": 1,
+      "fillStyle": "solid"
+    },
+    {
+      "id": "g5-c6",
+      "type": "rectangle",
+      "x": 1840,
+      "y": 850,
+      "width": 360,
+      "height": 100,
+      "backgroundColor": "#EEEFFF",
+      "strokeColor": "#654ACB",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "label": {
+        "text": "inv_balance\nmaterial_id｜warehouse_id｜on_hand"
+      },
+      "fontSize": 16,
+      "fontFamily": 2,
+      "roundness": {
+        "type": 3,
+        "value": 8
+      },
+      "createdAt": "2026-10-29T07:48:07.540Z",
+      "updatedAt": "2026-10-29T07:48:07.540Z",
+      "version": 1,
+      "fillStyle": "solid"
+    },
+    {
+      "id": "g5-c7",
+      "type": "rectangle",
+      "x": 1840,
+      "y": 970,
+      "width": 360,
+      "height": 100,
+      "backgroundColor": "#FFFFFF",
+      "strokeColor": "#7373735C",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "label": {
+        "text": "inv_stock_operation\nop_type｜warehouse_id｜status"
+      },
+      "fontSize": 16,
+      "fontFamily": 2,
+      "roundness": {
+        "type": 3,
+        "value": 8
+      },
+      "createdAt": "2026-10-29T07:48:07.540Z",
+      "updatedAt": "2026-10-29T07:48:07.540Z",
+      "version": 1,
+      "fillStyle": "solid"
+    },
+    {
+      "id": "g5-c8",
+      "type": "rectangle",
+      "x": 1840,
+      "y": 1090,
+      "width": 360,
+      "height": 100,
+      "backgroundColor": "#FFFFFF",
+      "strokeColor": "#7373735C",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "label": {
+        "text": "inv_replenishment_request\nmaterial_id｜suggest_qty｜status"
+      },
+      "fontSize": 16,
+      "fontFamily": 2,
+      "roundness": {
+        "type": 3,
+        "value": 8
+      },
+      "createdAt": "2026-10-29T07:48:07.540Z",
+      "updatedAt": "2026-10-29T07:48:07.540Z",
+      "version": 1,
+      "fillStyle": "solid"
+    }
+  ],
+  "appState": {
+    "viewBackgroundColor": "#F7F6F5",
+    "gridSize": null
+  }
+}
