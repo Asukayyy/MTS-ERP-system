@@ -15,10 +15,10 @@ import { fmtQty } from '@/utils/format'
 import type { RemoteOption, StockOperation } from '@/types/erp'
 
 /**
- * 业务模块推送的待入库 / 待出库单列表（库存管理 → 入库管理 / 出库管理）。
+ * 入库单 / 出库单列表（库存管理 → 入库管理 / 出库管理）。
  *
- * - 销售发货 → 待出库，销售退货 → 待入库，采购到货 → 待入库，
- *   生产领料 → 待出库，生产完工 → 待入库；
+ * - 入库单来源只有三种：销售退货、采购到货、生产完工；
+ * - 出库单来源只有两种：销售发货、生产领料；
  * - 业务单据不再自行选择仓库，**由仓库管理人员在这里决定仓库并确认**，
  *   确认后才真正增加 / 减少结存；
  * - 表单信息：来源模块 / 来源单据 / 物料编码、名称、规格、单位、数量 / 备注 / 状态。
@@ -35,18 +35,25 @@ const SOURCE_MODULE_NAMES: Record<string, string> = {
   inventory: '库存',
 }
 
-const SOURCE_TYPE_OPTIONS = [
-  { value: 'SALES_SHIPMENT', label: '销售发货' },
-  { value: 'SALES_RETURN', label: '销售退货' },
-  { value: 'PURCHASE_RECEIPT', label: '采购到货' },
-  { value: 'MATERIAL_REQUISITION', label: '生产领料' },
-  { value: 'PRODUCTION_COMPLETION', label: '生产完工' },
-]
+/** 来源类型按方向隔离：入库只有三种业务来源，出库只有两种，互不串台 */
+const SOURCE_TYPE_OPTIONS: Record<'INBOUND' | 'OUTBOUND', { value: string; label: string }[]> = {
+  INBOUND: [
+    { value: 'SALES_RETURN', label: '销售退货' },
+    { value: 'PURCHASE_RECEIPT', label: '采购到货' },
+    { value: 'PRODUCTION_COMPLETION', label: '生产完工' },
+  ],
+  OUTBOUND: [
+    { value: 'SALES_SHIPMENT', label: '销售发货' },
+    { value: 'MATERIAL_REQUISITION', label: '生产领料' },
+  ],
+}
+
+const sourceTypeOptions = SOURCE_TYPE_OPTIONS[props.opType]
 
 const { loading, rows, total, page, pageSize, query, load, search, reset, changePage, changeSize } =
   usePagedTable<StockOperation, { status: string; source_type: string; keyword: string }>(
     (params) => listStockOperations({ ...params, op_type: props.opType }),
-    { status: 'DRAFT', source_type: '', keyword: '' },
+    { status: '', source_type: '', keyword: '' },
   )
 
 function sourceModuleName(moduleName?: string | null): string {
@@ -121,7 +128,7 @@ onMounted(load)
       <el-form-item label="来源">
         <el-select v-model="query.source_type" clearable placeholder="全部" style="width: 150px">
           <el-option
-            v-for="item in SOURCE_TYPE_OPTIONS"
+            v-for="item in sourceTypeOptions"
             :key="item.value"
             :label="item.label"
             :value="item.value"
@@ -188,7 +195,7 @@ onMounted(load)
           <span v-else>-</span>
         </template>
       </el-table-column>
-      <template #empty>暂无待{{ actionLabel }}单据</template>
+      <template #empty>暂无{{ actionLabel }}单</template>
     </el-table>
 
     <div class="pager">
