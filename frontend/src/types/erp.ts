@@ -580,6 +580,8 @@ export interface DispatchOrder {
   completed_qty: Num
   worker_id?: number | null
   worker_name?: string | null
+  org_id?: number | null
+  org_name?: string | null
   planned_start: string
   planned_end: string
   status: string

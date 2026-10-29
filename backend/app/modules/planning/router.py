@@ -575,7 +575,7 @@ def list_dispatch_orders(
 def create_dispatch_order(
     payload: schemas.DispatchOrderCreate, db: Session = Depends(get_db)
 ) -> ApiResponse[schemas.DispatchOrderOut]:
-    """新增派工单；作业人员须存在于 `sys_personnel`。"""
+    """新增派工单；作业人员须存在于 `sys_personnel`，承接单位留空默认智能加工中心。"""
     dispatch = service.create_dispatch_order(
         db,
         planned_qty=payload.planned_qty,
@@ -584,6 +584,7 @@ def create_dispatch_order(
         plan_id=payload.plan_id,
         operation=payload.operation,
         worker_id=payload.worker_id,
+        org_id=payload.org_id,
         dispatch_no=payload.dispatch_no,
         remark=payload.remark,
     )
@@ -599,7 +600,7 @@ def create_dispatch_order(
 def create_dispatch_orders_from_plans(
     payload: schemas.DispatchOrderFromPlansRequest, db: Session = Depends(get_db)
 ) -> ApiResponse[schemas.GenerationResultOut]:
-    """按选中计划的工艺路线逐工序生成 DRAFT 派工单；无工艺路线的计划计入 errors。"""
+    """按选中计划生成 DRAFT 派工单：一张计划一张，整单派给智能加工中心。"""
     try:
         result = service.create_dispatch_orders_from_plans(db, payload.plan_ids)
         db.commit()

@@ -182,6 +182,46 @@ def get_personnel_names(
     return {row.id: row.person_name for row in rows}
 
 
+def get_organization(db: Session, org_id: int) -> Optional[Dict[str, Any]]:
+    """按 ID 取组织，返回 `{id, org_code, org_name, org_type, status}`。"""
+    row = db.get(models.SysOrganization, org_id)
+    if not row:
+        return None
+    return {
+        "id": row.id,
+        "org_code": row.org_code,
+        "org_name": row.org_name,
+        "org_type": row.org_type,
+        "status": row.status,
+    }
+
+
+def get_organization_names(db: Session, org_ids: Sequence[int]) -> Dict[int, str]:
+    """批量取组织名称，返回 `{org_id: org_name}`。"""
+    ids = [int(i) for i in org_ids if i]
+    if not ids:
+        return {}
+    rows = db.scalars(select(models.SysOrganization).where(models.SysOrganization.id.in_(ids)))
+    return {row.id: row.org_name for row in rows}
+
+
+def get_default_factory(db: Session) -> Optional[Dict[str, Any]]:
+    """取默认承接单位：首个启用的 `FACTORY`（智能加工中心）。
+
+    车间派工不再逐工序拆分，统一由加工中心承接后再自行派给具体作业人员，
+    因此需要一个"整单承接"的默认组织；主数据未维护时返回 None，由调用方留空。
+    """
+    row = db.scalars(
+        select(models.SysOrganization)
+        .where(
+            models.SysOrganization.org_type == "FACTORY",
+            models.SysOrganization.status == RecordStatus.ACTIVE.value,
+        )
+        .order_by(models.SysOrganization.id)
+    ).first()
+    return get_organization(db, row.id) if row else None
+
+
 # ==================== BOM ====================
 
 

@@ -17,14 +17,14 @@ import type { GenerationResult, ProductionPlan, RemoteOption } from '@/types/erp
 /**
  * 按生产作业计划生成单据的通用弹窗。
  *
- * - `mode='dispatch'`：按物料工艺路线逐工序生成派工单
+ * - `mode='dispatch'`：每张计划生成一张派工单，整单派给智能加工中心
  * - `mode='requisition'`：按物料 BOM 直接子件生成领料单
  * - `mode='completion'`：按计划产出物料与剩余数量生成完工报告
  *
  * 生成结果是**预填草稿**：工序 / 数量 / 明细等可从计划推导的数据自动带出，
- * 需要人工决策的字段（派工的起止日期与作业人员、领料的日期与仓库、
- * 完工的报工日期与入库仓库）一律留空，由使用者在单据编辑页填写后再确认。
- * 无工艺路线 / 无 BOM 的计划不产生单据，会在结果区以明细表显式展示，
+ * 需要人工决策的字段（派工的承接单位与作业人员、领料的日期与仓库、
+ * 完工的报工日期与入库仓库）一律留空或取默认值，由使用者在单据编辑页确认。
+ * 计划无 BOM 时不产生领料单，会在结果区以明细表显式展示，
  * 避免被误认为"生成失败"。
  */
 const props = defineProps<{ mode: 'dispatch' | 'requisition' | 'completion' }>()
@@ -188,8 +188,9 @@ defineExpose({ open })
     <div class="generate-tip">
       已勾选 {{ selected.length }} 张。
       <template v-if="mode === 'dispatch'">
-        每张计划按其工艺路线逐工序生成派工单，工序与派工数量预填，
-        日期和作业人员留空，请到派工单列表点"编辑"补填后再确认。
+        每张计划生成一张派工单（不再按工序拆分），整单派给智能加工中心，
+        派工数量取"计划量 − 已完工量"、计划起止日期沿用计划行；
+        作业人员留空，由加工中心自行指派后确认开工。
       </template>
       <template v-else-if="mode === 'requisition'">
         每张计划按其 BOM 直接子件生成一条领料单，明细数量预填，

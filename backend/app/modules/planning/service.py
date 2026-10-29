@@ -12,7 +12,6 @@
 
 import calendar
 import json
-from collections import Counter
 from datetime import date, datetime, timedelta
 from decimal import ROUND_CEILING, ROUND_HALF_UP, Decimal
 from pathlib import Path
@@ -30,9 +29,11 @@ from app.modules.planning import models, repository
 from app.modules.system.contract import (
     find_material_by_code,
     get_active_bom_children,
-    get_active_routing_operations,
+    get_default_factory,
     get_material,
     get_materials,
+    get_organization,
+    get_organization_names,
     get_personnel,
     get_personnel_names,
     log_operation,
@@ -1653,16 +1654,18 @@ def get_dispatch_order(db: Session, dispatch_id: int) -> models.PlnDispatchOrder
 
 
 def _attach_dispatch_refs(db: Session, rows: Sequence[models.PlnDispatchOrder]) -> None:
-    """派工单附带作业计划编号与作业人员姓名。"""
+    """派工单附带作业计划编号、承接单位与作业人员姓名。"""
     if not rows:
         return
     plan_map = repository.nos_by_ids(
         db, models.PlnProductionPlan, [r.plan_id for r in rows if r.plan_id], "plan_no"
     )
     workers = get_personnel_names(db, [r.worker_id for r in rows if r.worker_id])
+    orgs = get_organization_names(db, [r.org_id for r in rows if r.org_id])
     for row in rows:
         row.plan_no = plan_map.get(row.plan_id) if row.plan_id else None
         row.worker_name = workers.get(row.worker_id) if row.worker_id else None
+        row.org_name = orgs.get(row.org_id) if row.org_id else None
 
 
 def create_dispatch_order(
@@ -1674,6 +1677,7 @@ def create_dispatch_order(
     plan_id: Optional[int] = None,
     operation: Optional[str] = None,
     worker_id: Optional[int] = None,
+    org_id: Optional[int] = None,
     dispatch_no: Optional[str] = None,
     remark: Optional[str] = None,
     operator_id: Optional[int] = None,
@@ -1682,6 +1686,7 @@ def create_dispatch_order(
 
     日期允许留空：派工单以 DRAFT 预填草稿形态存在，日期与作业人员由人工指定，
     确认（进入非 DRAFT 状态）前必须补齐。
+    `org_id` 为承接单位（加工中心 / 车间），留空时自动取智能加工中心。
     """
     qty = _as_decimal(planned_qty)
     if qty <= 0:
@@ -1692,6 +1697,11 @@ def create_dispatch_order(
         _require_plan(db, plan_id)
     if worker_id is not None and not get_personnel(db, worker_id):
         raise BusinessException(CODE_NOT_FOUND, f"作业人员不存在：{worker_id}")
+    if org_id is None:
+        factory = get_default_factory(db)
+        org_id = factory["id"] if factory else None
+    elif not get_organization(db, org_id):
+        raise BusinessException(CODE_NOT_FOUND, f"承接单位不存在：{org_id}")
     dispatch = models.PlnDispatchOrder(
         dispatch_no=_unique_no(db, models.PlnDispatchOrder, "dispatch_no", dispatch_no, "DSP"),
         plan_id=plan_id,
@@ -1699,6 +1709,7 @@ def create_dispatch_order(
         planned_qty=qty,
         completed_qty=Decimal("0"),
         worker_id=worker_id,
+        org_id=org_id,
         planned_start=planned_start,
         planned_end=planned_end,
         status="DRAFT",
@@ -1740,6 +1751,11 @@ def update_dispatch_order(
         if worker_id is not None and not get_personnel(db, worker_id):
             raise BusinessException(CODE_NOT_FOUND, f"作业人员不存在：{worker_id}")
         dispatch.worker_id = worker_id
+    if "org_id" in data:
+        org_id = data["org_id"]
+        if org_id is not None and not get_organization(db, org_id):
+            raise BusinessException(CODE_NOT_FOUND, f"承接单位不存在：{org_id}")
+        dispatch.org_id = org_id
     if "planned_start" in data:
         dispatch.planned_start = data["planned_start"]
     if "planned_end" in data:
@@ -1770,18 +1786,26 @@ def create_dispatch_orders_from_plans(
     plan_ids: Sequence[int],
     operator_id: Optional[int] = None,
 ) -> Dict[str, Any]:
-    """按选定的生产作业计划，取物料工艺路线逐工序生成 DRAFT 派工单。
+    """按选定的生产作业计划生成 DRAFT 派工单：**一张计划一张派工单**。
 
-    生成口径：一道工序一张派工单，`operation` 为工序名称、`planned_qty` 为计划数量；
-    **计划开始/结束日期与作业人员留空**，作为预填草稿交由人工指定后再确认。
+    生成口径（规格调整：车间不再逐工序派工）：
+    - 不再按工艺路线拆工序，也不再要求物料必须维护工艺路线；
+    - `org_id` 统一指派给智能加工中心（主数据缺失时留空），由加工中心再自行
+      把任务分派给具体作业人员，因此 `worker_id`、`operation` 均留空；
+    - `planned_qty` 取"计划量 − 已完工量"，计划起止日期沿用计划行，
+      便于加工中心直接确认开工。
     幂等口径：以 `(source_type='PLAN', source_reference_id=plan.id)` 为来源键，
-    对已有单据的工序名称做计数差，**逐工序精准跳过**；全部已存在则整张计划跳过。
-    单条失败不中断批量：缺失计划 / 终态计划 / 无工艺路线均计入 `errors`。
+    已存在派工单的计划整体跳过，不会重复生成。
+    单条失败不中断批量：缺失计划 / 终态计划 / 已完工计划均计入 `errors`。
     """
     ids = list(dict.fromkeys(int(i) for i in plan_ids))
     if not ids:
         raise BusinessException(CODE_PARAM_INVALID, "plan_ids 不能为空")
     plan_map = {p.id: p for p in repository.get_production_plans_by_ids(db, ids)}
+
+    factory = get_default_factory(db)
+    default_org_id = factory["id"] if factory else None
+    default_org_name = factory["org_name"] if factory else None
 
     errors: List[Dict[str, Any]] = []
     skipped: List[Dict[str, Any]] = []
@@ -1812,60 +1836,52 @@ def create_dispatch_orders_from_plans(
             )
             continue
 
-        operations = get_active_routing_operations(db, plan.material_id)
-        if not operations:
+        remaining_qty = _as_decimal(plan.planned_qty) - _as_decimal(plan.completed_qty)
+        if remaining_qty <= 0:
             errors.append(
                 {
                     "plan_id": plan.id,
                     "plan_no": plan.plan_no,
                     "material_code": material_code,
-                    "reason": "物料未维护生效工艺路线",
+                    "reason": "该计划已无未完工数量，无需派工",
                 }
             )
             continue
 
-        remaining = Counter(
-            row.operation
-            for row in repository.list_dispatch_orders_by_source(db, "PLAN", plan.id)
-            if row.operation
-        )
-        new_operations = []
-        for operation in operations:
-            name = operation["operation_name"]
-            if remaining[name] > 0:
-                remaining[name] -= 1
-                continue
-            new_operations.append(operation)
-        if not new_operations:
+        existing = repository.list_dispatch_orders_by_source(db, "PLAN", plan.id)
+        if existing:
             skipped.append(
                 {
                     "plan_id": plan.id,
                     "plan_no": plan.plan_no,
-                    "reason": "该计划工序均已生成派工单",
+                    "reason": f"该计划已生成派工单（{existing[0].dispatch_no}），不重复生成",
                 }
             )
             continue
 
-        for operation in new_operations:
-            dispatch = models.PlnDispatchOrder(
-                dispatch_no=_unique_no(
-                    db, models.PlnDispatchOrder, "dispatch_no", None, "DSP"
-                ),
-                source_type="PLAN",
-                source_reference_id=plan.id,
-                plan_id=plan.id,
-                operation=str(operation["operation_name"])[:100],
-                planned_qty=_as_decimal(plan.planned_qty),
-                completed_qty=Decimal("0"),
-                worker_id=None,
-                planned_start=None,
-                planned_end=None,
-                status="DRAFT",
-                remark=f"按计划 {plan.plan_no} 生成，工序顺序 {operation['sequence_no']}",
-                created_by=operator_id,
-            )
-            repository.add_dispatch_order(db, dispatch)
-            created_ids.append(dispatch.id)
+        dispatch = models.PlnDispatchOrder(
+            dispatch_no=_unique_no(
+                db, models.PlnDispatchOrder, "dispatch_no", None, "DSP"
+            ),
+            source_type="PLAN",
+            source_reference_id=plan.id,
+            plan_id=plan.id,
+            operation=None,
+            planned_qty=remaining_qty,
+            completed_qty=Decimal("0"),
+            worker_id=None,
+            org_id=default_org_id,
+            planned_start=plan.start_date,
+            planned_end=plan.end_date,
+            status="DRAFT",
+            remark=(
+                f"按计划 {plan.plan_no} 整单派工，承接单位：{default_org_name or '未指定'}，"
+                "作业人员由加工中心指派"
+            ),
+            created_by=operator_id,
+        )
+        repository.add_dispatch_order(db, dispatch)
+        created_ids.append(dispatch.id)
 
     if created_ids:
         log_operation(
@@ -1875,7 +1891,10 @@ def create_dispatch_orders_from_plans(
             target_type="pln_dispatch_order",
             target_id=created_ids[0],
             operator_id=operator_id,
-            detail=f"按生产作业计划生成派工单 {len(created_ids)} 张",
+            detail=(
+                f"按生产作业计划生成派工单 {len(created_ids)} 张"
+                f"（整单派给 {default_org_name or '加工中心'}）"
+            ),
         )
     return {
         "created_count": len(created_ids),

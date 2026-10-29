@@ -601,8 +601,18 @@ def _make_make_plan(db: Session, material_id: int, qty=10, days: int = 2):
     return plan
 
 
-def test_generate_dispatch_orders_one_per_operation(db: Session) -> None:
-    """按工艺路线逐工序生成：工序数 = 派工单数，日期与人员留空待人工填写。"""
+def _default_factory_id(db: Session) -> int | None:
+    """取默认承接单位（首个启用的 FACTORY 组织）。"""
+    return db.execute(
+        text(
+            "SELECT id FROM sys_organization WHERE org_type = 'FACTORY' "
+            "AND status = 'ACTIVE' ORDER BY id LIMIT 1"
+        )
+    ).scalar()
+
+
+def test_generate_dispatch_orders_one_per_plan(db: Session) -> None:
+    """整单派工：一张计划只生成一张派工单，派给智能加工中心，不再逐工序拆分。"""
     material_id, _ = _create_material(db, supply_type="MAKE", material_type="FINISHED")
     _create_routing(
         db,
@@ -618,35 +628,53 @@ def test_generate_dispatch_orders_one_per_operation(db: Session) -> None:
     result = service.create_dispatch_orders_from_plans(db, [plan.id])
     db.commit()
 
-    assert result["created_count"] == 3
+    assert result["created_count"] == 1
     assert result["skipped_count"] == 0
     assert result["errors"] == []
-    assert len(result["ids"]) == 3
 
     rows, _total = service.list_dispatch_orders(db, plan_id=plan.id)
-    assert len(rows) == 3
-    assert {row.operation for row in rows} == {"下料", "焊接", "喷涂"}
-    for row in rows:
-        assert row.status == "DRAFT"
-        assert row.source_type == "PLAN"
-        assert row.source_reference_id == plan.id
-        assert row.planned_qty == Decimal("10.0000")
-        assert row.completed_qty == Decimal("0.0000")
-        # 需人工指定的字段留空：日期与作业人员
-        assert row.worker_id is None
-        assert row.planned_start is None
-        assert row.planned_end is None
-
-
-def test_generate_dispatch_orders_blank_dates_block_confirm(db: Session) -> None:
-    """留空日期的预填草稿不能直接确认；补齐日期后即可流转。"""
-    material_id, _ = _create_material(db, supply_type="MAKE", material_type="FINISHED")
-    _create_routing(db, material_id, [(10, "OP10", "下料", "WC1")])
-    plan = _make_make_plan(db, material_id, qty=5, days=1)
-    service.create_dispatch_orders_from_plans(db, [plan.id])
-    db.commit()
-    rows, _total = service.list_dispatch_orders(db, plan_id=plan.id)
+    assert len(rows) == 1
     dispatch = rows[0]
+    assert dispatch.status == "DRAFT"
+    assert dispatch.source_type == "PLAN"
+    assert dispatch.source_reference_id == plan.id
+    # 不再带工序名称，整单派给加工中心，作业人员留空由加工中心指派
+    assert dispatch.operation is None
+    assert dispatch.worker_id is None
+    assert dispatch.org_id == _default_factory_id(db)
+    assert dispatch.org_name == "智能加工中心"
+    assert dispatch.planned_qty == Decimal("10.0000")
+    assert dispatch.completed_qty == Decimal("0.0000")
+    # 日期沿用计划行，加工中心可直接确认开工
+    assert dispatch.planned_start == plan.start_date
+    assert dispatch.planned_end == plan.end_date
+
+
+def test_generate_dispatch_orders_without_routing_still_generates(db: Session) -> None:
+    """整单派工不再依赖工艺路线：无工序的物料同样能生成派工单。"""
+    material_id, _ = _create_material(db, supply_type="MAKE", material_type="FINISHED")
+    plan = _make_make_plan(db, material_id)
+
+    result = service.create_dispatch_orders_from_plans(db, [plan.id, 999999999])
+    db.commit()
+
+    assert result["created_count"] == 1
+    assert len(result["errors"]) == 1
+    assert "不存在" in result["errors"][0]["reason"]
+    rows, _total = service.list_dispatch_orders(db, plan_id=plan.id)
+    assert len(rows) == 1
+    assert rows[0].org_id == _default_factory_id(db)
+    assert rows[0].planned_qty == Decimal("10.0000")
+
+
+def test_dispatch_confirm_requires_dates(db: Session) -> None:
+    """手工建单（无日期）不能直接确认；补齐日期后即可流转。"""
+    material_id, _ = _create_material(db, supply_type="MAKE", material_type="FINISHED")
+    plan = _make_make_plan(db, material_id, qty=5, days=1)
+    dispatch = service.create_dispatch_order(
+        db, planned_qty=Decimal("5"), plan_id=plan.id
+    )
+    db.commit()
 
     with pytest.raises(BusinessException) as exc:
         service.set_dispatch_order_status(db, dispatch.id, "CONFIRMED")
@@ -683,17 +711,17 @@ def test_generate_dispatch_orders_is_idempotent(db: Session) -> None:
     replay = service.create_dispatch_orders_from_plans(db, [plan.id])
     db.commit()
 
-    assert first["created_count"] == 2
+    assert first["created_count"] == 1
     assert replay["created_count"] == 0
     assert replay["ids"] == []
     assert replay["skipped_count"] == 1
     assert replay["skipped"][0]["plan_id"] == plan.id
     rows, _total = service.list_dispatch_orders(db, plan_id=plan.id)
-    assert len(rows) == 2
+    assert len(rows) == 1
 
 
-def test_generate_dispatch_orders_only_adds_new_operation(db: Session) -> None:
-    """工艺路线新增工序后再生成：只补新增那一道，已存在的工序精准跳过。"""
+def test_generate_dispatch_orders_ignores_new_operations(db: Session) -> None:
+    """工艺路线新增工序后再次生成：仍只有一张派工单，不会因工序变多而增单。"""
     material_id, _ = _create_material(db, supply_type="MAKE", material_type="FINISHED")
     routing_id = _create_routing(
         db,
@@ -708,30 +736,10 @@ def test_generate_dispatch_orders_only_adds_new_operation(db: Session) -> None:
     result = service.create_dispatch_orders_from_plans(db, [plan.id])
     db.commit()
 
-    assert result["created_count"] == 1
-    assert result["skipped_count"] == 0
-    rows, _total = service.list_dispatch_orders(db, plan_id=plan.id)
-    assert len(rows) == 3
-    assert {row.operation for row in rows} == {"下料", "焊接", "喷涂"}
-
-
-def test_generate_dispatch_orders_without_routing_reports_error(db: Session) -> None:
-    """无生效工艺路线：该计划不建单，errors 带计划号与物料编码。"""
-    material_id, code = _create_material(db, supply_type="MAKE", material_type="FINISHED")
-    plan = _make_make_plan(db, material_id)
-
-    result = service.create_dispatch_orders_from_plans(db, [plan.id, 999999999])
-    db.commit()
-
     assert result["created_count"] == 0
-    assert len(result["errors"]) == 2
-    reasons = {error["plan_id"]: error for error in result["errors"]}
-    assert reasons[plan.id]["plan_no"] == plan.plan_no
-    assert reasons[plan.id]["material_code"] == code
-    assert "工艺路线" in reasons[plan.id]["reason"]
-    assert "不存在" in reasons[999999999]["reason"]
+    assert result["skipped_count"] == 1
     rows, _total = service.list_dispatch_orders(db, plan_id=plan.id)
-    assert rows == []
+    assert len(rows) == 1
 
 
 def test_generate_requisitions_quantity_and_aggregation(db: Session) -> None:
