@@ -107,9 +107,12 @@ class AbcClassifyResult(BaseModel):
     b_count: int = Field(description="B 类物料数")
     c_count: int = Field(description="C 类物料数")
     total_value: Decimal = Field(description="分类依据的总价值")
-    basis: str = Field(description="分类依据：库存金额 / 标准成本 / 库存数量")
+    basis: str = Field(description="分类依据：采购+销售金额 / 库存金额 / 标准成本 / 库存数量")
     a_threshold: int = Field(description="A 类累计占比阈值（%）")
     b_threshold: int = Field(description="B 类累计占比阈值（%）")
+    purchase_value: Decimal = Field(default=0, description="统计窗口内采购到货金额")
+    sales_value: Decimal = Field(default=0, description="统计窗口内销售出库金额")
+    months: int = Field(default=12, description="统计窗口（月）")
 
 
 # ==================== BOM ====================
@@ -165,6 +168,9 @@ class BomUpdate(BaseModel):
 class BomItemOut(_IdOut):
     bom_id: int
     material_id: int
+    material_code: Optional[str] = None
+    material_name: Optional[str] = None
+    unit_code: Optional[str] = None
     quantity: Decimal
     lead_time_offset: int
     scrap_rate: Decimal
@@ -321,7 +327,9 @@ OrganizationTreeNode.model_rebuild()
 class PersonnelCreate(BaseModel):
     """人员新增入参。"""
 
-    employee_no: str = Field(max_length=50, description="员工工号（唯一）")
+    employee_no: Optional[str] = Field(
+        default=None, max_length=50, description="员工工号（留空由系统自动生成）"
+    )
     person_name: str = Field(max_length=100, description="姓名")
     gender: Optional[str] = Field(default=None, pattern="^(MALE|FEMALE)$", description="性别")
     id_card: Optional[str] = Field(
@@ -433,7 +441,7 @@ class UserCreate(BaseModel):
     """
 
     username: str = Field(max_length=50, description="登录名（唯一）")
-    password: str = Field(min_length=6, max_length=64, description="明文密码（服务端 sha256 后入库）")
+    password: str = Field(min_length=6, max_length=64, description="明文密码（服务端 PBKDF2 哈希后入库）")
     display_name: str = Field(max_length=100, description="显示名")
     personnel_id: Optional[int] = Field(default=None, description="关联员工ID（可为空，1:1）")
     org_id: Optional[int] = Field(default=None, description="所属组织/部门ID（未关联员工时用于新建档案）")
@@ -447,7 +455,9 @@ class UserUpdate(BaseModel):
     """用户账号修改入参。"""
 
     display_name: Optional[str] = Field(default=None, max_length=100)
-    password: Optional[str] = Field(default=None, description="新密码，留空不改")
+    password: Optional[str] = Field(
+        default=None, min_length=6, max_length=64, description="新密码，留空不改"
+    )
     personnel_id: Optional[int] = None
     status: Optional[str] = None
     remark: Optional[str] = None

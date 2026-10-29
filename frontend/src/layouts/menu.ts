@@ -34,6 +34,7 @@ export const menuItems: MenuItem[] = [
     children: [
       { path: '/sales/customer', title: '客户' },
       { path: '/sales/forecast', title: '销售预测' },
+      { path: '/sales/price', title: '产品价格' },
       { path: '/sales/order', title: '销售订单' },
       { path: '/sales/shipment', title: '发货管理' },
       { path: '/sales/return', title: '退货管理' },
@@ -77,9 +78,8 @@ export const menuItems: MenuItem[] = [
       { path: '/inventory/outbound', title: '出库' },
       { path: '/inventory/transfer', title: '移库' },
       { path: '/inventory/stocktake', title: '盘点' },
-      { path: '/inventory/transaction', title: '库存流水' },
-      { path: '/inventory/reorder', title: '订货点' },
       { path: '/inventory/replenishment', title: '补库需求' },
+      { path: '/inventory/stock-journal', title: '库存流水' },
     ],
   },
   {

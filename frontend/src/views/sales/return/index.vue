@@ -12,12 +12,13 @@ import {
   listOrders,
   listProducts,
   listReturns,
+  listShipments,
 } from '@/api/sales'
 import { listWarehouses } from '@/api/inventory'
 import RemoteSelect from '@/components/common/RemoteSelect.vue'
 import StatusTag from '@/components/common/StatusTag.vue'
 import { usePagedTable } from '@/composables/usePagedTable'
-import type { RemoteOption, SalesReturn } from '@/types/erp'
+import type { Order, RemoteOption, SalesReturn } from '@/types/erp'
 
 const { loading, rows, total, page, pageSize, query, load, search, reset, changePage, changeSize } =
   usePagedTable<
@@ -35,14 +36,62 @@ async function loadOrderOptions(keyword: string): Promise<RemoteOption[]> {
   return data.items.map((item) => ({ id: item.id, label: `${item.order_no} · ${item.customer_name ?? ''}` }))
 }
 
+/** 已选原销售订单的物料清单；为空表示尚未选订单，退回全部成品 */
+const orderMaterialOptions = ref<RemoteOption[] | null>(null)
+/** 已选原销售订单的完整信息，用于在弹窗中回显 */
+const selectedOrder = ref<Order | null>(null)
+
 async function loadProductOptions(keyword: string): Promise<RemoteOption[]> {
+  const scoped = orderMaterialOptions.value
+  if (scoped) {
+    const kw = keyword.trim().toLowerCase()
+    if (!kw) return scoped
+    return scoped.filter((item) => item.label.toLowerCase().includes(kw))
+  }
   const list = await listProducts({ keyword })
   return list.map((item) => ({ id: item.id, label: `${item.material_code} ${item.material_name}` }))
 }
 
+/** 废品仓编码：退货仓库限定为「原订单出库仓库 + 废品仓」 */
+const SCRAP_WAREHOUSE_CODE = 'WH-SCRAP-01'
+/** 全量仓库缓存，避免重复请求 */
+let warehouseCache: RemoteOption[] | null = null
+/** 当前订单允许的仓库；为空表示尚未选订单，此时不提供任何候选 */
+const orderWarehouseOptions = ref<RemoteOption[] | null>(null)
+
+async function fetchWarehouseOptions(): Promise<RemoteOption[]> {
+  if (!warehouseCache) {
+    const data = await listWarehouses({ page: 1, page_size: 100 })
+    warehouseCache = data.items.map((item) => ({
+      id: item.id,
+      label: `${item.warehouse_code} ${item.warehouse_name}`,
+    }))
+  }
+  return warehouseCache
+}
+
 async function loadWarehouseOptions(keyword: string): Promise<RemoteOption[]> {
-  const data = await listWarehouses({ keyword, page: 1, page_size: 50 })
-  return data.items.map((item) => ({ id: item.id, label: `${item.warehouse_code} ${item.warehouse_name}` }))
+  // 未选原订单时不给任何候选项：退货仓库只能来自「原订单出库仓库 + 废品仓」
+  const source = orderWarehouseOptions.value
+  if (!source) return []
+  const kw = keyword.trim().toLowerCase()
+  if (!kw) return source
+  return source.filter((item) => item.label.toLowerCase().includes(kw))
+}
+
+/** 查询原订单实际出库过的仓库，并合入废品仓 */
+async function loadOrderWarehouses(orderId: number): Promise<void> {
+  const [all, shipments] = await Promise.all([
+    fetchWarehouseOptions(),
+    listShipments({ order_id: orderId, page: 1, page_size: 100 }),
+  ])
+  const ids = new Set<number>()
+  shipments.items
+    .filter((item) => item.status === 'COMPLETED')
+    .forEach((item) => item.items.forEach((line) => ids.add(line.warehouse_id)))
+  const scrap = all.find((item) => item.label.startsWith(SCRAP_WAREHOUSE_CODE))
+  if (scrap) ids.add(scrap.id)
+  orderWarehouseOptions.value = all.filter((item) => ids.has(item.id))
 }
 
 interface ReturnLineForm {
@@ -78,12 +127,33 @@ const rules: FormRules = {
   warehouse_id: [{ required: true, message: '请选择退回仓库', trigger: 'change' }],
 }
 
-/** 退货额度按原订单已发数量核算，选订单后自动带出该订单客户，避免 2004 */
+/** 退货额度按原订单已发数量核算，选订单后自动带出该订单客户，并限定物料只能选该订单的 */
 async function onOrderChange(value: number | undefined): Promise<void> {
   form.customer_id = undefined
+  form.warehouse_id = undefined
+  orderMaterialOptions.value = null
+  orderWarehouseOptions.value = null
+  selectedOrder.value = null
+  // 换订单后旧行物料可能不属于新订单，统一清空重选
+  form.items.forEach((line) => {
+    line.material_id = undefined
+  })
   if (value === undefined) return
   const order = await getOrder(value)
+  selectedOrder.value = order
   form.customer_id = order.customer_id
+  await loadOrderWarehouses(order.id)
+  const seen = new Set<number>()
+  const options: RemoteOption[] = []
+  order.items.forEach((item) => {
+    if (seen.has(item.material_id)) return
+    seen.add(item.material_id)
+    options.push({
+      id: item.material_id,
+      label: `${item.material_code ?? ''} ${item.material_name ?? ''}`.trim() || `物料 #${item.material_id}`,
+    })
+  })
+  orderMaterialOptions.value = options
 }
 
 function addLine(): void {
@@ -99,6 +169,9 @@ function openCreate(): void {
     reason: '',
     items: [],
   })
+  orderMaterialOptions.value = null
+  orderWarehouseOptions.value = null
+  selectedOrder.value = null
   addLine()
   dialogVisible.value = true
 }
@@ -257,7 +330,13 @@ onMounted(load)
           </el-col>
           <el-col :span="8">
             <el-form-item label="退回仓库" prop="warehouse_id">
-              <RemoteSelect v-model="form.warehouse_id" :loader="loadWarehouseOptions" style="width: 100%" />
+              <RemoteSelect
+                :key="`wh-${form.order_id ?? 0}`"
+                v-model="form.warehouse_id"
+                :loader="loadWarehouseOptions"
+                placeholder="请先选择原销售订单"
+                style="width: 100%"
+              />
             </el-form-item>
           </el-col>
           <el-col :span="12">
@@ -277,6 +356,36 @@ onMounted(load)
         </el-row>
       </el-form>
 
+      <div v-if="selectedOrder" class="order-info">
+        <el-descriptions :column="3" border size="small">
+          <el-descriptions-item label="订单号">{{ selectedOrder.order_no }}</el-descriptions-item>
+          <el-descriptions-item label="客户">{{ selectedOrder.customer_name || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="订单状态"><StatusTag :status="selectedOrder.status" /></el-descriptions-item>
+          <el-descriptions-item label="订单日期">{{ selectedOrder.order_date }}</el-descriptions-item>
+          <el-descriptions-item label="交货日期">{{ selectedOrder.delivery_date }}</el-descriptions-item>
+          <el-descriptions-item label="销售员">{{ selectedOrder.salesperson_name || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="订单金额">{{ selectedOrder.total_amount }}</el-descriptions-item>
+          <el-descriptions-item label="明细行数">{{ selectedOrder.items.length }}</el-descriptions-item>
+          <el-descriptions-item label="已发数量">
+            {{ selectedOrder.items.reduce((sum, item) => sum + Number(item.delivered_qty ?? 0), 0) }}
+          </el-descriptions-item>
+        </el-descriptions>
+
+        <el-table :data="selectedOrder.items" border size="small" class="order-items">
+          <el-table-column label="物料编码" prop="material_code" min-width="140" />
+          <el-table-column label="物料名称" prop="material_name" min-width="160" />
+          <el-table-column label="订单数量" width="110" align="right">
+            <template #default="{ row }">{{ row.quantity }}</template>
+          </el-table-column>
+          <el-table-column label="已发数量" width="110" align="right">
+            <template #default="{ row }">{{ row.delivered_qty }}</template>
+          </el-table-column>
+          <el-table-column label="未发数量" width="110" align="right">
+            <template #default="{ row }">{{ Number(row.quantity) - Number(row.delivered_qty ?? 0) }}</template>
+          </el-table-column>
+        </el-table>
+      </div>
+
       <div class="table-toolbar">
         <span class="page-title">退货明细</span>
         <span class="table-toolbar__spacer" />
@@ -284,8 +393,13 @@ onMounted(load)
       </div>
       <el-table :data="form.items" border size="small">
         <el-table-column label="物料" min-width="240">
-          <template #default="{ row }">
-            <RemoteSelect v-model="row.material_id" :loader="loadProductOptions" style="width: 100%" />
+          <template #default="{ row, $index }">
+            <RemoteSelect
+              :key="`${form.order_id ?? 0}-${$index}`"
+              v-model="row.material_id"
+              :loader="loadProductOptions"
+              style="width: 100%"
+            />
           </template>
         </el-table-column>
         <el-table-column label="数量" width="140">
@@ -313,6 +427,7 @@ onMounted(load)
       </el-table>
       <p class="form-tip">
         退货单必须关联原销售订单，数量不得超过该订单该物料的已发货数量（草稿单也占额度）；确认时才写入库存。
+        退回仓库只能从原订单已出库的仓库与废品仓中选择，选择订单后自动带出候选。
       </p>
       <template #footer>
         <el-button @click="dialogVisible = false">取消</el-button>
@@ -326,5 +441,13 @@ onMounted(load)
 .nested-table {
   margin: 4px 0 4px 48px;
   width: calc(100% - 48px);
+}
+
+.order-info {
+  margin-bottom: 12px;
+}
+
+.order-items {
+  margin-top: 8px;
 }
 </style>

@@ -25,6 +25,7 @@ from sqlalchemy import (
     Date,
     DateTime,
     ForeignKey,
+    Index,
     Numeric,
     String,
     Text,
@@ -119,6 +120,52 @@ class InvBalance(Base, AuditMixin):
 
 # inv_transaction 流水表已删除：库存变动由各业务单据直接驱动 inv_balance，流水信息
 # 可从入库/出库/移库/盘点单据聚合查询，不再单独维护。
+
+# 2026-10-29 新增：inv_stock_journal 库存变动流水。
+# 每次 increase_stock / decrease_stock / _apply_adjust / 移库确认 / 盘点确认 时，
+# 在同一事务内追加一条 journal，记录：谁/什么物料/哪个仓库/哪一天/入或出/变动多少/前后结存/来源单据。
+# 目的：让用户可以完整追溯任何一笔库存变动的原因。
+
+
+class InvStockJournal(Base):
+    """库存变动流水：每次改 inv_balance 时追加一条。"""
+
+    __tablename__ = "inv_stock_journal"
+
+    id: Mapped[BigIntPk]
+    op_date: Mapped[date] = mapped_column(Date, nullable=False, comment="业务日期")
+    material_id: Mapped[BigIntFk] = mapped_column(
+        ForeignKey("sys_material.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    material_code: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, comment="物料编码快照")
+    material_name: Mapped[Optional[str]] = mapped_column(String(128), nullable=True, comment="物料名称快照")
+    warehouse_id: Mapped[BigIntFk] = mapped_column(
+        ForeignKey("inv_warehouse.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    warehouse_code: Mapped[Optional[str]] = mapped_column(String(32), nullable=True, comment="仓库编码快照")
+    warehouse_name: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, comment="仓库名称快照")
+    direction: Mapped[str] = mapped_column(
+        String(16), nullable=False, index=True, comment="IN/OUT/ADJUST/TRANSFER"
+    )
+    delta_qty: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, comment="数量变化")
+    qty_before: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, comment="变动前结存")
+    qty_after: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, comment="变动后结存")
+    source_module: Mapped[Optional[str]] = mapped_column(String(32), nullable=True, comment="来源模块")
+    source_type: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, comment="来源类型")
+    source_reference_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True, comment="来源单据ID")
+    source_no: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, comment="来源单据号")
+    remark: Mapped[Optional[str]] = mapped_column(String(500), nullable=True, comment="备注")
+    operator_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True, comment="操作人ID")
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now, comment="创建时间")
+
+    __table_args__ = (
+        Index("idx_journal_op_date", "op_date"),
+        Index("idx_journal_source", "source_module", "source_type"),
+        CheckConstraint(
+            "direction IN ('IN','OUT','ADJUST','TRANSFER')",
+            name="ck_inv_journal_direction",
+        ),
+    )
 
 
 # ====================================================================

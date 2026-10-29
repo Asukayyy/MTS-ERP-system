@@ -65,7 +65,7 @@ const classifying = ref(false)
 async function runAbcClassify(): Promise<void> {
   try {
     await ElMessageBox.confirm(
-      '按库存金额（标准成本 × 现有库存）从高到低累计，累计占比 < 70% 归 A 类、< 90% 归 B 类、其余归 C 类。会覆盖现有分类，是否继续？',
+      '按近 12 个月「采购到货金额 + 销售出库金额」从高到低累计，累计占比 < 70% 归 A 类、< 90% 归 B 类、其余归 C 类；窗口内无业务数据时自动回退库存金额。会覆盖现有分类，是否继续？',
       '自动 ABC 分类',
       { type: 'warning', confirmButtonText: '开始分类', cancelButtonText: '取消' },
     )
@@ -76,7 +76,7 @@ async function runAbcClassify(): Promise<void> {
   try {
     const result = await autoClassifyAbc()
     ElMessage.success(
-      `分类完成：A ${result.a_count} / B ${result.b_count} / C ${result.c_count}（依据：${result.basis}）`,
+      `分类完成：A ${result.a_count} / B ${result.b_count} / C ${result.c_count}（依据：${result.basis}，采购 ${result.purchase_value} / 销售 ${result.sales_value}）`,
     )
     await load()
   } catch (error) {

@@ -14,7 +14,7 @@ from datetime import date
 from decimal import Decimal
 from typing import List, Optional, Sequence, Tuple
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.modules.sales import models
@@ -25,6 +25,26 @@ from app.modules.sales import models
 def count_all(db: Session, model) -> int:
     """统计某表总行数。"""
     return db.scalar(select(func.count()).select_from(model)) or 0
+
+
+def material_delivered_value_rows(db: Session, since: date) -> List[Tuple[int, Decimal]]:
+    """按物料汇总 `since` 之后的销售出库金额（已发货数量 × 销售单价）。
+
+    ABC 自动分类使用：只统计非作废销售订单，金额反映物料真实销售吞吐。
+    """
+    stmt = (
+        select(
+            models.SalOrderItem.material_id,
+            func.sum(models.SalOrderItem.delivered_qty * models.SalOrderItem.unit_price),
+        )
+        .join(models.SalOrder, models.SalOrder.id == models.SalOrderItem.order_id)
+        .where(
+            models.SalOrder.order_date >= since,
+            models.SalOrder.status != "CANCELLED",
+        )
+        .group_by(models.SalOrderItem.material_id)
+    )
+    return [(int(row[0]), Decimal(str(row[1] or 0))) for row in db.execute(stmt).all()]
 
 
 def count_where(db: Session, model, *criteria) -> int:
@@ -134,6 +154,89 @@ def count_customer_references(db: Session, customer_id: int) -> int:
 def delete_customer(db: Session, customer: models.SalCustomer) -> None:
     db.delete(customer)
     db.flush()
+
+
+# ==================== 产品价格 ====================
+
+
+def get_price(db: Session, material_id: int) -> Optional[models.SalProductPrice]:
+    return db.scalar(
+        select(models.SalProductPrice).where(
+            models.SalProductPrice.material_id == material_id
+        )
+    )
+
+
+def get_prices(db: Session, material_ids: Sequence[int]) -> dict:
+    """批量取当前价格 `{material_id: SalProductPrice}`。"""
+    ids = [int(i) for i in material_ids if i]
+    if not ids:
+        return {}
+    rows = db.scalars(
+        select(models.SalProductPrice).where(models.SalProductPrice.material_id.in_(ids))
+    )
+    return {row.material_id: row for row in rows}
+
+
+def list_prices(db: Session) -> List[models.SalProductPrice]:
+    """全部当前价格（用于找出「已定价但不在可售清单」的物料）。"""
+    return list(db.scalars(select(models.SalProductPrice)))
+
+
+def delete_price(db: Session, row: models.SalProductPrice) -> None:
+    db.delete(row)
+    db.flush()
+
+
+def delete_price_history(db: Session, material_id: int) -> None:
+    db.execute(
+        delete(models.SalProductPriceHistory).where(
+            models.SalProductPriceHistory.material_id == material_id
+        )
+    )
+
+
+def price_history_counts(db: Session, material_ids: Sequence[int]) -> dict:
+    """批量统计价格变动记录数 `{material_id: count}`。"""
+    ids = [int(i) for i in material_ids if i]
+    if not ids:
+        return {}
+    stmt = (
+        select(
+            models.SalProductPriceHistory.material_id,
+            func.count(),
+        )
+        .where(models.SalProductPriceHistory.material_id.in_(ids))
+        .group_by(models.SalProductPriceHistory.material_id)
+    )
+    return {int(material_id): int(count) for material_id, count in db.execute(stmt).all()}
+
+
+def add_price(db: Session, price: models.SalProductPrice) -> models.SalProductPrice:
+    db.add(price)
+    db.flush()
+    return price
+
+
+def list_price_history(db: Session, material_id: int) -> List[models.SalProductPriceHistory]:
+    return list(
+        db.scalars(
+            select(models.SalProductPriceHistory)
+            .where(models.SalProductPriceHistory.material_id == material_id)
+            .order_by(
+                models.SalProductPriceHistory.effective_date,
+                models.SalProductPriceHistory.id,
+            )
+        )
+    )
+
+
+def add_price_history(
+    db: Session, row: models.SalProductPriceHistory
+) -> models.SalProductPriceHistory:
+    db.add(row)
+    db.flush()
+    return row
 
 
 # ==================== 销售预测 ====================
@@ -609,21 +712,15 @@ def draft_shipment_allocations(db: Session) -> dict:
 def open_order_demand_rows(db: Session, on_date: Optional[date] = None) -> List[Tuple]:
     """未交付需求行：状态 CONFIRMED/IN_PROGRESS 且剩余未发数量 > 0。
 
-    剩余数量还要扣掉**已生成但未确认的发货草稿**占用量：订单确认时库存充足
-    的部分会自动生成发货草稿，这部分不再属于“需要生产”的需求，否则计划侧
-    会把同一批货既算库存发货、又算生产需求。
+    `open_qty` 取**订单未交付总量**（`quantity − delivered_qty`），**不扣减**
+    订单确认时自动生成、尚未确认的发货草稿占用量。
+
+    原因：发货草稿只是「已承诺、未出库」，实物库存还在仓里，MRP 净算时会用
+    可用库存正常抵扣一次。若这里再扣一次草稿占用量，需求就被缩水成「缺口」，
+    MRP 又把同一批库存当作可用量再抵一次，净需求会被算成 0（例如订单 1000、
+    库存 900：需求被记成 100，MRP 再用 900 抵扣 → 净需求 0，少生产 100）。
     """
-    draft_qty = (
-        select(func.coalesce(func.sum(models.SalShipmentItem.quantity), 0))
-        .join(models.SalShipment, models.SalShipment.id == models.SalShipmentItem.shipment_id)
-        .where(
-            models.SalShipmentItem.order_item_id == models.SalOrderItem.id,
-            models.SalShipment.status == "DRAFT",
-        )
-        .correlate(models.SalOrderItem)
-        .scalar_subquery()
-    )
-    open_qty = models.SalOrderItem.quantity - models.SalOrderItem.delivered_qty - draft_qty
+    open_qty = models.SalOrderItem.quantity - models.SalOrderItem.delivered_qty
     stmt = (
         select(
             models.SalOrder.id,

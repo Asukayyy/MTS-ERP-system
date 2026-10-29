@@ -35,9 +35,13 @@ def _paginate(db: Session, stmt, page: int, page_size: int):
     return rows, total
 
 
-def next_no(db: Session, model, prefix: str) -> str:
-    """生成业务编码：`<prefix><6位序号>`。仅用于演示级编码，真实场景应走独立序列。"""
-    return f"{prefix}{count_all(db, model) + 1:06d}"
+def next_no(db: Session, model, field, prefix: str) -> str:
+    """生成业务编码：取同前缀的最大序号 +1（删除记录后不会撞号）。"""
+    max_no = db.scalar(
+        select(func.max(field)).where(field.regexp_match(f"^{prefix}[0-9]+$"))
+    )
+    seq = int(str(max_no)[len(prefix) :]) if max_no else 0
+    return f"{prefix}{seq + 1:06d}"
 
 
 # ==================== 物料 ====================
@@ -122,6 +126,10 @@ def list_boms(
 
 def get_bom(db: Session, bom_id: int) -> Optional[models.SysBom]:
     return db.get(models.SysBom, bom_id)
+
+
+def get_bom_by_code(db: Session, bom_code: str) -> Optional[models.SysBom]:
+    return db.scalar(select(models.SysBom).where(models.SysBom.bom_code == bom_code))
 
 
 def get_bom_by_material_version(
@@ -229,6 +237,14 @@ def list_routings(
 
 def get_routing(db: Session, routing_id: int) -> Optional[models.SysRouting]:
     return db.get(models.SysRouting, routing_id)
+
+
+def get_routing_by_code(
+    db: Session, routing_code: str
+) -> Optional[models.SysRouting]:
+    return db.scalar(
+        select(models.SysRouting).where(models.SysRouting.routing_code == routing_code)
+    )
 
 
 def get_routing_by_material_version(

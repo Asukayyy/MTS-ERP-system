@@ -144,9 +144,13 @@ def list_balances(
     has_reorder_point: bool = Query(default=False, description="仅返回已配置订货点的结存"),
     sales_category: Optional[str] = Query(default=None, description="MACHINE/SPARE/INTERNAL"),
     abc_class: Optional[str] = Query(default=None, description="ABC 分类 A/B/C"),
+    quantity_gt: Optional[float] = Query(default=None, description="仅返回现存量 > 该值的结存，设 0 可过滤零行"),
+    sort_by: Optional[str] = Query(default=None, description="排序字段: material_code/material_name/warehouse_name/quantity/available_quantity/safety_stock/abc_class/sales_category"),
+    sort_order: str = Query(default="asc", description="asc 或 desc"),
     db: Session = Depends(get_db),
 ) -> ApiResponse[PageData[schemas.BalanceOut]]:
-    """分页查询实时库存（含现存量/锁定量/可用量/订货点），可按销售类别与 ABC 分类筛选。"""
+    """分页查询实时库存（含现存量/锁定量/可用量/订货点），可按销售类别与 ABC 分类筛选，支持全量后端排序。"""
+    from decimal import Decimal
     rows, total = service.list_balances(
         db,
         page=params.page,
@@ -157,6 +161,9 @@ def list_balances(
         has_reorder_point=has_reorder_point,
         sales_category=sales_category,
         abc_class=abc_class,
+        quantity_gt=Decimal(str(quantity_gt)) if quantity_gt is not None else None,
+        sort_by=sort_by,
+        sort_order=sort_order,
     )
     return success(
         PageData[schemas.BalanceOut](
@@ -389,6 +396,47 @@ def cancel_stock_operation(
     return success(operation)
 
 
+# ==================== 库存变动流水 ====================
+
+
+@router.get(
+    "/stock-journal",
+    response_model=ApiResponse[PageData[schemas.StockJournalOut]],
+    summary="库存变动流水列表",
+)
+def list_stock_journal(
+    params: PageParams = Depends(PageParams.as_dependency),
+    keyword: Optional[str] = Query(default=None, description="物料编码/名称/单据号关键字"),
+    material_id: Optional[int] = Query(default=None, description="物料ID过滤"),
+    warehouse_id: Optional[int] = Query(default=None, description="仓库ID过滤"),
+    direction: Optional[str] = Query(default=None, description="方向 IN/OUT/ADJUST"),
+    source_module: Optional[str] = Query(default=None, description="来源模块"),
+    source_type: Optional[str] = Query(default=None, description="来源类型"),
+    date_from: Optional[str] = Query(default=None, description="起始日期 YYYY-MM-DD"),
+    date_to: Optional[str] = Query(default=None, description="结束日期 YYYY-MM-DD"),
+    db: Session = Depends(get_db),
+) -> ApiResponse[PageData[schemas.StockJournalOut]]:
+    """分页查询库存变动流水。"""
+    rows, total = service.list_stock_journal(
+        db,
+        page=params.page,
+        page_size=params.page_size,
+        keyword=keyword,
+        material_id=material_id,
+        warehouse_id=warehouse_id,
+        direction=direction,
+        source_module=source_module,
+        source_type=source_type,
+        date_from=date_from,
+        date_to=date_to,
+    )
+    return success(
+        PageData[schemas.StockJournalOut](
+            page=params.page, page_size=params.page_size, total=total, items=rows
+        )
+    )
+
+
 # ==================== 补库需求 ====================
 
 
@@ -431,6 +479,21 @@ def generate_from_reorder_rules(
 ) -> ApiResponse[schemas.GenerateFromRulesOut]:
     """按订货点建议批量创建 DRAFT 的 REORDER 补库需求。"""
     result = service.generate_from_reorder_rules(db, operator_id)
+    db.commit()
+    return success(result)
+
+
+@router.post(
+    "/replenishment-requests/generate-from-safety-stock",
+    response_model=ApiResponse[schemas.GenerateFromRulesOut],
+    summary="按安全库存批量生成补库需求",
+)
+def generate_from_safety_stock(
+    operator_id: Optional[int] = Query(default=None, description="操作人ID"),
+    db: Session = Depends(get_db),
+) -> ApiResponse[schemas.GenerateFromRulesOut]:
+    """按安全库存建议批量创建 DRAFT 补库需求（采购 / 生产按 supply_type 分流）。"""
+    result = service.generate_from_safety_stock(db, operator_id)
     db.commit()
     return success(result)
 
@@ -528,6 +591,33 @@ def stock_summary_report(
 def low_stock_report(db: Session = Depends(get_db)) -> ApiResponse[List[schemas.LowStockOut]]:
     """可用量低于安全库存的物料（缺料预警）。"""
     return success(service.low_stock_report(db))
+
+
+@router.get(
+    "/reports/safety-stock-suggestions",
+    response_model=ApiResponse[List[schemas.SafetyStockSuggestionOut]],
+    summary="安全库存补库建议",
+)
+def safety_stock_suggestions(
+    db: Session = Depends(get_db),
+) -> ApiResponse[List[schemas.SafetyStockSuggestionOut]]:
+    """按物料安全库存生成补库建议（BUY→采购补库，MAKE→生产补库）。"""
+    return success(service.safety_stock_suggestions(db))
+
+
+@router.get(
+    "/reports/stocktake-summary",
+    response_model=ApiResponse[schemas.StocktakeSummaryOut],
+    summary="盘点汇总（盘盈盘亏）",
+)
+def stocktake_summary(
+    date_from: Optional[date] = Query(default=None, description="盘点日期起（含）"),
+    date_to: Optional[date] = Query(default=None, description="盘点日期止（含）"),
+    warehouse_id: Optional[int] = Query(default=None, description="仓库ID"),
+    db: Session = Depends(get_db),
+) -> ApiResponse[schemas.StocktakeSummaryOut]:
+    """已确认盘点单的盘盈盘亏汇总（差异 = 实盘 − 账面）。"""
+    return success(service.stocktake_summary(db, date_from, date_to, warehouse_id))
 
 
 @router.get(

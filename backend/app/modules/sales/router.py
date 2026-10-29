@@ -167,6 +167,91 @@ def list_products(
     return success(service.list_products(db, keyword))
 
 
+# ==================== 产品价格（仅可售物料） ====================
+
+
+@router.get(
+    "/product-prices",
+    response_model=ApiResponse[PageData[schemas.ProductPriceOut]],
+    summary="产品价格列表（整机 / 可售备件）",
+)
+def list_product_prices(
+    params: PageParams = Depends(PageParams.as_dependency),
+    keyword: Optional[str] = Query(default=None, description="物料编码/名称关键字"),
+    db: Session = Depends(get_db),
+) -> ApiResponse[PageData[schemas.ProductPriceOut]]:
+    """分页查询可售物料的产品价格，未定价的物料同样返回。"""
+    rows, total = service.list_product_prices(db, params.page, params.page_size, keyword)
+    return success(
+        PageData[schemas.ProductPriceOut](
+            page=params.page, page_size=params.page_size, total=total, items=rows
+        )
+    )
+
+
+@router.get(
+    "/product-prices/{material_id}",
+    response_model=ApiResponse[schemas.ProductPriceOut],
+    summary="产品当前价格",
+)
+def get_product_price(
+    material_id: int, db: Session = Depends(get_db)
+) -> ApiResponse[schemas.ProductPriceOut]:
+    """按物料 ID 查询当前价格，供销售订单自动带出单价。"""
+    return success(service.get_product_price(db, material_id))
+
+
+@router.put(
+    "/product-prices/{material_id}",
+    response_model=ApiResponse[schemas.ProductPriceOut],
+    summary="调整产品价格（写入价格变动记录）",
+)
+def update_product_price(
+    material_id: int,
+    payload: schemas.ProductPriceUpdate,
+    db: Session = Depends(get_db),
+) -> ApiResponse[schemas.ProductPriceOut]:
+    """调整产品价格：更新当前价并追加一条价格变动记录。"""
+    row = service.set_product_price(
+        db,
+        material_id,
+        price=payload.price,
+        effective_date=payload.effective_date,
+        remark=payload.remark,
+        operator_id=payload.operator_id,
+    )
+    db.commit()
+    return success(row)
+
+
+@router.get(
+    "/product-prices/{material_id}/history",
+    response_model=ApiResponse[List[schemas.ProductPriceHistoryOut]],
+    summary="产品价格变动记录",
+)
+def product_price_history(
+    material_id: int, db: Session = Depends(get_db)
+) -> ApiResponse[List[schemas.ProductPriceHistoryOut]]:
+    """某可售物料的全部价格变动（按生效日期升序，供折线图展示）。"""
+    return success(service.product_price_history(db, material_id))
+
+
+@router.delete(
+    "/product-prices/{material_id}",
+    response_model=ApiResponse[None],
+    summary="删除产品价格（含全部变动记录）",
+)
+def delete_product_price(
+    material_id: int,
+    operator_id: Optional[int] = Query(default=None),
+    db: Session = Depends(get_db),
+) -> ApiResponse[None]:
+    """删除产品价格及其价格变动记录，物料回到「未定价」。"""
+    service.delete_product_price(db, material_id, operator_id)
+    db.commit()
+    return success(None)
+
+
 # ==================== 销售预测 ====================
 
 

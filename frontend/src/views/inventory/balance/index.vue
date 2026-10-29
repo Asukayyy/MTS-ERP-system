@@ -1,25 +1,34 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
-import { ElMessage } from 'element-plus'
 
 import {
   getBalanceSummary,
-  getLowStockReport,
   listBalances,
   listWarehouses,
 } from '@/api/inventory'
 import RemoteSelect from '@/components/common/RemoteSelect.vue'
 import { usePagedTable, toNumber } from '@/composables/usePagedTable'
-import type { Balance, BalanceSummary, LowStock, RemoteOption } from '@/types/erp'
+import { fmtQty } from '@/utils/format'
+import type { Balance, BalanceSummary, RemoteOption } from '@/types/erp'
+
+type SortQuery = {
+  sort_by?: string
+  sort_order?: 'asc' | 'desc'
+}
+
+const sortQuery = ref<SortQuery>({ sort_by: undefined, sort_order: undefined })
 
 const { loading, rows, total, page, pageSize, query, load, search, reset, changePage, changeSize } =
   usePagedTable<
     Balance,
-    { keyword: string; warehouse_id: number | undefined; sales_category: string }
+    { keyword: string; warehouse_id: number | undefined; sales_category: string; quantity_gt: number | undefined } & SortQuery
   >((params) => listBalances(params), {
     keyword: '',
     warehouse_id: undefined,
     sales_category: '',
+    quantity_gt: 0,
+    sort_by: undefined,
+    sort_order: undefined,
   })
 
 /** 销售类别：整机 / 可售备件（如转椅轮子）/ 内部件 */
@@ -67,34 +76,35 @@ async function loadWarehouseOptions(keyword: string): Promise<RemoteOption[]> {
   return data.items.map((item) => ({ id: item.id, label: `${item.warehouse_code} ${item.warehouse_name}` }))
 }
 
-// ---------------- 低库存 / 缺料报表 ----------------
-
-const lowStockLoading = ref(false)
-const lowStockRows = ref<LowStock[]>([])
-
-async function loadLowStock(): Promise<void> {
-  lowStockLoading.value = true
-  try {
-    lowStockRows.value = await getLowStockReport()
-  } catch (error) {
-    ElMessage.error((error as Error).message)
-  } finally {
-    lowStockLoading.value = false
-  }
-}
-
-// ---------------- 低库存 / 缺料报表 ----------------
-
-function refreshAll(): void {
-  doSearch()
-  loadLowStock()
-}
-
 onMounted(() => {
   load()
   loadSummary()
-  loadLowStock()
 })
+
+/** 点击表头排序 → 全量后端排序（跨分页） */
+const SORT_BY_MAP: Record<string, string> = {
+  material_code: 'material_code',
+  material_name: 'material_name',
+  material_sales_category: 'material_sales_category',
+  material_abc_class: 'material_abc_class',
+  warehouse_name: 'warehouse_name',
+  warehouse_code: 'warehouse_code',
+  on_hand: 'quantity',
+  available_quantity: 'available_quantity',
+  safety_stock: 'safety_stock',
+}
+
+function handleSortChange({ prop, order }: { prop: string; order: string | null }) {
+  if (!prop || !order) {
+    query.sort_by = undefined
+    query.sort_order = undefined
+  } else {
+    query.sort_by = SORT_BY_MAP[prop] || prop
+    query.sort_order = order === 'ascending' ? 'asc' : 'desc'
+  }
+  changePage(1) // 回到第 1 页
+  load()
+}
 </script>
 
 <template>
@@ -104,7 +114,7 @@ onMounted(() => {
         <div class="table-toolbar">
           <span class="page-title">实时库存</span>
           <span class="table-toolbar__spacer" />
-          <el-button @click="refreshAll">刷新</el-button>
+          <el-button @click="load">刷新</el-button>
         </div>
       </template>
 
@@ -150,15 +160,15 @@ onMounted(() => {
         </el-form-item>
       </el-form>
 
-      <el-table v-loading="loading" :data="rows" border size="small">
-        <el-table-column label="物料编码" prop="material_code" min-width="130" />
-        <el-table-column label="物料名称" prop="material_name" min-width="160" />
-        <el-table-column label="销售类别" width="100">
+      <el-table v-loading="loading" :data="rows" border size="small" @sort-change="handleSortChange">
+        <el-table-column label="物料编码" prop="material_code" min-width="130" sortable="custom" />
+        <el-table-column label="物料名称" prop="material_name" min-width="160" sortable="custom" />
+        <el-table-column label="销售类别" width="100" sortable="custom" prop="material_sales_category">
           <template #default="{ row }">
             {{ SALES_CATEGORIES.find((item) => item.value === row.material_sales_category)?.label ?? '内部件' }}
           </template>
         </el-table-column>
-        <el-table-column label="ABC" width="70" align="center">
+        <el-table-column label="ABC" width="70" align="center" sortable="custom" prop="material_abc_class">
           <template #default="{ row }">
             <el-tag v-if="row.material_abc_class" :type="row.material_abc_class === 'A' ? 'danger' : row.material_abc_class === 'B' ? 'warning' : 'info'" size="small">
               {{ row.material_abc_class }}
@@ -166,14 +176,44 @@ onMounted(() => {
             <span v-else>—</span>
           </template>
         </el-table-column>
-        <el-table-column label="仓库" min-width="150">
-          <template #default="{ row }">{{ row.warehouse_name || `ID ${row.warehouse_id}` }}</template>
-        </el-table-column>
-        <el-table-column label="现有量" prop="on_hand" width="110" align="right" />
-        <el-table-column label="锁定量" prop="locked_quantity" width="110" align="right" />
-        <el-table-column label="可用量" width="110" align="right">
+        <el-table-column label="仓库" min-width="180" sortable="custom" prop="warehouse_name">
           <template #default="{ row }">
-            <span :class="{ 'qty-zero': toNumber(row.available_quantity) <= 0 }">{{ row.available_quantity }}</span>
+            {{ row.warehouse_name || `ID ${row.warehouse_id}` }}
+            <span style="color: #98a2ad; font-size: 12px; margin-left: 4px" v-if="row.warehouse_code">
+              ({{ row.warehouse_code }})
+            </span>
+            <el-tag v-if="row.is_available_warehouse === false" type="info" size="small" style="margin-left: 4px">
+              废品
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="现有量" width="110" align="right" prop="on_hand" sortable="custom">
+          <template #default="{ row }">{{ fmtQty(row.on_hand) }}</template>
+        </el-table-column>
+        <el-table-column label="可用量" width="110" align="right" prop="available_quantity" sortable="custom">
+          <template #default="{ row }">
+            <template v-if="row.is_available_warehouse === false">
+              <span style="color: #98a2ad">已报废</span>
+            </template>
+            <template v-else>
+              <span :class="{ 'qty-zero': toNumber(row.available_quantity) <= 0 }">{{ fmtQty(row.available_quantity) }}</span>
+            </template>
+          </template>
+        </el-table-column>
+        <el-table-column label="安全库存" width="110" align="right" prop="safety_stock" sortable="custom">
+          <template #default="{ row }">
+            <template v-if="row.is_available_warehouse === false">
+              <span style="color: #c0c4cc">—</span>
+            </template>
+            <template v-else>
+              <span
+                :class="{
+                  'qty-zero':
+                    toNumber(row.material_total_available) < toNumber(row.safety_stock),
+                }"
+                >{{ fmtQty(row.safety_stock) }}</span
+              >
+            </template>
           </template>
         </el-table-column>
         <template #empty>暂无库存结存数据</template>
@@ -190,24 +230,6 @@ onMounted(() => {
           @size-change="changeSize"
         />
       </div>
-    </el-card>
-
-    <el-card shadow="never" style="margin-top: 12px">
-      <template #header>
-        <div class="table-toolbar">
-          <span class="page-title">库存预警（低于安全库存）</span>
-          <span class="table-toolbar__spacer" />
-          <el-button @click="loadLowStock">刷新</el-button>
-        </div>
-      </template>
-      <el-table v-loading="lowStockLoading" :data="lowStockRows" border size="small">
-        <el-table-column label="物料编码" prop="material_code" min-width="130" />
-        <el-table-column label="物料名称" prop="material_name" min-width="160" />
-        <el-table-column label="可用量" prop="available_quantity" width="120" align="right" />
-        <el-table-column label="安全库存" prop="safety_stock" width="120" align="right" />
-        <el-table-column label="缺口数量" prop="shortage_qty" width="120" align="right" />
-        <template #empty>暂无低于安全库存的物料</template>
-      </el-table>
     </el-card>
   </div>
 </template>

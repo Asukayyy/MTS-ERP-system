@@ -2,17 +2,38 @@
 
 只负责数据库读写与查询拼装，**不写业务规则**。
 只允许被本模块的 `service.py` / `contract.py` 调用；其它模块禁止直接 import 本文件。
-跨模块数据（物料、安全库存）通过 `system.contract` 获取，本层**不跨模块 JOIN**。
+跨模块数据（物料、安全库存）通过 `system.contract` 获取，本层**不跨模块 JOIN**，
+仅在需要按物料/仓库字段排序时才临时 JOIN system.models.SysMaterial。
 """
 
 from datetime import date
 from decimal import Decimal
 from typing import Dict, List, Optional, Sequence, Tuple
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import case, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.modules.inventory import models
+from app.modules.system.models import SysMaterial  # 仅用于排序时跨模块 JOIN
+
+# 不计入可用量的仓库编码：废品仓内的物资已报废，仅作资产登记，
+# 不参与可用量、安全库存判断与补库建议（现存量仍然照实记录）。
+NON_AVAILABLE_WAREHOUSE_CODES: Tuple[str, ...] = ("WH-SCRAP-01",)
+
+
+def _non_available_warehouse_ids():
+    """废品仓等不计入可用量的仓库 ID 子查询。"""
+    return select(models.InvWarehouse.id).where(
+        models.InvWarehouse.warehouse_code.in_(NON_AVAILABLE_WAREHOUSE_CODES)
+    )
+
+
+def _available_expr():
+    """可用量表达式：废品仓一律记 0（物资已报废，不能用于生产/销售）。"""
+    return case(
+        (models.InvBalance.warehouse_id.in_(_non_available_warehouse_ids()), 0),
+        else_=models.InvBalance.quantity - models.InvBalance.locked_quantity,
+    )
 
 
 # ==================== 通用工具 ====================
@@ -141,20 +162,87 @@ def list_balances(
     warehouse_id: Optional[int] = None,
     material_ids: Optional[Sequence[int]] = None,
     has_reorder_point: bool = False,
+    quantity_gt: Optional[Decimal] = None,
+    sort_by: Optional[str] = None,
+    sort_order: str = "asc",
 ):
-    """分页查询结存。`material_ids` 用于把跨模块的关键字检索结果收敛到本模块 SQL。"""
-    stmt = select(models.InvBalance).order_by(models.InvBalance.id.desc())
+    """分页查询结存。`material_ids` 用于把跨模块的关键字检索结果收敛到本模块 SQL。
+
+    sort_by 可选值：
+      id / quantity / locked_qty / safety_stock / reorder_point /
+      material_code / material_name / material_abc_class / material_sales_category /
+      warehouse_name / warehouse_code /
+      available_quantity（= quantity - locked_qty，后端计算字段）
+    默认按 id desc（最新建的结存在前）。
+    """
+    stmt = select(models.InvBalance)
     if material_id:
         stmt = stmt.where(models.InvBalance.material_id == material_id)
     if warehouse_id:
         stmt = stmt.where(models.InvBalance.warehouse_id == warehouse_id)
     if has_reorder_point:
         stmt = stmt.where(models.InvBalance.reorder_point.is_not(None))
+    if quantity_gt is not None:
+        stmt = stmt.where(models.InvBalance.quantity > quantity_gt)
     if material_ids is not None:
         ids = [int(i) for i in material_ids]
         if not ids:
             return [], 0
         stmt = stmt.where(models.InvBalance.material_id.in_(ids))
+
+    # --- 排序 ---
+    asc = sort_order.lower() == "asc"
+    B = models.InvBalance     # inv_balance
+    W = models.InvWarehouse   # inv_warehouse（本模块）
+    SM = SysMaterial          # sys_material（跨模块）
+    direction = lambda col: col if asc else col.desc()
+
+    # 需要联表的排序列
+    _need_material_join = sort_by in (
+        "material_code", "material_name", "material_abc_class",
+        "material_sales_category", "safety_stock",
+    )
+    _need_warehouse_join = sort_by in ("warehouse_name", "warehouse_code")
+
+    if sort_by is None:
+        stmt = stmt.order_by(B.id.desc())
+    elif _need_material_join or _need_warehouse_join:
+        if _need_material_join:
+            stmt = stmt.join(SM, SM.id == B.material_id)
+        if _need_warehouse_join:
+            stmt = stmt.join(W, W.id == B.warehouse_id)
+        _ORDER_MAP = {
+            "material_code": SM.material_code,
+            "material_name": SM.material_name,
+            "material_abc_class": SM.abc_class,
+            "material_sales_category": SM.sales_category,
+            "safety_stock": SM.safety_stock,
+            "warehouse_name": W.warehouse_name,
+            "warehouse_code": W.warehouse_code,
+        }
+        col = _ORDER_MAP.get(sort_by)
+        if col is not None:
+            stmt = stmt.order_by(direction(col), B.id)
+        else:
+            stmt = stmt.order_by(B.id.desc())
+    elif sort_by == "available_quantity":
+        available = (B.quantity - B.locked_quantity).label("available_quantity")
+        stmt = stmt.order_by(direction(available), B.id)
+    else:
+        # InvBalance 自身字段
+        _DIRECT_MAP = {
+            "id": B.id,
+            "quantity": B.quantity,
+            "locked_quantity": B.locked_quantity,
+            "reorder_point": B.reorder_point,
+            "reorder_quantity": B.reorder_quantity,
+        }
+        col = _DIRECT_MAP.get(sort_by)
+        if col is not None:
+            stmt = stmt.order_by(direction(col), B.id)
+        else:
+            stmt = stmt.order_by(B.id.desc())
+
     return _paginate(db, stmt, page, page_size)
 
 
@@ -194,7 +282,8 @@ def sum_available(
     """某物料的可用量合计（现存量 - 锁定量，可选限制仓库）。"""
     expr = models.InvBalance.quantity - models.InvBalance.locked_quantity
     stmt = select(func.coalesce(func.sum(expr), 0)).where(
-        models.InvBalance.material_id == material_id
+        models.InvBalance.material_id == material_id,
+        models.InvBalance.warehouse_id.notin_(_non_available_warehouse_ids()),
     )
     if warehouse_id is not None:
         stmt = stmt.where(models.InvBalance.warehouse_id == warehouse_id)
@@ -216,6 +305,7 @@ def list_available_by_warehouse(db: Session, material_id: int) -> List[Tuple]:
         .where(
             models.InvBalance.material_id == material_id,
             available_expr > 0,
+            models.InvBalance.warehouse_id.notin_(_non_available_warehouse_ids()),
         )
         .order_by(available_expr.desc(), models.InvBalance.warehouse_id)
     )
@@ -229,7 +319,7 @@ def stock_snapshot(
     ids = [int(i) for i in material_ids]
     if not ids:
         return {}
-    available_expr = models.InvBalance.quantity - models.InvBalance.locked_quantity
+    available_expr = _available_expr()
     stmt = (
         select(
             models.InvBalance.material_id,
@@ -253,8 +343,8 @@ def stock_snapshot(
 def aggregate_by_material(
     db: Session, warehouse_id: Optional[int] = None
 ) -> List[Tuple[int, Decimal, Decimal]]:
-    """按物料汇总现存量/可用量，供库存报表使用。"""
-    available_expr = models.InvBalance.quantity - models.InvBalance.locked_quantity
+    """按物料汇总现存量/可用量，供库存报表使用（废品仓计入现存量、不计入可用量）。"""
+    available_expr = _available_expr()
     stmt = (
         select(
             models.InvBalance.material_id,
@@ -332,6 +422,51 @@ def add_operation_item(
 ) -> models.InvStockOperationItem:
     db.add(item)
     return item
+
+
+# ==================== 库存流水（inv_stock_journal） ====================
+
+
+def list_stock_journal(
+    db: Session,
+    *,
+    page: int = 1,
+    page_size: int = 20,
+    keyword: Optional[str] = None,
+    material_id: Optional[int] = None,
+    warehouse_id: Optional[int] = None,
+    direction: Optional[str] = None,
+    source_module: Optional[str] = None,
+    source_type: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+) -> Tuple[List[models.InvStockJournal], int]:
+    """分页查询库存变动流水。按 created_at / id 倒序。"""
+    stmt = select(models.InvStockJournal).order_by(
+        models.InvStockJournal.id.desc()
+    )
+    if keyword:
+        like = f"%{keyword}%"
+        stmt = stmt.where(
+            (models.InvStockJournal.material_code.like(like))
+            | (models.InvStockJournal.material_name.like(like))
+            | (models.InvStockJournal.source_no.like(like))
+        )
+    if material_id:
+        stmt = stmt.where(models.InvStockJournal.material_id == material_id)
+    if warehouse_id:
+        stmt = stmt.where(models.InvStockJournal.warehouse_id == warehouse_id)
+    if direction:
+        stmt = stmt.where(models.InvStockJournal.direction == direction)
+    if source_module:
+        stmt = stmt.where(models.InvStockJournal.source_module == source_module)
+    if source_type:
+        stmt = stmt.where(models.InvStockJournal.source_type == source_type)
+    if date_from:
+        stmt = stmt.where(models.InvStockJournal.op_date >= date_from)
+    if date_to:
+        stmt = stmt.where(models.InvStockJournal.op_date <= date_to)
+    return _paginate(db, stmt, page, page_size)
 
 
 def count_operations_by_type(db: Session, op_type: str) -> int:

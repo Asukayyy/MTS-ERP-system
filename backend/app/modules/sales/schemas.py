@@ -100,6 +100,42 @@ class ProductOut(BaseModel):
     status: str
 
 
+# ==================== 产品价格 ====================
+
+
+class ProductPriceOut(BaseModel):
+    """可售物料的产品价格（未定价时 `current_price` 为空）。"""
+
+    material_id: int
+    material_code: str
+    material_name: str
+    sales_category: Optional[str] = None
+    unit_code: Optional[str] = None
+    standard_cost: Optional[Decimal] = None
+    current_price: Optional[Decimal] = None
+    effective_date: Optional[date] = None
+    remark: Optional[str] = None
+    history_count: int = Field(default=0, description="价格变动记录数")
+
+
+class ProductPriceUpdate(BaseModel):
+    """调整产品价格入参。"""
+
+    price: Decimal = Field(ge=0, description="新单价")
+    effective_date: Optional[date] = Field(default=None, description="生效日期，留空取当天")
+    remark: Optional[str] = Field(default=None, max_length=200)
+    operator_id: Optional[int] = None
+
+
+class ProductPriceHistoryOut(_IdOut):
+    """价格变动记录。"""
+
+    material_id: int
+    price: Decimal
+    effective_date: date
+    remark: Optional[str] = None
+
+
 # ==================== 销售预测 ====================
 
 

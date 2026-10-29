@@ -72,6 +72,12 @@ export const constantRoutes: RouteRecordRaw[] = [
         meta: { title: '销售预测', perm: 'sales:demand' },
       },
       {
+        path: 'sales/price',
+        name: 'SalesProductPrice',
+        component: () => import('@/views/sales/price/index.vue'),
+        meta: { title: '产品价格', perm: 'sales:price' },
+      },
+      {
         path: 'sales/order',
         name: 'SalesOrder',
         component: () => import('@/views/sales/order/index.vue'),
@@ -210,22 +216,16 @@ export const constantRoutes: RouteRecordRaw[] = [
         meta: { title: '盘点', perm: 'inventory:stocktake' },
       },
       {
-        path: 'inventory/transaction',
-        name: 'InventoryTransaction',
-        component: () => import('@/views/inventory/transaction/index.vue'),
-        meta: { title: '库存流水', perm: 'inventory:ledger' },
-      },
-      {
-        path: 'inventory/reorder',
-        name: 'InventoryReorder',
-        component: () => import('@/views/inventory/reorder/index.vue'),
-        meta: { title: '订货点', perm: 'inventory:reorder' },
-      },
-      {
         path: 'inventory/replenishment',
         name: 'InventoryReplenishment',
         component: () => import('@/views/inventory/replenishment/index.vue'),
         meta: { title: '补库需求', perm: 'inventory:replenishment' },
+      },
+      {
+        path: 'inventory/stock-journal',
+        name: 'InventoryStockJournal',
+        component: () => import('@/views/inventory/stock-journal/index.vue'),
+        meta: { title: '库存流水', perm: 'inventory:balance' },
       },
 
       // ---------- 人事管理 ----------

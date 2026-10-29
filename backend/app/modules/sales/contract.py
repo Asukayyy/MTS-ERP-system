@@ -27,7 +27,8 @@ from app.modules.sales import repository
 def get_open_order_demand(db: Session, on_date: Optional[date] = None) -> List[Dict[str, Any]]:
     """未交付需求行（供 MRP / 计划展开）。
 
-    只统计状态 ∈ CONFIRMED/IN_PROGRESS 的订单，且 `quantity = quantity - delivered_qty > 0`。
+    只统计状态 ∈ CONFIRMED/IN_PROGRESS 的订单，且 `quantity - delivered_qty > 0`。
+    数量取**订单未交付总量**，不扣减尚未确认的发货草稿（草稿占用由 MRP 净算抵扣）。
     传入 `on_date` 时只返回要求交货日期不晚于该日的需求。
 
     返回 `[{"order_id", "order_no", "customer_id", "material_id", "quantity", "due_date"}]`。
@@ -79,3 +80,13 @@ def get_customer_name(db: Session, customer_id: Optional[int]) -> Optional[str]:
         return None
     customer = repository.get_customer(db, int(customer_id))
     return customer.customer_name if customer else None
+
+
+def get_material_delivered_values(db: Session, since: date) -> Dict[int, Decimal]:
+    """按物料汇总指定日期之后的销售出库金额（供 ABC 自动分类使用）。
+
+    金额 = 已发货数量 × 销售单价，只统计非作废销售订单；不提交事务。
+    """
+    from app.modules.sales import service
+
+    return service.get_material_delivered_values(db, since)
