@@ -13,6 +13,10 @@ from sqlalchemy.orm import Session
 
 from app.modules.planning import models
 
+#: 仍可继续生成下游单据（派工单 / 领料单 / 完工报告）的计划状态。
+#: `COMPLETED` 已无剩余可下达量、`CANCELLED` 已作废，均不参与按计划生成。
+GENERABLE_PLAN_STATUSES = ("DRAFT", "CONFIRMED", "RELEASED", "IN_PROGRESS")
+
 
 def count_all(db: Session, model) -> int:
     """统计某表总行数（供综合统计使用）。"""
@@ -184,6 +188,71 @@ def get_mps_items(db: Session, mps_id: int) -> List[models.PlnMpsItem]:
             select(models.PlnMpsItem)
             .where(models.PlnMpsItem.mps_id == mps_id)
             .order_by(models.PlnMpsItem.id)
+        )
+    )
+
+
+def plans_of_mps_item(
+    db: Session, mps_id: int, material_id: int
+) -> List[models.PlnProductionPlan]:
+    """某 MPS 行（MPS + 物料）关联的作业计划（排除已取消）。
+
+    关联路径：`pln_production_plan.mrp_result_id → pln_mrp_result.run_id
+    → pln_mrp_run.mps_id`，再按物料一致匹配。
+    """
+    stmt = (
+        select(models.PlnProductionPlan)
+        .join(
+            models.PlnMrpResult,
+            models.PlnMrpResult.id == models.PlnProductionPlan.mrp_result_id,
+        )
+        .join(models.PlnMrpRun, models.PlnMrpRun.id == models.PlnMrpResult.run_id)
+        .where(
+            models.PlnMrpRun.mps_id == mps_id,
+            models.PlnProductionPlan.material_id == material_id,
+            models.PlnProductionPlan.status != "CANCELLED",
+        )
+        .order_by(models.PlnProductionPlan.id)
+    )
+    return list(db.scalars(stmt))
+
+
+def latest_order_qty_of_material(
+    db: Session, mps_id: int, material_id: int
+) -> Optional[Decimal]:
+    """该 MPS **最新一次** MRP 批次中某物料的建议下达量合计。
+
+    返回 `None` 表示该 MPS 还没有跑过 MRP（无法判定该行需求是否被库存满足）；
+    返回 `0` 表示跑过但净需求为 0（可用库存已覆盖，无需生产）。
+    """
+    latest_run_id = db.scalar(
+        select(models.PlnMrpRun.id)
+        .where(models.PlnMrpRun.mps_id == mps_id)
+        .order_by(models.PlnMrpRun.id.desc())
+        .limit(1)
+    )
+    if latest_run_id is None:
+        return None
+    total = db.scalar(
+        select(func.coalesce(func.sum(models.PlnMrpResult.order_qty), 0)).where(
+            models.PlnMrpResult.run_id == int(latest_run_id),
+            models.PlnMrpResult.material_id == material_id,
+            models.PlnMrpResult.status != "CANCELLED",
+        )
+    )
+    return Decimal(str(total or 0))
+
+
+def get_demands_by_ids(db: Session, ids: Sequence[int]) -> List[models.PlnDemand]:
+    """按 ID 批量取需求（用于 MPS 完成后回写来源需求状态）。"""
+    unique = [int(i) for i in dict.fromkeys(ids) if i]
+    if not unique:
+        return []
+    return list(
+        db.scalars(
+            select(models.PlnDemand)
+            .where(models.PlnDemand.id.in_(unique))
+            .order_by(models.PlnDemand.id)
         )
     )
 
@@ -360,12 +429,21 @@ def list_production_plans(
     page_size: int = 20,
     status: Optional[str] = None,
     material_id: Optional[int] = None,
+    generable_only: bool = False,
 ):
+    """分页查询生产作业计划。
+
+    `generable_only=True` 时只返回**还能继续生成下游单据**的计划，
+    即排除 `COMPLETED`（已完工，无剩余可下达量）与 `CANCELLED`（已作废），
+    供"按计划生成派工单 / 领料单 / 完工报告"的选择列表使用。
+    """
     stmt = select(models.PlnProductionPlan).order_by(models.PlnProductionPlan.id.desc())
     if status:
         stmt = stmt.where(models.PlnProductionPlan.status == status)
     if material_id:
         stmt = stmt.where(models.PlnProductionPlan.material_id == material_id)
+    if generable_only:
+        stmt = stmt.where(models.PlnProductionPlan.status.in_(GENERABLE_PLAN_STATUSES))
     return _paginate(db, stmt, page, page_size)
 
 
@@ -482,6 +560,22 @@ def list_dispatch_orders_by_source(
             .where(
                 models.PlnDispatchOrder.source_type == source_type,
                 models.PlnDispatchOrder.source_reference_id == source_reference_id,
+                models.PlnDispatchOrder.status != "CANCELLED",
+            )
+            .order_by(models.PlnDispatchOrder.id)
+        )
+    )
+
+
+def list_dispatch_orders_by_plan(
+    db: Session, plan_id: int
+) -> List[models.PlnDispatchOrder]:
+    """某作业计划下的派工单（排除已取消），用于汇总派工是否全部完工。"""
+    return list(
+        db.scalars(
+            select(models.PlnDispatchOrder)
+            .where(
+                models.PlnDispatchOrder.plan_id == plan_id,
                 models.PlnDispatchOrder.status != "CANCELLED",
             )
             .order_by(models.PlnDispatchOrder.id)

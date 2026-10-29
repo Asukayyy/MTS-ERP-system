@@ -259,6 +259,28 @@ export interface Product {
   status: string
 }
 
+export interface ProductPrice {
+  material_id: number
+  material_code: string
+  material_name: string
+  sales_category?: string | null
+  unit_code?: string | null
+  standard_cost?: Num | null
+  /** 当前价格，未定价时为 null */
+  current_price?: Num | null
+  effective_date?: string | null
+  remark?: string | null
+  history_count: number
+}
+
+export interface ProductPriceHistory {
+  id: number
+  material_id: number
+  price: Num
+  effective_date: string
+  remark?: string | null
+}
+
 export interface Forecast {
   id: number
   forecast_no: string
@@ -558,6 +580,8 @@ export interface DispatchOrder {
   completed_qty: Num
   worker_id?: number | null
   worker_name?: string | null
+  org_id?: number | null
+  org_name?: string | null
   planned_start: string
   planned_end: string
   status: string
@@ -691,6 +715,10 @@ export interface Balance {
   on_hand: Num
   locked_quantity: Num
   available_quantity: Num
+  /** 废品仓等不计入可用量的仓库为 false */
+  is_available_warehouse?: boolean
+  /** 该物料跨仓库可用量合计（排除废品仓），用于安全库存总量判断 */
+  material_total_available?: Num
   safety_stock?: Num
   reorder_point?: Num | null
   reorder_quantity?: Num | null

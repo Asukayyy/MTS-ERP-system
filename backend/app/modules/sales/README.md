@@ -14,8 +14,8 @@
 | 客户管理 | 增删改查、状态流转、按关键字检索 |
 | 销售预测 | 预测录入 / 修改 / 状态流转，按月份区间查询 |
 | 销售订单 | 头 + 明细，状态机 `DRAFT → CONFIRMED → IN_PROGRESS → COMPLETED`（可 `CANCELLED`） |
-| 订单确认库存分流 | 确认时按「现存量 − 锁定量」查库存：够的部分自动生成发货草稿，缺口转计划需求（`SALES`，直接 `CONFIRMED`）；响应 `allocation` 返回分流明细 |
-| 订单取消回收 | 取消时撤销该订单的 `DRAFT` 发货单，并作废尚未进入 MPS 的缺口需求，释放被占用的库存 |
+| 订单确认库存分流 | 确认时按「现存量 − 锁定量」查库存：够的部分自动生成发货草稿；存在缺口时登记计划需求（`SALES`，直接 `CONFIRMED`），数量为**订单未交付总量**（库存已分配部分由 MRP 净算抵扣）；响应 `allocation` 返回分流明细 |
+| 订单取消回收 | 取消时撤销该订单的 `DRAFT` 发货单，并作废尚未进入 MPS 的销售计划需求，释放被占用的库存 |
 | 销售发货 | 新建 / 确认 / 取消；确认时调用库存契约出库并回写 `delivered_qty` |
 | 销售退货 | 新建 / 确认 / 取消；确认时调用库存契约入库，行级带质量状态 `QUALIFIED/DEFECTIVE/SCRAP` |
 | 销售产品查询 | `/products` 直接取 `system.contract.get_finished_materials`，只列 FINISHED + ACTIVE |
@@ -43,7 +43,7 @@
 
 `backend/app/modules/sales/contract.py`：
 
-- `get_open_order_demand(db, on_date=None)` → 未交付的订单需求（已扣除自动分配的发货草稿占用量），供 planning 汇总需求
+- `get_open_order_demand(db, on_date=None)` → 未交付的订单需求（数量为订单未交付总量，发货草稿占用由 MRP 净算抵扣），供 planning 汇总需求
 - `get_confirmed_forecast_demand(db, month_from=None, month_to=None)` → 已确认预测需求
 - `get_open_order_qty(db, material_id)` → 某物料未交付订单量
 - `get_customer_name(db, customer_id)` → 客户名称
@@ -57,8 +57,8 @@
 | `inventory.contract.decrease_stock` | 发货确认出库（`SALES_SHIPMENT`） |
 | `inventory.contract.increase_stock` | 退货确认入库（`SALES_RETURN`） |
 | `inventory.contract.get_available_by_warehouse` | 订单确认时按仓库查可用量（现存量 − 锁定量）做库存分流 |
-| `planning.contract.create_sales_demand_from_shortage` | 订单确认时把库存缺口登记为 `SALES` 计划需求（置 `CONFIRMED`） |
-| `planning.contract.cancel_sales_demands_for_order` | 订单取消时作废未进入 MPS 的缺口需求 |
+| `planning.contract.create_sales_demand_from_order` | 订单确认时登记 `SALES` 计划需求（置 `CONFIRMED`，数量为订单未交付总量） |
+| `planning.contract.cancel_sales_demands_for_order` | 订单取消时作废未进入 MPS 的销售计划需求 |
 
 ## 主要接口分组
 

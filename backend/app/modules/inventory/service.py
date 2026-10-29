@@ -558,10 +558,23 @@ def list_balances(
     )
     materials = _material_map(db, [r.material_id for r in rows])
     warehouses = _warehouse_map(db, [r.warehouse_id for r in rows])
+    # 批量算物料跨仓可用量（排除废品仓），供前端按总量判断安全库存
+    unique_mids = list({r.material_id for r in rows})
+    total_available_map = {
+        mid: repository.sum_available(db, mid) for mid in unique_mids
+    }
     items = []
     for row in rows:
         material = materials.get(row.material_id, {})
         warehouse = warehouses.get(row.warehouse_id, {})
+        # 废品仓物资已报废：现存量照实，但可用量记 0、不参与安全库存判断
+        counts_in_available = (
+            warehouse.get("warehouse_code")
+            not in repository.NON_AVAILABLE_WAREHOUSE_CODES
+        )
+        balance_dict = _balance_dict(row)
+        if not counts_in_available:
+            balance_dict["available_quantity"] = Decimal("0")
         items.append(
             {
                 "id": row.id,
@@ -576,7 +589,11 @@ def list_balances(
                 "safety_stock": _as_decimal(material.get("safety_stock")),
                 "reorder_point": row.reorder_point,
                 "reorder_quantity": row.reorder_quantity,
-                **_balance_dict(row),
+                "is_available_warehouse": counts_in_available,
+                "material_total_available": total_available_map.get(
+                    row.material_id, Decimal("0")
+                ),
+                **balance_dict,
             }
         )
     return items, total
@@ -1256,7 +1273,16 @@ def _suggestion_warehouse(
     """补库建议的目标仓库：优先取该物料存量最大的仓库，否则取第一个启用的仓库。"""
     balance = db.scalars(
         select(models.InvBalance)
-        .where(models.InvBalance.material_id == material_id)
+        .join(
+            models.InvWarehouse,
+            models.InvWarehouse.id == models.InvBalance.warehouse_id,
+        )
+        .where(
+            models.InvBalance.material_id == material_id,
+            models.InvWarehouse.warehouse_code.notin_(
+                repository.NON_AVAILABLE_WAREHOUSE_CODES
+            ),
+        )
         .order_by(models.InvBalance.quantity.desc(), models.InvBalance.id)
         .limit(1)
     ).first()
@@ -1264,7 +1290,12 @@ def _suggestion_warehouse(
         return repository.get_warehouse(db, balance.warehouse_id)
     return db.scalars(
         select(models.InvWarehouse)
-        .where(models.InvWarehouse.status == "ACTIVE")
+        .where(
+            models.InvWarehouse.status == "ACTIVE",
+            models.InvWarehouse.warehouse_code.notin_(
+                repository.NON_AVAILABLE_WAREHOUSE_CODES
+            ),
+        )
         .order_by(models.InvWarehouse.id)
         .limit(1)
     ).first()

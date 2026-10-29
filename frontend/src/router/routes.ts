@@ -72,6 +72,12 @@ export const constantRoutes: RouteRecordRaw[] = [
         meta: { title: '销售预测', perm: 'sales:demand' },
       },
       {
+        path: 'sales/price',
+        name: 'SalesProductPrice',
+        component: () => import('@/views/sales/price/index.vue'),
+        meta: { title: '产品价格', perm: 'sales:price' },
+      },
+      {
         path: 'sales/order',
         name: 'SalesOrder',
         component: () => import('@/views/sales/order/index.vue'),

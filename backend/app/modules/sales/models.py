@@ -231,6 +231,55 @@ class SalShipmentItem(Base, AuditMixin):
 
 
 # ====================================================================
+# 产品价格（仅覆盖可对外销售的物料：整机 / 可售备件）
+# ====================================================================
+
+
+class SalProductPrice(Base, AuditMixin):
+    """产品当前价格：每个可售物料一行，销售订单默认取此价。
+
+    价格变动不留痕于本表，每次改价另写一条 `SalProductPriceHistory`，
+    详细页据此绘制价格走势。
+    """
+
+    __tablename__ = "sal_product_price"
+
+    id: Mapped[BigIntPk]
+    material_id: Mapped[BigIntFk] = mapped_column(
+        ForeignKey("sys_material.id", ondelete="RESTRICT"),
+        nullable=False,
+        unique=True,
+        comment="物料ID",
+    )
+    price: Mapped[Decimal] = mapped_column(
+        Numeric(18, 2), nullable=False, comment="当前单价"
+    )
+    effective_date: Mapped[date] = mapped_column(Date, nullable=False, comment="当前价格生效日期")
+    remark: Mapped[Optional[str]] = mapped_column(String(200), nullable=True, comment="定价说明")
+
+    __table_args__ = (CheckConstraint("price >= 0", name="ck_sal_product_price_price"),)
+
+
+class SalProductPriceHistory(Base, AuditMixin):
+    """产品价格变动记录：每次改价（含初始定价）追加一行。"""
+
+    __tablename__ = "sal_product_price_history"
+
+    id: Mapped[BigIntPk]
+    material_id: Mapped[BigIntFk] = mapped_column(
+        ForeignKey("sys_material.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+        comment="物料ID",
+    )
+    price: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False, comment="变动后的单价")
+    effective_date: Mapped[date] = mapped_column(Date, nullable=False, comment="生效日期")
+    remark: Mapped[Optional[str]] = mapped_column(String(200), nullable=True, comment="变动说明")
+
+    __table_args__ = (CheckConstraint("price >= 0", name="ck_sal_product_price_history_price"),)
+
+
+# ====================================================================
 # 销售退货（规格 §42：不允许只有发货没有退货）
 # ====================================================================
 
