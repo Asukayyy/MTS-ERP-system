@@ -1149,8 +1149,15 @@ def _settle_order_from_stock(
         raise BusinessException(CODE_CONTRACT_NOT_READY, "计划接口尚未就绪") from exc
 
     items = repository.get_order_items(db, order.id)
-    # 其他草稿发货单已占用的库存要先扣掉（发货确认前不会真正扣减结存）
+    # 其他草稿发货单已占用的库存要先扣掉（发货确认前不会真正扣减结存）。
+    # 草稿可能没指定仓库（由仓库管理在出库单里定仓），这种占用只能按物料整体抵扣。
     reserved = repository.draft_shipment_allocations(db)
+    reserved_by_material: Dict[int, Decimal] = {}
+    for (reserved_warehouse_id, reserved_material_id), reserved_qty in reserved.items():
+        if reserved_warehouse_id is None:
+            reserved_by_material[reserved_material_id] = (
+                reserved_by_material.get(reserved_material_id, Decimal("0")) + reserved_qty
+            )
     # 同一物料可能出现在多行，库存池必须按物料共享，否则会重复分配同一批库存
     pools: Dict[int, List[Dict[str, Any]]] = {}
     shipment_lines: List[Dict[str, Any]] = []
@@ -1172,6 +1179,15 @@ def _settle_order_from_stock(
                 )
                 if free > 0:
                     pool.append({"warehouse_id": warehouse_id, "available": free})
+            # 未指定仓库的草稿占用：按可用量从大到小依次抵扣，与后续分配顺序一致
+            outstanding = reserved_by_material.get(material_id, Decimal("0"))
+            for bucket in pool:
+                if outstanding <= 0:
+                    break
+                take = min(bucket["available"], outstanding)
+                bucket["available"] -= take
+                outstanding -= take
+            pool = [bucket for bucket in pool if bucket["available"] > 0]
             pools[material_id] = pool
         need = remaining
         for bucket in pool:
