@@ -14,11 +14,12 @@ import type { Balance, BalanceSummary, RemoteOption } from '@/types/erp'
 const { loading, rows, total, page, pageSize, query, load, search, reset, changePage, changeSize } =
   usePagedTable<
     Balance,
-    { keyword: string; warehouse_id: number | undefined; sales_category: string }
+    { keyword: string; warehouse_id: number | undefined; sales_category: string; quantity_gt: number | undefined }
   >((params) => listBalances(params), {
     keyword: '',
     warehouse_id: undefined,
     sales_category: '',
+    quantity_gt: 0,
   })
 
 /** 销售类别：整机 / 可售备件（如转椅轮子）/ 内部件 */
@@ -126,14 +127,14 @@ onMounted(() => {
       </el-form>
 
       <el-table v-loading="loading" :data="rows" border size="small">
-        <el-table-column label="物料编码" prop="material_code" min-width="130" />
-        <el-table-column label="物料名称" prop="material_name" min-width="160" />
-        <el-table-column label="销售类别" width="100">
+        <el-table-column label="物料编码" prop="material_code" min-width="130" sortable />
+        <el-table-column label="物料名称" prop="material_name" min-width="160" sortable />
+        <el-table-column label="销售类别" width="100" sortable prop="material_sales_category">
           <template #default="{ row }">
             {{ SALES_CATEGORIES.find((item) => item.value === row.material_sales_category)?.label ?? '内部件' }}
           </template>
         </el-table-column>
-        <el-table-column label="ABC" width="70" align="center">
+        <el-table-column label="ABC" width="70" align="center" sortable prop="material_abc_class">
           <template #default="{ row }">
             <el-tag v-if="row.material_abc_class" :type="row.material_abc_class === 'A' ? 'danger' : row.material_abc_class === 'B' ? 'warning' : 'info'" size="small">
               {{ row.material_abc_class }}
@@ -141,18 +142,21 @@ onMounted(() => {
             <span v-else>—</span>
           </template>
         </el-table-column>
-        <el-table-column label="仓库" min-width="150">
+        <el-table-column label="仓库" min-width="180" sortable prop="warehouse_name">
           <template #default="{ row }">
             {{ row.warehouse_name || `ID ${row.warehouse_id}` }}
+            <span style="color: #98a2ad; font-size: 12px; margin-left: 4px" v-if="row.warehouse_code">
+              ({{ row.warehouse_code }})
+            </span>
             <el-tag v-if="row.is_available_warehouse === false" type="info" size="small" style="margin-left: 4px">
               废品
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="现有量" width="110" align="right">
+        <el-table-column label="现有量" width="110" align="right" sortable>
           <template #default="{ row }">{{ fmtQty(row.on_hand) }}</template>
         </el-table-column>
-        <el-table-column label="可用量" width="110" align="right">
+        <el-table-column label="可用量" width="110" align="right" sortable>
           <template #default="{ row }">
             <template v-if="row.is_available_warehouse === false">
               <span style="color: #98a2ad">已报废</span>
@@ -162,7 +166,7 @@ onMounted(() => {
             </template>
           </template>
         </el-table-column>
-        <el-table-column label="安全库存" width="110" align="right">
+        <el-table-column label="安全库存" width="110" align="right" sortable>
           <template #default="{ row }">
             <template v-if="row.is_available_warehouse === false">
               <span style="color: #c0c4cc">—</span>

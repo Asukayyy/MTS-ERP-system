@@ -160,6 +160,7 @@ def list_balances(
     warehouse_id: Optional[int] = None,
     material_ids: Optional[Sequence[int]] = None,
     has_reorder_point: bool = False,
+    quantity_gt: Optional[Decimal] = None,
 ):
     """分页查询结存。`material_ids` 用于把跨模块的关键字检索结果收敛到本模块 SQL。"""
     stmt = select(models.InvBalance).order_by(models.InvBalance.id.desc())
@@ -169,6 +170,8 @@ def list_balances(
         stmt = stmt.where(models.InvBalance.warehouse_id == warehouse_id)
     if has_reorder_point:
         stmt = stmt.where(models.InvBalance.reorder_point.is_not(None))
+    if quantity_gt is not None:
+        stmt = stmt.where(models.InvBalance.quantity > quantity_gt)
     if material_ids is not None:
         ids = [int(i) for i in material_ids]
         if not ids:
@@ -353,6 +356,51 @@ def add_operation_item(
 ) -> models.InvStockOperationItem:
     db.add(item)
     return item
+
+
+# ==================== 库存流水（inv_stock_journal） ====================
+
+
+def list_stock_journal(
+    db: Session,
+    *,
+    page: int = 1,
+    page_size: int = 20,
+    keyword: Optional[str] = None,
+    material_id: Optional[int] = None,
+    warehouse_id: Optional[int] = None,
+    direction: Optional[str] = None,
+    source_module: Optional[str] = None,
+    source_type: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+) -> Tuple[List[models.InvStockJournal], int]:
+    """分页查询库存变动流水。按 created_at / id 倒序。"""
+    stmt = select(models.InvStockJournal).order_by(
+        models.InvStockJournal.id.desc()
+    )
+    if keyword:
+        like = f"%{keyword}%"
+        stmt = stmt.where(
+            (models.InvStockJournal.material_code.like(like))
+            | (models.InvStockJournal.material_name.like(like))
+            | (models.InvStockJournal.source_no.like(like))
+        )
+    if material_id:
+        stmt = stmt.where(models.InvStockJournal.material_id == material_id)
+    if warehouse_id:
+        stmt = stmt.where(models.InvStockJournal.warehouse_id == warehouse_id)
+    if direction:
+        stmt = stmt.where(models.InvStockJournal.direction == direction)
+    if source_module:
+        stmt = stmt.where(models.InvStockJournal.source_module == source_module)
+    if source_type:
+        stmt = stmt.where(models.InvStockJournal.source_type == source_type)
+    if date_from:
+        stmt = stmt.where(models.InvStockJournal.op_date >= date_from)
+    if date_to:
+        stmt = stmt.where(models.InvStockJournal.op_date <= date_to)
+    return _paginate(db, stmt, page, page_size)
 
 
 def count_operations_by_type(db: Session, op_type: str) -> int:

@@ -761,6 +761,28 @@ export interface StockOperation {
   items: StockOperationItem[]
 }
 
+export interface StockJournal {
+  id: number
+  op_date: string
+  material_id: number
+  material_code?: string | null
+  material_name?: string | null
+  warehouse_id: number
+  warehouse_code?: string | null
+  warehouse_name?: string | null
+  direction: 'IN' | 'OUT' | 'ADJUST'
+  delta_qty: Num
+  qty_before: Num
+  qty_after: Num
+  source_module?: string | null
+  source_type?: string | null
+  source_reference_id?: number | null
+  source_no?: string | null
+  remark?: string | null
+  operator_id?: number | null
+  created_at: string
+}
+
 export interface ReorderSuggestion {
   balance_id: number
   material_id: number

@@ -327,6 +327,34 @@ class SafetyStockSuggestionOut(BaseModel):
     suggested_qty: Decimal
 
 
+# ==================== 库存变动流水 ====================
+
+
+class StockJournalOut(BaseModel):
+    """库存变动流水出参。"""
+
+    id: int
+    op_date: date
+    material_id: int
+    material_code: Optional[str] = None
+    material_name: Optional[str] = None
+    warehouse_id: int
+    warehouse_code: Optional[str] = None
+    warehouse_name: Optional[str] = None
+    direction: str = Field(description="IN/OUT/ADJUST")
+    delta_qty: Decimal
+    qty_before: Decimal
+    qty_after: Decimal
+    source_module: Optional[str] = None
+    source_type: Optional[str] = None
+    source_reference_id: Optional[int] = None
+    source_no: Optional[str] = None
+    remark: Optional[str] = None
+    operator_id: Optional[int] = None
+    created_at: datetime
+
+
+
 class StocktakeSummaryItemOut(BaseModel):
     """盘点汇总明细行（单条盘点明细）。"""
 
