@@ -77,8 +77,8 @@ BUY 件通过契约交给 procurement 生成采购计划。
 `backend/app/modules/planning/contract.py`：
 
 - `create_production_plan_from_replenishment(db, request_id)` → `{"plan_id", "plan_no"}`
-- `create_sales_demand_from_shortage(db, ...)` → 销售订单确认时库存缺口登记为 `SALES` 需求（`CONFIRMED`）
-- `cancel_sales_demands_for_order(db, order_id)` → 订单取消时作废未进入 MPS 的缺口需求
+- `create_sales_demand_from_order(db, ...)` → 销售订单确认时登记 `SALES` 需求（`CONFIRMED`，数量为订单未交付总量）
+- `cancel_sales_demands_for_order(db, order_id)` → 订单取消时作废未进入 MPS 的销售计划需求
 - `create_production_plan_from_mrp_result(db, mrp_result_id)` → 由 MRP 结果直接建生产计划
 - `get_mrp_results(db, result_ids)` → 供 procurement 从 MRP BUY 结果生成采购计划
 - `get_open_production_qty(db, material_id)` → 在制量

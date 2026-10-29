@@ -438,7 +438,7 @@
 | `POST /api/v1/planning/completion-reports/{report_id}/confirm` | `increase_stock`（`source_type=PRODUCTION_COMPLETION`） |
 | `POST /api/v1/sales/shipments/{shipment_id}/confirm` | `decrease_stock`（`source_type=SALES_SHIPMENT`） |
 | `POST /api/v1/sales/returns/{return_id}/confirm` | `increase_stock`（`source_type=SALES_RETURN`） |
-| `PATCH /api/v1/sales/orders/{order_id}/status`（`CONFIRMED`） | `get_available_by_warehouse` 查可用量 → 库存够的自动建 `DRAFT` 发货单；缺口经 `planning.contract.create_sales_demand_from_shortage` 登记 `SALES` 需求 |
+| `PATCH /api/v1/sales/orders/{order_id}/status`（`CONFIRMED`） | `get_available_by_warehouse` 查可用量 → 库存够的自动建 `DRAFT` 发货单；存在缺口时经 `planning.contract.create_sales_demand_from_order` 登记 `SALES` 需求（数量为订单未交付总量） |
 | `POST /api/v1/inventory/transfers/{transfer_id}/confirm` | `TRANSFER_OUT` + `TRANSFER_IN` |
 | `POST /api/v1/inventory/stocktakes/{stocktake_id}/confirm` | `ADJUST`（差异调整） |
 | `POST /api/v1/inventory/replenishment-requests/{request_id}/confirm` | `REORDER` → `procurement.contract`；`PRODUCTION` → `planning.contract` |

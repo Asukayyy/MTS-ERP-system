@@ -712,21 +712,15 @@ def draft_shipment_allocations(db: Session) -> dict:
 def open_order_demand_rows(db: Session, on_date: Optional[date] = None) -> List[Tuple]:
     """未交付需求行：状态 CONFIRMED/IN_PROGRESS 且剩余未发数量 > 0。
 
-    剩余数量还要扣掉**已生成但未确认的发货草稿**占用量：订单确认时库存充足
-    的部分会自动生成发货草稿，这部分不再属于“需要生产”的需求，否则计划侧
-    会把同一批货既算库存发货、又算生产需求。
+    `open_qty` 取**订单未交付总量**（`quantity − delivered_qty`），**不扣减**
+    订单确认时自动生成、尚未确认的发货草稿占用量。
+
+    原因：发货草稿只是「已承诺、未出库」，实物库存还在仓里，MRP 净算时会用
+    可用库存正常抵扣一次。若这里再扣一次草稿占用量，需求就被缩水成「缺口」，
+    MRP 又把同一批库存当作可用量再抵一次，净需求会被算成 0（例如订单 1000、
+    库存 900：需求被记成 100，MRP 再用 900 抵扣 → 净需求 0，少生产 100）。
     """
-    draft_qty = (
-        select(func.coalesce(func.sum(models.SalShipmentItem.quantity), 0))
-        .join(models.SalShipment, models.SalShipment.id == models.SalShipmentItem.shipment_id)
-        .where(
-            models.SalShipmentItem.order_item_id == models.SalOrderItem.id,
-            models.SalShipment.status == "DRAFT",
-        )
-        .correlate(models.SalOrderItem)
-        .scalar_subquery()
-    )
-    open_qty = models.SalOrderItem.quantity - models.SalOrderItem.delivered_qty - draft_qty
+    open_qty = models.SalOrderItem.quantity - models.SalOrderItem.delivered_qty
     stmt = (
         select(
             models.SalOrder.id,

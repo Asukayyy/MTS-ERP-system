@@ -1225,13 +1225,19 @@ def _settle_order_from_stock(
         )
         stock_total += got
         if shortage > 0:
-            result = planning_contract.create_sales_demand_from_shortage(
+            # 需求数量登记**订单未交付总量**（而非缺口）：库存已分配的部分由
+            # MRP 用可用库存净算抵扣，需求侧若只记缺口，会被库存重复抵扣一次。
+            result = planning_contract.create_sales_demand_from_order(
                 db,
                 order_id=order.id,
                 order_no=order.order_no,
                 material_id=material_id,
-                quantity=shortage,
+                quantity=need_qty,
                 due_date=order.delivery_date,
+                remark=(
+                    f"销售订单 {order.order_no} 客户需求 {need_qty}"
+                    f"（库存已分配 {got}，缺口 {shortage}）"
+                ),
                 operator_id=operator_id,
             )
             demand_nos.append(result["demand_no"])
@@ -1246,8 +1252,8 @@ def _settle_order_from_stock(
         operator_id=operator_id,
         detail=(
             f"销售订单 {order.order_no} 确认后库存分流：库存发货 {stock_total}"
-            f"（发货单 {shipment_no or '无'}），缺口转计划 {shortage_total}"
-            f"（需求 {'、'.join(demand_nos) or '无'}）"
+            f"（发货单 {shipment_no or '无'}），缺口 {shortage_total} 触发计划需求"
+            f"（需求 {'、'.join(demand_nos) or '无'}，按订单未交付总量登记）"
         ),
     )
     return {
