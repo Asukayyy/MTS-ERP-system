@@ -7,7 +7,8 @@ import {
   cancelReplenishmentRequest,
   confirmReplenishmentRequest,
   createReplenishmentRequest,
-  generateFromReorderRules,
+  generateFromSafetyStock,
+  getSafetyStockSuggestions,
   listBalances,
   listReplenishmentRequests,
   listWarehouses,
@@ -17,7 +18,8 @@ import { listMaterials } from '@/api/system'
 import RemoteSelect from '@/components/common/RemoteSelect.vue'
 import StatusTag from '@/components/common/StatusTag.vue'
 import { usePagedTable, toNumber } from '@/composables/usePagedTable'
-import type { RemoteOption, ReplenishmentRequest } from '@/types/erp'
+import { fmtQty } from '@/utils/format'
+import type { RemoteOption, ReplenishmentRequest, SafetyStockSuggestion } from '@/types/erp'
 
 const SOURCE_LABELS: Record<string, string> = {
   REORDER: '采购补库',
@@ -131,22 +133,39 @@ async function submit(): Promise<void> {
   }
 }
 
-async function doGenerateFromRules(): Promise<void> {
+async function doGenerateFromSafetyStock(): Promise<void> {
   try {
     await ElMessageBox.confirm(
-      '将按已启用的订货点规则扫描库存，自动生成补库需求，是否继续？',
-      '按订货点生成补库需求',
+      '将按物料安全库存扫描可用量，自动生成补库需求（采购件转采购、自制件转生产），是否继续？',
+      '按安全库存生成补库需求',
       { type: 'warning' },
     )
   } catch {
     return
   }
   try {
-    const result = await generateFromReorderRules()
+    const result = await generateFromSafetyStock()
     ElMessage.success(`新建 ${result.created_count} 条，跳过 ${result.skipped_count} 条`)
     await load()
+    await loadSuggestions()
   } catch (error) {
     ElMessage.error((error as Error).message)
+  }
+}
+
+// ---------------- 安全库存补库建议 ----------------
+
+const suggestionLoading = ref(false)
+const suggestions = ref<SafetyStockSuggestion[]>([])
+
+async function loadSuggestions(): Promise<void> {
+  suggestionLoading.value = true
+  try {
+    suggestions.value = await getSafetyStockSuggestions()
+  } catch (error) {
+    ElMessage.error((error as Error).message)
+  } finally {
+    suggestionLoading.value = false
   }
 }
 
@@ -180,7 +199,10 @@ async function doCancel(row: ReplenishmentRequest): Promise<void> {
   }
 }
 
-onMounted(load)
+onMounted(() => {
+  load()
+  loadSuggestions()
+})
 </script>
 
 <template>
@@ -188,9 +210,35 @@ onMounted(load)
     <el-card shadow="never">
       <template #header>
         <div class="table-toolbar">
+          <span class="page-title">安全库存补库建议（低于安全库存时系统自动生成补库需求）</span>
+          <span class="table-toolbar__spacer" />
+          <el-button @click="loadSuggestions">刷新</el-button>
+          <el-button type="primary" :disabled="!suggestions.length" @click="doGenerateFromSafetyStock">
+            补生成缺失需求
+          </el-button>
+        </div>
+      </template>
+      <el-table v-loading="suggestionLoading" :data="suggestions" border size="small">
+        <el-table-column label="物料编码" prop="material_code" min-width="130" />
+        <el-table-column label="物料名称" prop="material_name" min-width="150" />
+        <el-table-column label="仓库" min-width="150" show-overflow-tooltip>
+          <template #default="{ row }">{{ row.warehouse_code }} {{ row.warehouse_name }}</template>
+        </el-table-column>
+        <el-table-column label="可用量" width="100" align="right"><template #default="{ row }">{{ fmtQty(row.available_quantity) }}</template></el-table-column>
+        <el-table-column label="安全库存" width="100" align="right"><template #default="{ row }">{{ fmtQty(row.safety_stock) }}</template></el-table-column>
+        <el-table-column label="建议补库量" width="110" align="right"><template #default="{ row }">{{ fmtQty(row.suggested_qty) }}</template></el-table-column>
+        <el-table-column label="补库方式" width="100">
+          <template #default="{ row }">{{ SOURCE_LABELS[row.source_type] || row.source_type }}</template>
+        </el-table-column>
+        <template #empty>暂无低于安全库存的物料</template>
+      </el-table>
+    </el-card>
+
+    <el-card shadow="never" style="margin-top: 12px">
+      <template #header>
+        <div class="table-toolbar">
           <span class="page-title">补库需求</span>
           <span class="table-toolbar__spacer" />
-          <el-button @click="doGenerateFromRules">按订货点生成</el-button>
           <el-button type="primary" @click="openCreate">新增补库需求</el-button>
         </div>
       </template>
@@ -224,9 +272,9 @@ onMounted(load)
         <el-table-column label="物料编码" prop="material_code" min-width="120" />
         <el-table-column label="物料名称" prop="material_name" min-width="150" />
         <el-table-column label="仓库ID" prop="warehouse_id" width="90" align="right" />
-        <el-table-column label="补库数量" prop="request_qty" width="110" align="right" />
-        <el-table-column label="当前库存" prop="current_qty" width="110" align="right" />
-        <el-table-column label="目标库存" prop="target_qty" width="110" align="right" />
+        <el-table-column label="补库数量" width="110" align="right"><template #default="{ row }">{{ fmtQty(row.request_qty) }}</template></el-table-column>
+        <el-table-column label="当前库存" width="110" align="right"><template #default="{ row }">{{ fmtQty(row.current_qty) }}</template></el-table-column>
+        <el-table-column label="目标库存" width="110" align="right"><template #default="{ row }">{{ fmtQty(row.target_qty) }}</template></el-table-column>
         <el-table-column label="需求日期" prop="required_date" width="110" />
         <el-table-column label="来源" width="100">
           <template #default="{ row }">{{ SOURCE_LABELS[row.source_type] || row.source_type }}</template>

@@ -79,3 +79,13 @@ def get_customer_name(db: Session, customer_id: Optional[int]) -> Optional[str]:
         return None
     customer = repository.get_customer(db, int(customer_id))
     return customer.customer_name if customer else None
+
+
+def get_material_delivered_values(db: Session, since: date) -> Dict[int, Decimal]:
+    """按物料汇总指定日期之后的销售出库金额（供 ABC 自动分类使用）。
+
+    金额 = 已发货数量 × 销售单价，只统计非作废销售订单；不提交事务。
+    """
+    from app.modules.sales import service
+
+    return service.get_material_delivered_values(db, since)

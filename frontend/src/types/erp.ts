@@ -63,6 +63,9 @@ export interface BomItem {
   id: number
   bom_id: number
   material_id: number
+  material_code?: string | null
+  material_name?: string | null
+  unit_code?: string | null
   quantity: Num
   lead_time_offset: number
   scrap_rate: Num
@@ -683,10 +686,16 @@ export interface Balance {
   material_abc_class?: string | null
   material_sales_category?: string | null
   warehouse_id: number
+  warehouse_code?: string | null
   warehouse_name?: string | null
   on_hand: Num
   locked_quantity: Num
   available_quantity: Num
+  /** 废品仓等不计入可用量的仓库为 false */
+  is_available_warehouse?: boolean
+  /** 该物料跨仓库可用量合计（排除废品仓），用于安全库存总量判断 */
+  material_total_available?: Num
+  safety_stock?: Num
   reorder_point?: Num | null
   reorder_quantity?: Num | null
 }
@@ -728,10 +737,36 @@ export interface StockOperation {
   items: StockOperationItem[]
 }
 
+export interface StockJournal {
+  id: number
+  op_date: string
+  material_id: number
+  material_code?: string | null
+  material_name?: string | null
+  warehouse_id: number
+  warehouse_code?: string | null
+  warehouse_name?: string | null
+  direction: 'IN' | 'OUT' | 'ADJUST'
+  delta_qty: Num
+  qty_before: Num
+  qty_after: Num
+  source_module?: string | null
+  source_type?: string | null
+  source_reference_id?: number | null
+  source_no?: string | null
+  remark?: string | null
+  operator_id?: number | null
+  created_at: string
+}
+
 export interface ReorderSuggestion {
   balance_id: number
   material_id: number
+  material_code?: string | null
+  material_name?: string | null
   warehouse_id: number
+  warehouse_code?: string | null
+  warehouse_name?: string | null
   reorder_point: Num
   current_qty: Num
   suggested_qty: Num
@@ -773,6 +808,59 @@ export interface LowStock {
   available_quantity: Num
   safety_stock: Num
   shortage_qty: Num
+}
+
+/** 安全库存补库建议（可用量低于安全库存） */
+export interface SafetyStockSuggestion {
+  material_id: number
+  material_code?: string | null
+  material_name?: string | null
+  supply_type?: string | null
+  /** 补库来源：REORDER 转采购 / PRODUCTION 转生产计划 */
+  source_type: string
+  warehouse_id: number
+  warehouse_code?: string | null
+  warehouse_name?: string | null
+  available_quantity: Num
+  safety_stock: Num
+  suggested_qty: Num
+}
+
+/** 盘点汇总明细行 */
+export interface StocktakeSummaryItem {
+  operation_id: number
+  operation_no: string
+  op_date: string
+  warehouse_id?: number | null
+  warehouse_code?: string | null
+  warehouse_name?: string | null
+  material_id: number
+  material_code?: string | null
+  material_name?: string | null
+  book_qty: Num
+  actual_qty: Num
+  difference: Num
+  standard_cost: Num
+  diff_amount: Num
+  /** GAIN 盘盈 / LOSS 盘亏 / MATCH 相符 */
+  result: string
+}
+
+/** 盘点汇总（盘盈盘亏报表） */
+export interface StocktakeSummary {
+  operation_count: number
+  line_count: number
+  matched_count: number
+  gain_count: number
+  gain_qty: Num
+  loss_count: number
+  loss_qty: Num
+  net_qty: Num
+  gain_amount: Num
+  loss_amount: Num
+  net_amount: Num
+  accuracy_rate: Num
+  items: StocktakeSummaryItem[]
 }
 
 export interface FlowSummaryRow {

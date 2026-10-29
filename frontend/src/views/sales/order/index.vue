@@ -15,7 +15,7 @@ import {
   setOrderStatus,
   updateOrder,
 } from '@/api/sales'
-import { listPersonnel } from '@/api/system'
+import { listOrganizationsFlat, listPersonnel } from '@/api/system'
 import { listBalances, listWarehouses } from '@/api/inventory'
 import RemoteSelect from '@/components/common/RemoteSelect.vue'
 import StatusTag from '@/components/common/StatusTag.vue'
@@ -45,8 +45,21 @@ async function loadProductOptions(keyword: string): Promise<RemoteOption[]> {
   return list.map((item) => ({ id: item.id, label: `${item.material_code} ${item.material_name}` }))
 }
 
+/** 销售员只允许从销售部人员中选择 */
+const SALES_ORG_CODE = 'DEP-SALES'
+let salesOrgId: number | undefined
+
+async function resolveSalesOrgId(): Promise<number | undefined> {
+  if (salesOrgId !== undefined) return salesOrgId
+  const orgs = await listOrganizationsFlat()
+  salesOrgId = orgs.find((item) => item.org_code === SALES_ORG_CODE)?.id
+  return salesOrgId
+}
+
 async function loadSalespersonOptions(keyword: string): Promise<RemoteOption[]> {
-  const data = await listPersonnel({ keyword, page: 1, page_size: 50 })
+  const orgId = await resolveSalesOrgId()
+  if (!orgId) return []
+  const data = await listPersonnel({ keyword, org_id: orgId, page: 1, page_size: 50 })
   return data.items.map((item) => ({ id: item.id, label: `${item.employee_no} ${item.person_name}` }))
 }
 

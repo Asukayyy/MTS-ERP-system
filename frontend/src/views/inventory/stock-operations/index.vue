@@ -14,6 +14,7 @@ import { listMaterials, listPersonnel } from '@/api/system'
 import RemoteSelect from '@/components/common/RemoteSelect.vue'
 import StatusTag from '@/components/common/StatusTag.vue'
 import { usePagedTable } from '@/composables/usePagedTable'
+import { fmtQty } from '@/utils/format'
 import type { RemoteOption, StockOperation } from '@/types/erp'
 
 /**
@@ -230,12 +231,12 @@ onMounted(load)
             <el-table class="nested-table" :data="row.items" border size="small">
               <el-table-column label="物料ID" prop="material_id" width="90" align="right" />
               <template v-if="isTransfer">
-                <el-table-column label="移库数量" prop="quantity" width="110" align="right" />
+                <el-table-column label="移库数量" width="110" align="right"><template #default="{ row }">{{ fmtQty(row.quantity) }}</template></el-table-column>
               </template>
               <template v-else>
-                <el-table-column label="账面数量" prop="book_qty" width="110" align="right" />
-                <el-table-column label="实盘数量" prop="actual_qty" width="110" align="right" />
-                <el-table-column label="差异" prop="difference" width="110" align="right" />
+                <el-table-column label="账面数量" width="110" align="right"><template #default="{ row }">{{ fmtQty(row.book_qty) }}</template></el-table-column>
+                <el-table-column label="实盘数量" width="110" align="right"><template #default="{ row }">{{ fmtQty(row.actual_qty) }}</template></el-table-column>
+                <el-table-column label="差异" width="110" align="right"><template #default="{ row }">{{ fmtQty(row.difference) }}</template></el-table-column>
               </template>
               <el-table-column label="备注" prop="remark" min-width="140" />
               <template #empty>暂无明细</template>
@@ -336,18 +337,18 @@ onMounted(load)
           </el-table-column>
           <el-table-column v-if="isTransfer" label="移库数量" width="160">
             <template #default="{ row }">
-              <el-input-number v-model="row.quantity" :min="0.0001" :controls="false" style="width: 100%" />
+              <el-input-number v-model="row.quantity" :min="1" :precision="0" :controls="false" style="width: 100%" />
             </template>
           </el-table-column>
           <template v-else>
             <el-table-column label="账面数量" width="150">
               <template #default="{ row }">
-                <el-input-number v-model="row.book_qty" :min="0" :controls="false" placeholder="留空自动取" style="width: 100%" />
+                <el-input-number v-model="row.book_qty" :min="0" :precision="0" :controls="false" placeholder="留空自动取" style="width: 100%" />
               </template>
             </el-table-column>
             <el-table-column label="实盘数量" width="150">
               <template #default="{ row }">
-                <el-input-number v-model="row.actual_qty" :min="0" :controls="false" style="width: 100%" />
+                <el-input-number v-model="row.actual_qty" :min="0" :precision="0" :controls="false" style="width: 100%" />
               </template>
             </el-table-column>
           </template>

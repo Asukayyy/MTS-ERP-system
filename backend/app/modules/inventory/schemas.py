@@ -93,12 +93,22 @@ class BalanceOut(_IdOut):
     material_abc_class: Optional[str] = None
     material_sales_category: Optional[str] = None
     warehouse_id: int
+    warehouse_code: Optional[str] = None
     warehouse_name: Optional[str] = None
     on_hand: Decimal
     locked_quantity: Decimal
     available_quantity: Decimal
+    safety_stock: Decimal = Field(default=Decimal("0"), description="安全库存（取物料主数据）")
     reorder_point: Optional[Decimal] = Field(default=None, description="订货点（仅 A 类物料配置，未配置为 null）")
     reorder_quantity: Optional[Decimal] = Field(default=None, description="建议订货量（仅 A 类物料配置）")
+    is_available_warehouse: bool = Field(
+        default=True,
+        description="所在仓库是否计入可用量（废品仓为 false，可用量固定 0）",
+    )
+    material_total_available: Decimal = Field(
+        default=0,
+        description="该物料跨仓库可用量合计（排除废品仓），用于安全库存总量判断",
+    )
 
 
 class BalanceSummaryOut(BaseModel):
@@ -222,7 +232,11 @@ class ReorderSuggestionOut(BaseModel):
 
     balance_id: int
     material_id: int
+    material_code: Optional[str] = None
+    material_name: Optional[str] = None
     warehouse_id: int
+    warehouse_code: Optional[str] = None
+    warehouse_name: Optional[str] = None
     reorder_point: Decimal
     current_qty: Decimal
     suggested_qty: Decimal
@@ -295,6 +309,88 @@ class LowStockOut(BaseModel):
     available_quantity: Decimal
     safety_stock: Decimal
     shortage_qty: Decimal
+
+
+class SafetyStockSuggestionOut(BaseModel):
+    """安全库存补库建议：可用量低于安全库存时的建议。"""
+
+    material_id: int
+    material_code: Optional[str] = None
+    material_name: Optional[str] = None
+    supply_type: Optional[str] = None
+    source_type: str = Field(description="补库来源 REORDER / PRODUCTION")
+    warehouse_id: int
+    warehouse_code: Optional[str] = None
+    warehouse_name: Optional[str] = None
+    available_quantity: Decimal
+    safety_stock: Decimal
+    suggested_qty: Decimal
+
+
+# ==================== 库存变动流水 ====================
+
+
+class StockJournalOut(BaseModel):
+    """库存变动流水出参。"""
+
+    id: int
+    op_date: date
+    material_id: int
+    material_code: Optional[str] = None
+    material_name: Optional[str] = None
+    warehouse_id: int
+    warehouse_code: Optional[str] = None
+    warehouse_name: Optional[str] = None
+    direction: str = Field(description="IN/OUT/ADJUST")
+    delta_qty: Decimal
+    qty_before: Decimal
+    qty_after: Decimal
+    source_module: Optional[str] = None
+    source_type: Optional[str] = None
+    source_reference_id: Optional[int] = None
+    source_no: Optional[str] = None
+    remark: Optional[str] = None
+    operator_id: Optional[int] = None
+    created_at: datetime
+
+
+
+class StocktakeSummaryItemOut(BaseModel):
+    """盘点汇总明细行（单条盘点明细）。"""
+
+    operation_id: int
+    operation_no: str
+    op_date: date
+    warehouse_id: Optional[int] = None
+    warehouse_code: Optional[str] = None
+    warehouse_name: Optional[str] = None
+    material_id: int
+    material_code: Optional[str] = None
+    material_name: Optional[str] = None
+    book_qty: Decimal
+    actual_qty: Decimal
+    difference: Decimal
+    standard_cost: Decimal
+    diff_amount: Decimal
+    result: str = Field(description="GAIN 盘盈 / LOSS 盘亏 / MATCH 相符")
+
+
+class StocktakeSummaryOut(BaseModel):
+    """盘点汇总（盘盈盘亏报表）。"""
+
+    operation_count: int
+    line_count: int
+    matched_count: int
+    gain_count: int
+    gain_qty: Decimal
+    loss_count: int
+    loss_qty: Decimal
+    net_qty: Decimal
+    gain_amount: Decimal
+    loss_amount: Decimal
+    net_amount: Decimal
+    accuracy_rate: Decimal
+    items: List[StocktakeSummaryItemOut]
 
 
 class FlowSummaryOut(BaseModel):

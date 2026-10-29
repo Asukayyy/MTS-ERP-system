@@ -9,9 +9,12 @@ import type {
   LowStock,
   ReorderSuggestion,
   ReplenishmentRequest,
+  SafetyStockSuggestion,
   StockChangeResult,
+  StockJournal,
   StockOperation,
   StockSummary,
+  StocktakeSummary,
   Warehouse,
 } from '@/types/erp'
 
@@ -126,6 +129,17 @@ export function generateFromReorderRules(): Promise<{
   )
 }
 
+/** 按安全库存批量生成补库需求（BUY→采购补库，MAKE→生产补库） */
+export function generateFromSafetyStock(): Promise<{
+  created_count: number
+  request_ids: number[]
+  skipped_count: number
+}> {
+  return post<{ created_count: number; request_ids: number[]; skipped_count: number }>(
+    '/inventory/replenishment-requests/generate-from-safety-stock',
+  )
+}
+
 export function confirmReplenishmentRequest(
   id: number,
   operatorId?: number,
@@ -154,6 +168,16 @@ export function getLowStockReport(): Promise<LowStock[]> {
   return get<LowStock[]>('/inventory/reports/low-stock')
 }
 
+/** 安全库存补库建议（可用量低于安全库存的物料） */
+export function getSafetyStockSuggestions(): Promise<SafetyStockSuggestion[]> {
+  return get<SafetyStockSuggestion[]>('/inventory/reports/safety-stock-suggestions')
+}
+
+/** 盘点汇总（盘盈盘亏），只统计已确认盘点单 */
+export function getStocktakeSummary(params: Record<string, unknown> = {}): Promise<StocktakeSummary> {
+  return get<StocktakeSummary>('/inventory/reports/stocktake-summary', params)
+}
+
 // ---------------- 课程数据导入（规格 §37） ----------------
 
 /** 期初库存导入入参：可显式给 rows，也可只给 source 由服务端读取课程数据文件 */
@@ -177,4 +201,11 @@ export function confirmInitialStockImport(
   payload: InitialStockImportPayload,
 ): Promise<InitialStockConfirm> {
   return post<InitialStockConfirm>('/inventory/import/initial-stock/confirm', payload)
+}
+
+/** 库存变动流水列表 */
+export function listStockJournal(
+  params: Record<string, unknown> = {},
+): Promise<PageData<StockJournal>> {
+  return get<PageData<StockJournal>>('/inventory/stock-journal', params)
 }

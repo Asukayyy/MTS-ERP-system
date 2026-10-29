@@ -29,6 +29,7 @@ MATERIAL_FIELDS = (
     "unit_code",
     "lead_time_days",
     "safety_stock",
+    "standard_cost",
     "status",
 )
 
@@ -46,6 +47,7 @@ def _material_dict(row: models.SysMaterial) -> Dict[str, Any]:
         "sales_category": row.sales_category,
         "lead_time_days": row.lead_time_days,
         "safety_stock": row.safety_stock,
+        "standard_cost": row.standard_cost,
         "status": row.status,
     }
 

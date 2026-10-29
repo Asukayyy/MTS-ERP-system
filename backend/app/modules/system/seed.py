@@ -59,7 +59,7 @@ ROLE_SEEDS: list[dict[str, Any]] = [
         "role_code": "INVENTORY",
         "role_name": "库存人员",
         "status": "ACTIVE",
-        "description": "管理出入库与实时库存，查看发货指令、领料单与到货信息（数据范围：全部）",
+        "description": "库存管理全部权限；维护物料、只读 BOM；销售预测/订单/发货/退货；领料单与完工报告；采购计划/订单/到货（数据范围：全部）",
     },
     {
         "role_code": "PLAN",
@@ -287,15 +287,18 @@ ROLE_PERMISSION_BINDINGS: dict[str, list[str]] = {
         "inventory", "inventory:stock", "inventory:ledger",
         "planning", "planning:demand",
     ],
+    # 库存人员：库存管理全部；物料管理（可维护）、BOM 只读；
+    #           销售预测/订单/发货/退货；领料单/完工报告；采购计划/订单/到货
     "INVENTORY": [
         "inventory", "inventory:stock", "inventory:inbound",
         "inventory:outbound", "inventory:ledger",
         "inventory:transfer", "inventory:stocktake",
         "inventory:reorder", "inventory:replenishment",
-        "sales", "sales:shipping",
-        "planning", "planning:picking",
-        "procurement", "procurement:arrival",
-        "system:material",
+        "system", "system:material", "system:material:manage",
+        "system:bom",
+        "sales", "sales:demand", "sales:order", "sales:shipping", "sales:return",
+        "planning", "planning:picking", "planning:finish",
+        "procurement", "procurement:plan", "procurement:order", "procurement:arrival",
     ],
     # 计划管理员：计划管理全部 + 基础信息全部（物料/BOM/工艺路线）+ 销售订单
     #             + 采购计划 + 补货需求
