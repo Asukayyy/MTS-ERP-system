@@ -880,6 +880,9 @@ def set_mps_status(
         operator_id=operator_id,
         detail=f"MPS {mps.mps_no} 状态改为 {status}",
     )
+    # 手工把 MPS 置为完工时，其行上记录的来源需求同步置为已完成
+    if status == "COMPLETED":
+        _advance_demands_from_mps(db, mps, operator_id=operator_id)
     return mps
 
 
@@ -1127,6 +1130,11 @@ def _collect_level0(db: Session, mps_id: int) -> Dict[int, Dict[str, Any]]:
         _accumulate(level0, item.material_id, qty, 0, None, item.end_date, set())
 
     return level0
+
+
+def _qty_text(value: Decimal) -> str:
+    """数量转紧凑文本（去掉多余的小数零）。"""
+    return format(value.normalize(), "f")
 
 
 def run_mrp(
@@ -1426,8 +1434,11 @@ def list_production_plans(
     page_size: int = 20,
     status: Optional[str] = None,
     material_id: Optional[int] = None,
+    generable_only: bool = False,
 ) -> Tuple[List[models.PlnProductionPlan], int]:
-    rows, total = repository.list_production_plans(db, page, page_size, status, material_id)
+    rows, total = repository.list_production_plans(
+        db, page, page_size, status, material_id, generable_only
+    )
     _attach_material(rows, _material_fields(db, [r.material_id for r in rows]))
     return rows, total
 
@@ -1564,6 +1575,9 @@ def set_production_plan_status(
         operator_id=operator_id,
         detail=f"作业计划 {plan.plan_no} 状态改为 {status}",
     )
+    # 手工把计划置为完工时，同样向上补齐 MRP 结果 / MPS 行完成量 / MPS / 来源需求
+    if status == "COMPLETED":
+        _advance_mps_from_plan(db, plan, operator_id=operator_id)
     return plan
 
 
@@ -1929,6 +1943,14 @@ def set_dispatch_order_status(
         operator_id=operator_id,
         detail=f"派工单 {dispatch.dispatch_no} 状态改为 {status}",
     )
+    # 派工单一旦已下达车间（确认/发布/开工），上游作业计划即视为开工；
+    # 取消（CANCELLED）不算开工，避免错误推进计划状态
+    if status in {"CONFIRMED", "RELEASED", "IN_PROGRESS"} and dispatch.plan_id is not None:
+        plan = repository.get_production_plan(db, dispatch.plan_id)
+        if plan is not None:
+            _advance_plan_started(
+                db, plan, trigger=f"派工单 {dispatch.dispatch_no} {status}", operator_id=operator_id
+            )
     return dispatch
 
 
@@ -2275,6 +2297,13 @@ def confirm_requisition(
         operator_id=operator_id,
         detail=f"确认领料单 {req.req_no}",
     )
+    # 领料出库即代表车间已开始生产，上游作业计划自动转「进行中」
+    if req.plan_id is not None:
+        plan = repository.get_production_plan(db, req.plan_id)
+        if plan is not None:
+            _advance_plan_started(
+                db, plan, trigger=f"领料单 {req.req_no} 确认出库", operator_id=operator_id
+            )
     return req
 
 
@@ -2318,6 +2347,217 @@ def delete_requisition(db: Session, req_id: int, operator_id: Optional[int] = No
         operator_id=operator_id,
         detail=f"删除领料单 {number}",
     )
+
+
+# ==================== 状态联动（自动汇总） ====================
+
+
+#: 自动推进使用的审计动作，便于与人工操作区分
+_AUTO_ACTION = "AUTO_STATUS"
+
+
+def _auto_set_status(
+    db: Session,
+    record,
+    status: str,
+    *,
+    target_type: str,
+    number: str,
+    label: str,
+    trigger: str,
+    operator_id: Optional[int] = None,
+) -> bool:
+    """自动推进单据状态（内部专用，不提交）。
+
+    设计约束：
+
+    1. **只前进不回退**：只写入 `IN_PROGRESS` / `COMPLETED`，绝不把单据改回前序状态。
+    2. **终态保护**：`CANCELLED`、已 `COMPLETED` 一律不动，避免重复触发时抖动。
+    3. **幂等**：状态与目标一致时不写审计日志，重复确认完工不会产生重复记录。
+    4. **可追溯**：审计动作固定为 `AUTO_STATUS`，明细里写明触发单据，能与人工流转区分开。
+    """
+    current = record.status
+    if current in {"CANCELLED", status}:
+        return False
+    record.status = status
+    record.updated_by = operator_id
+    log_operation(
+        db,
+        module=MODULE,
+        action=_AUTO_ACTION,
+        target_type=target_type,
+        target_id=record.id,
+        operator_id=operator_id,
+        detail=f"{label} {number} 由 {current} 自动推进为 {status}（触发：{trigger}）",
+    )
+    return True
+
+
+def _advance_plan_started(
+    db: Session, plan: models.PlnProductionPlan, trigger: str, operator_id: Optional[int] = None
+) -> bool:
+    """领料/派工开工后，把上游作业计划推进到「进行中」。
+
+    只推进已确认及以后的计划：草稿计划仍要求人工确认，避免绕过确认环节。
+    """
+    if plan.status not in {"CONFIRMED", "RELEASED"}:
+        return False
+    return _auto_set_status(
+        db,
+        plan,
+        "IN_PROGRESS",
+        target_type="pln_production_plan",
+        number=plan.plan_no,
+        label="生产作业计划",
+        trigger=trigger,
+        operator_id=operator_id,
+    )
+
+
+def _mps_item_is_done(db: Session, mps: models.PlnMps, item: models.PlnMpsItem) -> bool:
+    """判断 MPS 行是否已完成。
+
+    两种情况：
+
+    1. 该行有作业计划 → 要求关联计划**全部**完工（取消的计划已排除）。
+    2. 该行没有作业计划 → 只有当该 MPS 跑过 MRP 且该物料净需求为 0 时，
+       视为「库存已满足、无需生产」，才判定完成；否则视为还没排产。
+    """
+    plans = repository.plans_of_mps_item(db, mps.id, item.material_id)
+    if plans:
+        return all(plan.status == "COMPLETED" for plan in plans)
+    order_qty = repository.latest_order_qty_of_material(db, mps.id, item.material_id)
+    return order_qty is not None and order_qty <= 0
+
+
+def _advance_demands_from_mps(
+    db: Session, mps: models.PlnMps, operator_id: Optional[int] = None
+) -> int:
+    """MPS 完成后，把其行上记录的来源需求一并置为「已完成」。"""
+    demand_ids: List[int] = []
+    for item in repository.get_mps_items(db, mps.id):
+        if not item.source_demand_ids:
+            continue
+        for token in str(item.source_demand_ids).split(","):
+            token = token.strip()
+            if token.isdigit():
+                demand_ids.append(int(token))
+    completed = 0
+    for demand in repository.get_demands_by_ids(db, demand_ids):
+        if demand.status not in {"CONFIRMED", "RELEASED"}:
+            continue
+        if _auto_set_status(
+            db,
+            demand,
+            "COMPLETED",
+            target_type="pln_demand",
+            number=demand.demand_no,
+            label="需求",
+            trigger=f"主生产计划 {mps.mps_no} 完工",
+            operator_id=operator_id,
+        ):
+            completed += 1
+    return completed
+
+
+def _advance_mps_from_plan(
+    db: Session, plan: models.PlnProductionPlan, operator_id: Optional[int] = None
+) -> bool:
+    """作业计划完工后向上汇总：MRP 结果 → MPS 行完成量 → MPS → 来源需求。"""
+    if plan.mrp_result_id is None:
+        return False
+    result = repository.get_mrp_result(db, plan.mrp_result_id)
+    if result is None:
+        return False
+    trigger = f"生产作业计划 {plan.plan_no} 完工"
+    _auto_set_status(
+        db,
+        result,
+        "COMPLETED",
+        target_type="pln_mrp_result",
+        number=f"#{result.id}",
+        label="MRP 结果",
+        trigger=trigger,
+        operator_id=operator_id,
+    )
+    run = repository.get_mrp_run(db, result.run_id)
+    if run is None or run.mps_id is None:
+        return False
+    mps = repository.get_mps(db, run.mps_id)
+    if mps is None or mps.status in {"CANCELLED", "COMPLETED"}:
+        return False
+
+    items = repository.get_mps_items(db, mps.id)
+    # 完成量按关联计划重算（而非累加），保证重复触发、计划取消后回算都正确
+    for item in items:
+        plans = repository.plans_of_mps_item(db, mps.id, item.material_id)
+        produced = sum((_as_decimal(p.completed_qty) for p in plans), Decimal("0"))
+        item.finished_qty = min(produced, _as_decimal(item.planned_qty))
+    if not items or not all(_mps_item_is_done(db, mps, item) for item in items):
+        return False
+    if not _auto_set_status(
+        db,
+        mps,
+        "COMPLETED",
+        target_type="pln_mps",
+        number=mps.mps_no,
+        label="主生产计划",
+        trigger=trigger,
+        operator_id=operator_id,
+    ):
+        return False
+    for item in items:
+        item.status = "COMPLETED"
+    _advance_demands_from_mps(db, mps, operator_id=operator_id)
+    return True
+
+
+def _advance_after_completion(
+    db: Session,
+    report: models.PlnCompletionReport,
+    plan: Optional[models.PlnProductionPlan],
+    dispatch: Optional[models.PlnDispatchOrder],
+    qualified: Decimal,
+    operator_id: Optional[int] = None,
+) -> None:
+    """完工入库后的整链自动汇总：完工报告 → 派工单 → 作业计划 → MPS → 需求。"""
+    trigger = f"完工报告 {report.report_no} 入库 {_qty_text(qualified)}"
+    if dispatch is not None and _as_decimal(dispatch.completed_qty) >= _as_decimal(
+        dispatch.planned_qty
+    ):
+        _auto_set_status(
+            db,
+            dispatch,
+            "COMPLETED",
+            target_type="pln_dispatch_order",
+            number=dispatch.dispatch_no,
+            label="派工单",
+            trigger=trigger,
+            operator_id=operator_id,
+        )
+    if plan is None:
+        return
+    if _as_decimal(plan.completed_qty) < _as_decimal(plan.planned_qty):
+        return
+    # 一张计划可能挂多张派工单（历史按工序拆分），必须全部完工才算计划完工
+    if any(
+        order.status != "COMPLETED"
+        for order in repository.list_dispatch_orders_by_plan(db, plan.id)
+    ):
+        return
+    changed = _auto_set_status(
+        db,
+        plan,
+        "COMPLETED",
+        target_type="pln_production_plan",
+        number=plan.plan_no,
+        label="生产作业计划",
+        trigger=trigger,
+        operator_id=operator_id,
+    )
+    # 计划已完工时也再次向上汇总，保证「计划手工置完工」后 MPS/需求能被补齐
+    if changed or plan.status == "COMPLETED":
+        _advance_mps_from_plan(db, plan, operator_id=operator_id)
 
 
 # ==================== 完工报告 ====================
@@ -2605,6 +2845,8 @@ def confirm_completion_report(
         operator_id=operator_id,
         remark=f"生产完工入库 {report.report_no}",
     )
+    plan: Optional[models.PlnProductionPlan] = None
+    dispatch: Optional[models.PlnDispatchOrder] = None
     if report.plan_id is not None:
         plan = repository.get_production_plan(db, report.plan_id)
         if plan:
@@ -2615,6 +2857,9 @@ def confirm_completion_report(
         if dispatch:
             dispatch.completed_qty = _as_decimal(dispatch.completed_qty) + qualified
             dispatch.updated_by = operator_id
+            # 报告只填了派工单时，作业计划从派工单反查，保证状态照样能向上汇总
+            if plan is None and dispatch.plan_id is not None:
+                plan = repository.get_production_plan(db, dispatch.plan_id)
     report.status = "COMPLETED"
     report.updated_by = operator_id
     log_operation(
@@ -2625,6 +2870,9 @@ def confirm_completion_report(
         target_id=report.id,
         operator_id=operator_id,
         detail=f"确认完工报告 {report.report_no}，入库 {qualified}",
+    )
+    _advance_after_completion(
+        db, report, plan, dispatch, qualified, operator_id=operator_id
     )
     return report
 

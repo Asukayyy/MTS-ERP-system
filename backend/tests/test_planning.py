@@ -1522,3 +1522,206 @@ def test_make_order_qty_rounds_up_to_integer(db: Session) -> None:
     db.commit()
     assert plan.planned_qty == Decimal("13")
     assert plan.planned_qty == plan.planned_qty.to_integral_value()
+
+
+# ==================== 状态联动测试造数 ====================
+
+
+def _create_confirmed_sales_order(db: Session, material_id: int, qty) -> tuple:
+    """造一张已确认、未发货的销售订单，返回 `(order_id, order_no)`。"""
+    customer_code = f"C{_tag()}"
+    db.execute(
+        text(
+            "INSERT INTO sal_customer (customer_code, customer_name, credit_limit, status, "
+            "created_at, updated_at) VALUES (:c, :n, 0, 'ACTIVE', NOW(), NOW())"
+        ),
+        {"c": customer_code, "n": f"计划测试客户{customer_code}"},
+    )
+    customer_id = int(
+        db.execute(
+            text("SELECT id FROM sal_customer WHERE customer_code = :c"), {"c": customer_code}
+        ).scalar()
+    )
+    order_no = f"SO{_tag()}"
+    db.execute(
+        text(
+            "INSERT INTO sal_order (order_no, customer_id, order_date, delivery_date, "
+            "total_amount, status, created_at, updated_at) "
+            "VALUES (:no, :cid, CURDATE(), CURDATE(), 0, 'CONFIRMED', NOW(), NOW())"
+        ),
+        {"no": order_no, "cid": customer_id},
+    )
+    order_id = int(
+        db.execute(text("SELECT id FROM sal_order WHERE order_no = :no"), {"no": order_no}).scalar()
+    )
+    db.execute(
+        text(
+            "INSERT INTO sal_order_item (order_id, line_no, material_id, quantity, delivered_qty, "
+            "unit_price, amount, created_at, updated_at) "
+            "VALUES (:oid, 1, :mid, :q, 0, 0, 0, NOW(), NOW())"
+        ),
+        {"oid": order_id, "mid": material_id, "q": Decimal(str(qty))},
+    )
+    db.commit()
+    return order_id, order_no
+
+
+# ==================== 12. 状态自动联动（整链汇总） ====================
+
+
+def test_dispatch_confirm_advances_plan_to_in_progress(db: Session) -> None:
+    """派工单下达车间（非草稿）后，上游作业计划自动转「进行中」。"""
+    material_id, _ = _create_material(db, supply_type="MAKE", material_type="FINISHED")
+    plan = _make_make_plan(db, material_id, qty=10)
+    service.set_production_plan_status(db, plan.id, "CONFIRMED")
+    db.commit()
+
+    service.create_dispatch_orders_from_plans(db, [plan.id])
+    db.commit()
+    dispatch = service.list_dispatch_orders(db, plan_id=plan.id)[0][0]
+
+    service.set_dispatch_order_status(db, dispatch.id, "CONFIRMED")
+    db.commit()
+
+    assert service.get_production_plan(db, plan.id).status == "IN_PROGRESS"
+
+
+def test_generable_only_excludes_finished_and_cancelled_plans(db: Session) -> None:
+    """按计划生成时的可选列表：已完成 / 已取消的计划不出现。"""
+    material_id, _ = _create_material(db, supply_type="MAKE", material_type="FINISHED")
+    draft = _make_make_plan(db, material_id, qty=10)
+    running = _make_make_plan(db, material_id, qty=20)
+    done = _make_make_plan(db, material_id, qty=30)
+    cancelled = _make_make_plan(db, material_id, qty=40)
+    def advance(plan_id: int, path) -> None:
+        for status in path:
+            service.set_production_plan_status(db, plan_id, status)
+
+    advance(running.id, ("CONFIRMED", "RELEASED", "IN_PROGRESS"))
+    advance(done.id, ("CONFIRMED", "RELEASED", "IN_PROGRESS", "COMPLETED"))
+    advance(cancelled.id, ("CANCELLED",))
+    db.commit()
+
+    rows, _ = service.list_production_plans(db, page_size=200, generable_only=True)
+    ids = {row.id for row in rows}
+
+    assert {draft.id, running.id} <= ids
+    assert done.id not in ids
+    assert cancelled.id not in ids
+
+    # 常规列表（不传标志）仍应能看到全部计划，避免影响计划管理页
+    all_rows, _ = service.list_production_plans(db, page_size=200)
+    all_ids = {row.id for row in all_rows}
+    assert {done.id, cancelled.id} <= all_ids
+
+
+def test_dispatch_cancel_does_not_advance_plan(db: Session) -> None:
+    """取消派工单不算开工：作业计划保持已确认，不被误推进为进行中。"""
+    material_id, _ = _create_material(db, supply_type="MAKE", material_type="FINISHED")
+    plan = _make_make_plan(db, material_id, qty=10)
+    service.set_production_plan_status(db, plan.id, "CONFIRMED")
+    db.commit()
+
+    service.create_dispatch_orders_from_plans(db, [plan.id])
+    db.commit()
+    dispatch = service.list_dispatch_orders(db, plan_id=plan.id)[0][0]
+    service.set_dispatch_order_status(db, dispatch.id, "CANCELLED")
+    db.commit()
+
+    assert service.get_production_plan(db, plan.id).status == "CONFIRMED"
+
+
+def test_requisition_confirm_advances_plan_to_in_progress(db: Session) -> None:
+    """领料确认出库后，上游作业计划自动转「进行中」。"""
+    material_id, _ = _create_material(db, supply_type="MAKE", material_type="FINISHED")
+    part_id, _ = _create_material(db, supply_type="BUY")
+    _create_bom(db, material_id, [(part_id, 1, 0, 0)])
+    warehouse_id = _create_warehouse(db)
+    _add_stock(db, part_id, warehouse_id, 50)
+
+    plan = _make_make_plan(db, material_id, qty=10)
+    service.set_production_plan_status(db, plan.id, "CONFIRMED")
+    db.commit()
+
+    service.create_requisitions_from_plans(db, [plan.id], warehouse_id=warehouse_id)
+    db.commit()
+    requisition = service.list_requisitions(db, plan_id=plan.id)[0][0]
+    service.update_requisition(
+        db,
+        requisition.id,
+        schemas.RequisitionUpdate(req_date=date.today(), warehouse_id=warehouse_id),
+    )
+    db.commit()
+
+    service.confirm_requisition(db, requisition.id)
+    db.commit()
+
+    assert service.get_production_plan(db, plan.id).status == "IN_PROGRESS"
+
+
+def test_completion_auto_propagates_status_through_whole_chain(db: Session) -> None:
+    """完工入库后整链自动汇总：派工单 → 作业计划 → MRP 结果 → MPS → 来源需求。"""
+    finished_id, _ = _create_material(
+        db, supply_type="MAKE", material_type="FINISHED", lead_time_days=1
+    )
+    part_id, _ = _create_material(db, supply_type="BUY", lead_time_days=1)
+    _create_bom(db, finished_id, [(part_id, 1, 0, 0)])
+    warehouse_id = _create_warehouse(db)
+    _add_stock(db, part_id, warehouse_id, 100)
+
+    order_id, order_no = _create_confirmed_sales_order(db, finished_id, 10)
+    demand = service.create_demand(
+        db,
+        source_type="SALES",
+        material_id=finished_id,
+        quantity=Decimal("10"),
+        due_date=date(2026, 11, 20),
+        source_reference_id=order_id,
+        source_no=order_no,
+    )
+    service.set_demand_status(db, demand.id, "CONFIRMED")
+    db.commit()
+
+    mps = service.create_mps_from_demands(
+        db,
+        schemas.MpsFromDemandsRequest(
+            start_date=date(2026, 11, 1), end_date=date(2026, 11, 30)
+        ),
+    )
+    db.commit()
+    run = service.run_mrp(db, mps_id=mps.id)
+    db.commit()
+    mrp_result = _results_of_run(db, run.id)[finished_id]
+    plan = service.create_production_plans_from_mrp(db, [mrp_result.id])[0]
+    db.commit()
+
+    service.set_production_plan_status(db, plan.id, "CONFIRMED")
+    db.commit()
+    service.create_dispatch_orders_from_plans(db, [plan.id])
+    db.commit()
+    dispatch = service.list_dispatch_orders(db, plan_id=plan.id)[0][0]
+    service.set_dispatch_order_status(db, dispatch.id, "CONFIRMED")
+    db.commit()
+    assert service.get_production_plan(db, plan.id).status == "IN_PROGRESS"
+
+    report = service.create_completion_report(
+        db,
+        material_id=finished_id,
+        completed_qty=Decimal("10"),
+        qualified_qty=Decimal("10"),
+        warehouse_id=warehouse_id,
+        report_date=date(2026, 11, 20),
+        plan_id=plan.id,
+        dispatch_id=dispatch.id,
+    )
+    db.commit()
+    service.confirm_completion_report(db, report.id)
+    db.commit()
+
+    assert repository.get_dispatch_order(db, dispatch.id).status == "COMPLETED"
+    assert repository.get_production_plan(db, plan.id).status == "COMPLETED"
+    assert repository.get_mrp_result(db, mrp_result.id).status == "COMPLETED"
+    mps_item = repository.get_mps_items(db, mps.id)[0]
+    assert mps_item.finished_qty == Decimal("10.0000")
+    assert repository.get_mps(db, mps.id).status == "COMPLETED"
+    assert repository.get_demand(db, demand.id).status == "COMPLETED"

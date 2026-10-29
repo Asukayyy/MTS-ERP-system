@@ -64,9 +64,11 @@ async function loadWarehouseOptions(keyword: string): Promise<RemoteOption[]> {
 async function loadPlans(): Promise<void> {
   loading.value = true
   try {
+    // generable_only：只列还能继续下达的计划，已完成 / 已取消的不进选项
     const data = await listProductionPlans({
       status: query.status || undefined,
       material_id: query.material_id,
+      generable_only: true,
       page: 1,
       page_size: 100,
     })
@@ -133,7 +135,7 @@ defineExpose({ open })
   <el-dialog v-model="visible" :title="title" width="900px">
     <el-form class="filter-bar" :inline="true" @submit.prevent>
       <el-form-item label="计划状态">
-        <el-select v-model="query.status" clearable placeholder="全部" style="width: 130px">
+        <el-select v-model="query.status" clearable placeholder="全部可生成" style="width: 130px">
           <el-option label="草稿" value="DRAFT" />
           <el-option label="已确认" value="CONFIRMED" />
           <el-option label="已下达" value="RELEASED" />
@@ -186,7 +188,7 @@ defineExpose({ open })
       <template #empty>暂无可生成的生产作业计划</template>
     </el-table>
     <div class="generate-tip">
-      已勾选 {{ selected.length }} 张。
+      已勾选 {{ selected.length }} 张。已完成、已取消的计划不会出现在上方列表中。
       <template v-if="mode === 'dispatch'">
         每张计划生成一张派工单（不再按工序拆分），整单派给智能加工中心，
         派工数量取"计划量 − 已完工量"、计划起止日期沿用计划行；

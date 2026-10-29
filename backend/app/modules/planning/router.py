@@ -429,10 +429,20 @@ def list_production_plans(
     params: PageParams = Depends(PageParams.as_dependency),
     status: Optional[str] = Query(default=None, description="状态"),
     material_id: Optional[int] = Query(default=None, description="物料ID"),
+    generable_only: bool = Query(
+        default=False,
+        description="仅返回仍可生成下游单据的计划（排除已完成 / 已取消）",
+    ),
     db: Session = Depends(get_db),
 ) -> ApiResponse[PageData[schemas.ProductionPlanOut]]:
-    """分页查询生产作业计划。"""
-    rows, total = service.list_production_plans(db, params.page, params.page_size, status, material_id)
+    """分页查询生产作业计划。
+
+    `generable_only=true` 供"按计划生成派工单 / 领料单 / 完工报告"的选择列表使用，
+    已完工与已取消的计划不会再出现在选项中。
+    """
+    rows, total = service.list_production_plans(
+        db, params.page, params.page_size, status, material_id, generable_only
+    )
     return success(
         PageData[schemas.ProductionPlanOut](
             page=params.page, page_size=params.page_size, total=total, items=rows
