@@ -558,6 +558,11 @@ def list_balances(
     )
     materials = _material_map(db, [r.material_id for r in rows])
     warehouses = _warehouse_map(db, [r.warehouse_id for r in rows])
+    # 批量算物料跨仓可用量（排除废品仓），供前端按总量判断安全库存
+    unique_mids = list({r.material_id for r in rows})
+    total_available_map = {
+        mid: repository.sum_available(db, mid) for mid in unique_mids
+    }
     items = []
     for row in rows:
         material = materials.get(row.material_id, {})
@@ -585,6 +590,9 @@ def list_balances(
                 "reorder_point": row.reorder_point,
                 "reorder_quantity": row.reorder_quantity,
                 "is_available_warehouse": counts_in_available,
+                "material_total_available": total_available_map.get(
+                    row.material_id, Decimal("0")
+                ),
                 **balance_dict,
             }
         )

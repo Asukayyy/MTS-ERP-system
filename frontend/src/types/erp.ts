@@ -693,6 +693,8 @@ export interface Balance {
   available_quantity: Num
   /** 废品仓等不计入可用量的仓库为 false */
   is_available_warehouse?: boolean
+  /** 该物料跨仓库可用量合计（排除废品仓），用于安全库存总量判断 */
+  material_total_available?: Num
   safety_stock?: Num
   reorder_point?: Num | null
   reorder_quantity?: Num | null

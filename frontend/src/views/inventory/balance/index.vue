@@ -154,19 +154,28 @@ onMounted(() => {
         </el-table-column>
         <el-table-column label="可用量" width="110" align="right">
           <template #default="{ row }">
-            <span :class="{ 'qty-zero': toNumber(row.available_quantity) <= 0 }">{{ fmtQty(row.available_quantity) }}</span>
+            <template v-if="row.is_available_warehouse === false">
+              <span style="color: #98a2ad">已报废</span>
+            </template>
+            <template v-else>
+              <span :class="{ 'qty-zero': toNumber(row.available_quantity) <= 0 }">{{ fmtQty(row.available_quantity) }}</span>
+            </template>
           </template>
         </el-table-column>
         <el-table-column label="安全库存" width="110" align="right">
           <template #default="{ row }">
-            <span
-              :class="{
-                'qty-zero':
-                  row.is_available_warehouse !== false &&
-                  toNumber(row.available_quantity) < toNumber(row.safety_stock),
-              }"
-              >{{ fmtQty(row.safety_stock) }}</span
-            >
+            <template v-if="row.is_available_warehouse === false">
+              <span style="color: #c0c4cc">—</span>
+            </template>
+            <template v-else>
+              <span
+                :class="{
+                  'qty-zero':
+                    toNumber(row.material_total_available) < toNumber(row.safety_stock),
+                }"
+                >{{ fmtQty(row.safety_stock) }}</span
+              >
+            </template>
           </template>
         </el-table-column>
         <template #empty>暂无库存结存数据</template>
