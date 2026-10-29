@@ -9,15 +9,20 @@
 4. 签名一经确定即视为公共接口，修改需同步其它模块。
 
 库存变动唯一入口：
-- `increase_stock` / `decrease_stock`：任何模块改库存都必须走这里，
-  内部直接更新 `inv_balance` 结存，且禁止负库存（不再维护独立流水表）。
+- `increase_stock` / `decrease_stock`：**仅供库存管理模块内部（仓库确认）调用**。
+  业务模块（销售 / 采购 / 计划）**不再直接改库存**，一律改用下面的
+  `push_inbound_order` / `push_outbound_order` 推送待办单据。
+- `push_inbound_order` / `push_outbound_order`：把业务单据（发货 / 退货 / 到货 /
+  领料 / 完工）登记为库存管理的入库单 / 出库单（状态 DRAFT，**不改结存**），
+  由仓库管理人员在「库存管理 → 入库管理 / 出库管理」里指定仓库并确认。
+- `cancel_pending_inout_orders`：业务单据取消 / 作废时撤销尚未确认的出入库单。
 - `create_replenishment_request`：库存不足时**只产生补库需求**，
   不直接创建正式生产/采购计划（规格 §14），由 planning / procurement 受理。
 """
 
 from datetime import date
 from decimal import Decimal
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from sqlalchemy.orm import Session
 
@@ -126,6 +131,96 @@ def decrease_stock(
         operator_id=operator_id,
         remark=remark,
     )
+
+
+def push_inout_order(
+    db: Session,
+    *,
+    op_type: str,
+    op_date: date,
+    items: Sequence[Dict[str, Any]],
+    source_module: str,
+    source_type: str,
+    source_reference_id: int,
+    source_no: str,
+    remark: Optional[str] = None,
+    operator_id: Optional[int] = None,
+) -> Dict[str, Any]:
+    """业务单据推送入库 / 出库单（**只登记待办，不改结存**）。
+
+    参数：
+    - `op_type`：`INBOUND` 入库 / `OUTBOUND` 出库；
+    - `items`：`[{"material_id", "quantity", "remark"}]`，数量必须为正整数；
+    - `source_module` / `source_type` / `source_reference_id` / `source_no`：来源单据信息，
+      会写进单据头并展示在库存管理列表中（source_type 见 `SOURCE_TYPE_NAMES`）；
+    - 同一来源单据已存在待处理单时直接返回原单，重复推送幂等。
+
+    返回 `{"operation_id", "operation_no", "created"}`；**不指定仓库**，
+    仓库由仓库管理人员在确认时选择。
+    """
+    operation = service.push_inout_order(
+        db,
+        op_type=op_type,
+        op_date=op_date,
+        items=items,
+        source_module=source_module,
+        source_type=source_type,
+        source_reference_id=source_reference_id,
+        source_no=source_no,
+        remark=remark,
+        operator_id=operator_id,
+    )
+    return {
+        "operation_id": operation.id,
+        "operation_no": operation.operation_no,
+        "created": operation.status == "DRAFT",
+    }
+
+
+def push_inbound_order(db: Session, **kwargs: Any) -> Dict[str, Any]:
+    """推送入库单（采购到货 / 销售退货 / 完工入库）。"""
+    return push_inout_order(db, op_type="INBOUND", **kwargs)
+
+
+def push_outbound_order(db: Session, **kwargs: Any) -> Dict[str, Any]:
+    """推送出库单（销售发货 / 生产领料）。"""
+    return push_inout_order(db, op_type="OUTBOUND", **kwargs)
+
+
+def cancel_pending_inout_orders(
+    db: Session,
+    *,
+    source_module: str,
+    source_type: str,
+    source_reference_id: int,
+    operator_id: Optional[int] = None,
+    reason: Optional[str] = None,
+) -> int:
+    """撤销某来源单据尚未被仓库确认的出入库单，返回撤销数量。"""
+    return service.cancel_pending_inout_orders(
+        db,
+        source_module=source_module,
+        source_type=source_type,
+        source_reference_id=source_reference_id,
+        operator_id=operator_id,
+        reason=reason,
+    )
+
+
+def get_inout_status_map(
+    db: Session, sources: Iterable[Tuple[str, str, int]]
+) -> Dict[Tuple[str, str, int], Dict[str, Any]]:
+    """批量查来源单据对应的库存单据状态。
+
+    返回 `{(module, source_type, reference_id): {"operation_no", "status", ...}}`，
+    供业务列表展示「库存单号 / 库存单状态」（DRAFT 待仓库处理 / COMPLETED 已出入库）。
+    """
+    return service.get_inout_status_map(db, list(sources))
+
+
+def get_source_type_names() -> Dict[str, str]:
+    """来源业务类型中文名映射（前端 / 列表展示用）。"""
+    return dict(service.SOURCE_TYPE_NAMES)
 
 
 def create_replenishment_request(

@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
+import { RefreshRight, Search } from '@element-plus/icons-vue'
+
 import { listStockJournal, listWarehouses } from '@/api/inventory'
 import { usePagedTable } from '@/composables/usePagedTable'
 import { fmtQty } from '@/utils/format'

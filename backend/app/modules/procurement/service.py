@@ -2,8 +2,10 @@
 
 硬性约定（规格 §7 / §14 / §16.5 / §24 / §35 / §42）：
 
-1. **采购模块永不直接改库存**：到货确认必须调用 `inventory.contract.increase_stock`，
-   由库存引擎写 `PURCHASE_RECEIPT` 流水并更新结存，禁止绕过库存流水改结存。
+1. **采购模块永不直接改库存**：到货确认不直接加结存，而是调用
+   `inventory.contract.push_inbound_order` 向库存管理推送**待入库单**，
+   由仓库管理人员在「库存管理 → 入库管理」中指定仓库并确认后才真正入库
+   （仓库选择权收口到库存模块，采购到货单不再强制选仓库）。
 2. **只有一个物料主数据 / 人员表**：物料、采购员、评价人分别经 `system.contract`
    的 `get_material` / `get_materials` / `get_personnel` 读取，不另建采购物料表 / 采购员表。
 3. **采购计划来源跨模块**：MRP `BUY` 结果经 `planning.contract.get_mrp_results` 读取，
@@ -22,7 +24,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 from sqlalchemy.orm import Session
 
 from app.common.exceptions import BusinessException
-from app.modules.inventory.contract import increase_stock
+from app.modules.inventory.contract import cancel_pending_inout_orders, push_inbound_order
 from app.modules.procurement import models, repository
 from app.modules.system.contract import (
     get_material,
@@ -1138,7 +1140,7 @@ def create_receipt(
     db: Session,
     *,
     purchase_order_id: int,
-    warehouse_id: int,
+    warehouse_id: Optional[int] = None,
     receipt_date: date,
     items: Sequence[Dict[str, Any]],
     receipt_no: Optional[str] = None,
@@ -1246,7 +1248,8 @@ def confirm_receipt(
     """确认到货（原子，单事务）：
 
     1. 校验到货数量不超过订单行未到货数量；
-    2. 逐行调用 `inventory.contract.increase_stock`（`PURCHASE_RECEIPT` 流水 + 结存）；
+    2. 调用 `inventory.contract.push_inbound_order` 推送**待入库单**
+       （`PURCHASE_RECEIPT` 来源，数量为合格数量），由仓库管理确认时指定仓库；
     3. 回写订单行已到货数量 → 单据 COMPLETED → 订单 IN_PROGRESS / COMPLETED。
     """
     receipt = _require_receipt(db, receipt_id)
@@ -1262,6 +1265,7 @@ def confirm_receipt(
     items = repository.get_receipt_items(db, receipt.id)
     if not items:
         raise BusinessException(CODE_PARAM_INVALID, "到货单没有明细，不能确认")
+    push_items: List[Dict[str, Any]] = []
     for item in items:
         order_item = repository.get_order_item(db, item.order_item_id)
         if not order_item:
@@ -1273,22 +1277,32 @@ def confirm_receipt(
                 CODE_RECEIPT_QTY_EXCEED,
                 f"到货数量超过未到货数量：物料 {item.material_id} 未到货 {remaining}，本次 {qty}",
             )
-        # 库存契约写 PURCHASE_RECEIPT 流水 + 加结存；本层不吞异常，整单事务回滚
-        increase_stock(
-            db,
-            material_id=item.material_id,
-            quantity=_as_decimal(item.qualified_qty),
-            warehouse_id=receipt.warehouse_id,
-            source_module=MODULE,
-            source_type="PURCHASE_RECEIPT",
-            source_reference_id=receipt.id,
-            source_no=receipt.receipt_no,
-            unit_cost=_as_decimal(order_item.unit_price),
-            biz_date=receipt.receipt_date,
-            operator_id=operator_id,
-            remark=f"采购到货 {receipt.receipt_no}",
-        )
+        qualified = _as_decimal(item.qualified_qty)
+        if qualified > 0:
+            push_items.append(
+                {
+                    "material_id": item.material_id,
+                    "quantity": qualified,
+                    "remark": f"到货 {qty}，合格 {qualified}",
+                }
+            )
         order_item.received_qty = _as_decimal(order_item.received_qty) + qty
+    supplier = repository.get_supplier(db, order.supplier_id) if order.supplier_id else None
+    pushed = push_inbound_order(
+        db,
+        op_date=receipt.receipt_date,
+        items=push_items,
+        source_module=MODULE,
+        source_type="PURCHASE_RECEIPT",
+        source_reference_id=receipt.id,
+        source_no=receipt.receipt_no,
+        remark=(
+            f"采购订单 {order.order_no}"
+            + (f"，供应商 {supplier.supplier_name}" if supplier else "")
+            + f"，共 {len(push_items)} 项（按合格数量入库）"
+        ),
+        operator_id=operator_id,
+    ) if push_items else {"operation_no": None, "operation_id": None}
     receipt.status = "COMPLETED"
     receipt.updated_by = operator_id
     order_items = repository.get_order_items(db, order.id)
@@ -1306,9 +1320,19 @@ def confirm_receipt(
         target_type="pur_receipt",
         target_id=receipt.id,
         operator_id=operator_id,
-        detail=f"确认到货单 {receipt.receipt_no}，订单 {order.order_no} → {order.status}",
+        detail=(
+            f"确认到货单 {receipt.receipt_no}，订单 {order.order_no} → {order.status}；"
+            + (
+                f"已推送库存待入库单 {pushed.get('operation_no')}"
+                if pushed.get("operation_no")
+                else "无合格数量，未推送入库单"
+            )
+        ),
     )
-    return _receipt_view(db, receipt)
+    view = _receipt_view(db, receipt)
+    view["inventory_operation_no"] = pushed.get("operation_no")
+    view["inventory_operation_id"] = pushed.get("operation_id")
+    return view
 
 
 def cancel_receipt(
@@ -1321,6 +1345,14 @@ def cancel_receipt(
         )
     receipt.status = "CANCELLED"
     receipt.updated_by = operator_id
+    cancelled = cancel_pending_inout_orders(
+        db,
+        source_module=MODULE,
+        source_type="PURCHASE_RECEIPT",
+        source_reference_id=receipt.id,
+        operator_id=operator_id,
+        reason=f"到货单 {receipt.receipt_no} 已取消",
+    )
     log_operation(
         db,
         module=MODULE,
@@ -1328,7 +1360,10 @@ def cancel_receipt(
         target_type="pur_receipt",
         target_id=receipt.id,
         operator_id=operator_id,
-        detail=f"取消到货单 {receipt.receipt_no}",
+        detail=(
+            f"取消到货单 {receipt.receipt_no}"
+            + (f"，同时撤销待入库单 {cancelled} 张" if cancelled else "")
+        ),
     )
     return _receipt_view(db, receipt)
 

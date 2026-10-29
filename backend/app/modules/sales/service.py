@@ -2,9 +2,10 @@
 
 硬性约定（规格 §7 / §24 / §35 / §42）：
 
-1. **不直接改库存**：发货 / 退货确认必须调用 `inventory.contract` 的
-   `decrease_stock` / `increase_stock`，由库存引擎写流水 + 结存；
-   库存不足时由库存契约抛 5001，本层**不吞异常**，整单事务回滚。
+1. **不直接改库存**：发货 / 退货确认不直接改结存，而是调用 `inventory.contract` 的
+   `push_outbound_order` / `push_inbound_order` 向库存管理推送**待出库 / 待入库单**；
+   由仓库管理人员在「库存管理 → 出库管理 / 入库管理」中指定仓库并确认后，
+   结存才真正变动（仓库选择权收口到库存模块）。
 2. **不写计划表**：销售只提供需求来源（订单 / 预测），由 Planning 通过契约读取。
 3. **只有一个物料主数据 / 人员表**：物料、销售员分别经 `system.contract`
    的 `get_material` / `get_personnel_name` 读取，不另建销售产品表 / 销售员表。
@@ -23,9 +24,10 @@ from sqlalchemy.orm import Session
 
 from app.common.exceptions import BusinessException
 from app.modules.inventory.contract import (
-    decrease_stock,
+    cancel_pending_inout_orders,
     get_available_by_warehouse,
-    increase_stock,
+    push_inbound_order,
+    push_outbound_order,
 )
 from app.modules.sales import models, repository
 from app.modules.system.contract import (
@@ -1447,7 +1449,11 @@ def create_shipment(
 def confirm_shipment(
     db: Session, shipment_id: int, operator_id: Optional[int] = None
 ) -> Dict[str, Any]:
-    """确认发货（原子）：调用库存出库 → 回写订单行已发数量 → 更新单据 / 订单状态。"""
+    """确认发货（原子）：推送库存待出库单 → 回写订单行已发数量 → 更新单据 / 订单状态。
+
+    **不再直接扣减结存、也不再指定仓库**：库存管理会生成一张「待出库单」，
+    由仓库管理人员选择仓库并确认后，库存才真正减少。
+    """
     shipment = _require_shipment(db, shipment_id)
     if shipment.status != "DRAFT":
         raise BusinessException(
@@ -1461,6 +1467,7 @@ def confirm_shipment(
     items = repository.get_shipment_items(db, shipment.id)
     if not items:
         raise BusinessException(CODE_PARAM_INVALID, "发货单没有明细，不能确认")
+    push_items: List[Dict[str, Any]] = []
     for item in items:
         order_item = repository.get_order_item(db, item.order_item_id)
         if not order_item:
@@ -1472,21 +1479,27 @@ def confirm_shipment(
                 CODE_SHIP_QTY_EXCEED,
                 f"发货数量超过未发数量：物料 {item.material_id} 未发 {remaining}，本次 {qty}",
             )
-        # 库存不足时库存契约抛 5001，本层不吞，整单事务回滚
-        decrease_stock(
-            db,
-            material_id=item.material_id,
-            quantity=qty,
-            warehouse_id=item.warehouse_id,
-            source_module=MODULE,
-            source_type="SALES_SHIPMENT",
-            source_reference_id=shipment.id,
-            source_no=shipment.shipment_no,
-            biz_date=shipment.shipment_date,
-            operator_id=operator_id,
-            remark=f"销售发货 {shipment.shipment_no}",
-        )
+        push_items.append({"material_id": item.material_id, "quantity": qty})
         order_item.delivered_qty = _as_decimal(order_item.delivered_qty) + qty
+
+    # 推送到库存管理 → 出库管理（待仓库指定仓库并确认）
+    customer = repository.get_customers(db, [order.customer_id]).get(order.customer_id)
+    customer_label = customer.customer_name if customer else ""
+    pushed = push_outbound_order(
+        db,
+        op_date=shipment.shipment_date,
+        items=push_items,
+        source_module=MODULE,
+        source_type="SALES_SHIPMENT",
+        source_reference_id=shipment.id,
+        source_no=shipment.shipment_no,
+        remark=(
+            f"订单 {order.order_no}"
+            + (f"，客户 {customer_label}" if customer_label else "")
+            + f"，共 {len(push_items)} 项"
+        ),
+        operator_id=operator_id,
+    )
 
     shipment.status = "COMPLETED"
     shipment.updated_by = operator_id
@@ -1505,9 +1518,15 @@ def confirm_shipment(
         target_type="sal_shipment",
         target_id=shipment.id,
         operator_id=operator_id,
-        detail=f"确认发货单 {shipment.shipment_no}，订单 {order.order_no} → {order.status}",
+        detail=(
+            f"确认发货单 {shipment.shipment_no}，订单 {order.order_no} → {order.status}；"
+            f"已推送库存待出库单 {pushed.get('operation_no')}"
+        ),
     )
-    return _shipment_view(db, shipment)
+    view = _shipment_view(db, shipment)
+    view["inventory_operation_no"] = pushed.get("operation_no")
+    view["inventory_operation_id"] = pushed.get("operation_id")
+    return view
 
 
 def cancel_shipment(
@@ -1520,6 +1539,15 @@ def cancel_shipment(
         )
     shipment.status = "CANCELLED"
     shipment.updated_by = operator_id
+    # 尚未被仓库确认的待出库单一并撤销
+    cancelled = cancel_pending_inout_orders(
+        db,
+        source_module=MODULE,
+        source_type="SALES_SHIPMENT",
+        source_reference_id=shipment.id,
+        operator_id=operator_id,
+        reason=f"发货单 {shipment.shipment_no} 已取消",
+    )
     log_operation(
         db,
         module=MODULE,
@@ -1527,7 +1555,10 @@ def cancel_shipment(
         target_type="sal_shipment",
         target_id=shipment.id,
         operator_id=operator_id,
-        detail=f"取消发货单 {shipment.shipment_no}",
+        detail=(
+            f"取消发货单 {shipment.shipment_no}"
+            + (f"，同时撤销待出库单 {cancelled} 张" if cancelled else "")
+        ),
     )
     return _shipment_view(db, shipment)
 
@@ -1670,7 +1701,10 @@ def create_return(
 def confirm_return(
     db: Session, return_id: int, operator_id: Optional[int] = None
 ) -> Dict[str, Any]:
-    """确认退货（原子）：调用库存入库，状态置 COMPLETED。
+    """确认退货（原子）：推送库存待入库单，状态置 COMPLETED。
+
+    **不再直接增加结存、也不再指定仓库**：库存管理生成「待入库单」，
+    由仓库管理人员选择仓库并确认后，库存才真正增加。
 
     简化说明（规格 §42）：`quality_status` 为 SCRAP 的退货行**仍然入仓**，
     仅通过质量状态标签区分，系统不设独立隔离仓。
@@ -1700,20 +1734,32 @@ def confirm_return(
                     f"退货数量超过可退数量：物料 {item.material_id} 可退 {available}，本次 {qty}",
                 )
             returned[item.material_id] = used + qty
-    for item in items:
-        increase_stock(
-            db,
-            material_id=item.material_id,
-            quantity=_as_decimal(item.quantity),
-            warehouse_id=item.warehouse_id,
-            source_module=MODULE,
-            source_type="SALES_RETURN",
-            source_reference_id=sales_return.id,
-            source_no=sales_return.return_no,
-            biz_date=sales_return.return_date,
-            operator_id=operator_id,
-            remark=f"销售退货 {sales_return.return_no}（{item.quality_status}）",
-        )
+    push_items = [
+        {
+            "material_id": item.material_id,
+            "quantity": _as_decimal(item.quantity),
+            "remark": f"质量状态 {item.quality_status}",
+        }
+        for item in items
+    ]
+    customer = repository.get_customers(
+        db, [sales_return.customer_id] if sales_return.customer_id else []
+    ).get(sales_return.customer_id)
+    customer_label = customer.customer_name if customer else ""
+    pushed = push_inbound_order(
+        db,
+        op_date=sales_return.return_date,
+        items=push_items,
+        source_module=MODULE,
+        source_type="SALES_RETURN",
+        source_reference_id=sales_return.id,
+        source_no=sales_return.return_no,
+        remark=(
+            (f"客户 {customer_label}，" if customer_label else "")
+            + f"共 {len(push_items)} 项"
+        ),
+        operator_id=operator_id,
+    )
     sales_return.status = "COMPLETED"
     sales_return.updated_by = operator_id
     log_operation(
@@ -1723,9 +1769,15 @@ def confirm_return(
         target_type="sal_return",
         target_id=sales_return.id,
         operator_id=operator_id,
-        detail=f"确认退货单 {sales_return.return_no}",
+        detail=(
+            f"确认退货单 {sales_return.return_no}；"
+            f"已推送库存待入库单 {pushed.get('operation_no')}"
+        ),
     )
-    return _return_view(db, sales_return)
+    view = _return_view(db, sales_return)
+    view["inventory_operation_no"] = pushed.get("operation_no")
+    view["inventory_operation_id"] = pushed.get("operation_id")
+    return view
 
 
 def cancel_return(
@@ -1738,6 +1790,14 @@ def cancel_return(
         )
     sales_return.status = "CANCELLED"
     sales_return.updated_by = operator_id
+    cancelled = cancel_pending_inout_orders(
+        db,
+        source_module=MODULE,
+        source_type="SALES_RETURN",
+        source_reference_id=sales_return.id,
+        operator_id=operator_id,
+        reason=f"退货单 {sales_return.return_no} 已取消",
+    )
     log_operation(
         db,
         module=MODULE,
@@ -1745,7 +1805,10 @@ def cancel_return(
         target_type="sal_return",
         target_id=sales_return.id,
         operator_id=operator_id,
-        detail=f"取消退货单 {sales_return.return_no}",
+        detail=(
+            f"取消退货单 {sales_return.return_no}"
+            + (f"，同时撤销待入库单 {cancelled} 张" if cancelled else "")
+        ),
     )
     return _return_view(db, sales_return)
 

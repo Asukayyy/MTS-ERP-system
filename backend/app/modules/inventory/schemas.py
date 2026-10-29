@@ -171,40 +171,68 @@ class StockChangeOut(BaseModel):
     quantity_after: Decimal
 
 
-# ==================== 库存操作单（移库 / 盘点） ====================
+# ==================== 库存操作单（移库 / 盘点 / 入库 / 出库） ====================
 
 
 class StockOperationItemCreate(BaseModel):
     """操作单明细行入参。
 
     - TRANSFER：填 `quantity`；
-    - STOCKTAKE：填 `actual_qty`（`book_qty` 留空时按当前结存自动带出）。
+    - STOCKTAKE：填 `actual_qty`（`book_qty` 留空时按当前结存自动带出）；
+    - INBOUND / OUTBOUND：填 `quantity`。
     """
 
     material_id: int
-    quantity: Optional[Decimal] = Field(default=None, gt=0, description="移库数量（TRANSFER 用）")
+    quantity: Optional[Decimal] = Field(default=None, gt=0, description="数量（TRANSFER/INBOUND/OUTBOUND 用）")
     book_qty: Optional[Decimal] = Field(default=None, ge=0, description="账面数量（STOCKTAKE 用，留空自动取当前结存）")
     actual_qty: Optional[Decimal] = Field(default=None, ge=0, description="实盘数量（STOCKTAKE 用）")
     remark: Optional[str] = None
 
 
 class StockOperationCreate(BaseModel):
-    """库存操作单新增入参（单头 + 明细），`op_type` 区分移库 / 盘点。"""
+    """库存操作单新增入参（单头 + 明细），`op_type` 区分移库 / 盘点 / 入库 / 出库。"""
 
-    op_type: str = Field(description="操作类型 TRANSFER/STOCKTAKE")
+    op_type: str = Field(description="操作类型 TRANSFER/STOCKTAKE/INBOUND/OUTBOUND")
     operation_no: Optional[str] = Field(default=None, description="操作单号，留空自动生成")
     from_warehouse_id: Optional[int] = Field(default=None, description="源仓库ID（TRANSFER 必填）")
     to_warehouse_id: Optional[int] = Field(default=None, description="目标仓库ID（TRANSFER 必填）")
-    warehouse_id: Optional[int] = Field(default=None, description="仓库ID（STOCKTAKE 必填）")
-    op_date: date = Field(description="业务日期（移库/盘点日期）")
+    warehouse_id: Optional[int] = Field(
+        default=None,
+        description="仓库ID（STOCKTAKE 必填；INBOUND/OUTBOUND 可留空，确认时再指定）",
+    )
+    op_date: date = Field(description="业务日期（移库/盘点/出入库日期）")
     remark: Optional[str] = None
     operator_id: Optional[int] = None
+    source_module: Optional[str] = Field(
+        default=None, description="来源模块（库存自建单填 inventory）"
+    )
+    source_type: Optional[str] = Field(
+        default=None,
+        description=(
+            "来源业务类型：入库限 SALES_RETURN/PURCHASE_RECEIPT/PRODUCTION_COMPLETION/MANUAL，"
+            "出库限 SALES_SHIPMENT/MATERIAL_REQUISITION/MANUAL"
+        ),
+    )
+    source_no: Optional[str] = Field(default=None, description="来源单号（可手工填业务单据号）")
     items: List[StockOperationItemCreate] = Field(default_factory=list, description="明细")
+
+
+class StockOperationConfirm(BaseModel):
+    """库存单据确认入参：入库 / 出库由仓库管理人员在此选择仓库。"""
+
+    warehouse_id: Optional[int] = Field(
+        default=None, description="仓库ID（INBOUND/OUTBOUND 确认时必填）"
+    )
+    operator_id: Optional[int] = None
 
 
 class StockOperationItemOut(_IdOut):
     operation_id: int
     material_id: int
+    material_code: Optional[str] = None
+    material_name: Optional[str] = None
+    material_spec: Optional[str] = None
+    unit: Optional[str] = None
     quantity: Optional[Decimal] = None
     book_qty: Optional[Decimal] = None
     actual_qty: Optional[Decimal] = None
@@ -220,6 +248,11 @@ class StockOperationOut(_IdOut):
     warehouse_id: Optional[int] = None
     op_date: date
     status: str
+    source_module: Optional[str] = None
+    source_type: Optional[str] = None
+    source_reference_id: Optional[int] = None
+    source_no: Optional[str] = None
+    confirmed_at: Optional[datetime] = None
     remark: Optional[str] = None
     items: List[StockOperationItemOut] = Field(default_factory=list)
 

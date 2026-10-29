@@ -12,8 +12,10 @@ sales（发货 / 退货）、procurement（到货入库）、planning（领料 /
 禁止出现负库存。
 
 > 历史方案中的 `inv_transaction` 流水表已删除（迁移 `c4d2e1f3a6b0`）。
-> 移库 / 盘点以库存操作单（`inv_stock_operation`）留痕；手工入 / 出库及跨模块
-> 入 / 出库直接改结存，来源信息记录在调用方业务单据上。
+> 移库 / 盘点 / 入库 / 出库统一以库存操作单（`inv_stock_operation`）留痕；
+> **业务模块（销售发货 / 退货、采购到货、生产领料 / 完工）不再自行选择仓库、不再直接改结存**，
+> 而是经 `push_inbound_order` / `push_outbound_order` 推送 DRAFT 单据（含来源模块 / 来源单据 /
+> 物料快照 / 备注），由仓库管理人员在「入库管理 / 出库管理」指定仓库并确认后才真正变动结存。
 
 ## 已实现功能
 
@@ -22,6 +24,7 @@ sales（发货 / 退货）、procurement（到货入库）、planning（领料 /
 | 仓库 | 增删改查、状态流转（库位信息为仓库上的文本字段，无独立库位表） |
 | 库存结存 | `/balances` 分页查询、`/balances/available` 可用量查询 |
 | 手工入 / 出库 | `/stock/increase`、`/stock/decrease`（`SELECT ... FOR UPDATE` + 事务内复校，不足抛 `5001`） |
+| 入库 / 出库管理 | 业务单据推送的待入库 / 待出库单（`op_type=INBOUND/OUTBOUND`，DRAFT）统一在此处理，**确认时选择仓库**后才增减结存；同时保留手工入 / 出库 |
 | 移库 / 盘点 | 统一为库存操作单：`/stock-operations`，`op_type=TRANSFER/STOCKTAKE`，确认时直接更新结存 |
 | 订货点 | 结存行上的可空字段（仅 A 类物料配置）：`/balances/reorder-suggestions`、`/balances/{id}/reorder` |
 | 补库需求 | `/replenishment-requests`，`generate-from-reorder-rules` 批量生成，确认时按供需分流到 procurement / planning |
@@ -48,8 +51,8 @@ sales（发货 / 退货）、procurement（到货入库）、planning（领料 /
 | `inv_warehouse` | 仓库，含库位编码 / 名称文本字段（原 inv_location 并入，仅展示） |
 | `inv_balance` | 库存结存，对 `(warehouse_id, material_id)` 唯一；含可空的 reorder_point / reorder_quantity |
 | `inv_replenishment_request` | 补库需求 |
-| `inv_stock_operation` | 库存操作单头，op_type 区分 TRANSFER / STOCKTAKE |
-| `inv_stock_operation_item` | 库存操作单明细 |
+| `inv_stock_operation` | 库存操作单头，op_type 区分 TRANSFER / STOCKTAKE / INBOUND / OUTBOUND，含来源模块 / 来源单据 / 确认时间 |
+| `inv_stock_operation_item` | 库存操作单明细（含物料编码 / 名称 / 规格 / 单位快照） |
 
 > 表结构详见 `docs/database/inventory-er.md`。
 
@@ -81,7 +84,7 @@ sales（发货 / 退货）、procurement（到货入库）、planning（领料 /
 | 仓库 | `/api/v1/inventory/warehouses` |
 | 结存 / 订货点 | `/api/v1/inventory/balances`、`/balances/available`、`/balances/reorder-suggestions` |
 | 手工入出库 | `/api/v1/inventory/stock/increase`、`/stock/decrease` |
-| 移库 / 盘点 | `/api/v1/inventory/stock-operations` |
+| 入库 / 出库 / 移库 / 盘点 | `/api/v1/inventory/stock-operations`（`?op_type=INBOUND&status=DRAFT` 即待入库列表） |
 | 补库需求 | `/api/v1/inventory/replenishment-requests` |
 | 课程期初库存导入 | `/api/v1/inventory/import/initial-stock/{preview,confirm}` |
 | 报表 / 统计 | `/api/v1/inventory/reports/*`、`/stats`、`/health` |

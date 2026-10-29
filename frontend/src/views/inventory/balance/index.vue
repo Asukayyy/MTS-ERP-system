@@ -16,8 +16,6 @@ type SortQuery = {
   sort_order?: 'asc' | 'desc'
 }
 
-const sortQuery = ref<SortQuery>({ sort_by: undefined, sort_order: undefined })
-
 const { loading, rows, total, page, pageSize, query, load, search, reset, changePage, changeSize } =
   usePagedTable<
     Balance,
@@ -39,6 +37,9 @@ const SALES_CATEGORIES = [
 ]
 
 const summary = ref<BalanceSummary[]>([])
+
+/** 表格实例，用于「重置」时同步清掉表头的排序高亮 */
+const tableRef = ref<{ clearSort: () => void } | null>(null)
 
 function summaryOf(category: string): { onHand: number; available: number; count: number } {
   const hit = summary.value.find((item) => item.sales_category === category)
@@ -67,6 +68,9 @@ async function doSearch(): Promise<void> {
 }
 
 async function doReset(): Promise<void> {
+  query.sort_by = undefined
+  query.sort_order = undefined
+  tableRef.value?.clearSort()
   await reset()
   await loadSummary()
 }
@@ -94,16 +98,17 @@ const SORT_BY_MAP: Record<string, string> = {
   safety_stock: 'safety_stock',
 }
 
-function handleSortChange({ prop, order }: { prop: string; order: string | null }) {
+function handleSortChange({ prop, order }: { prop: string; order: 'ascending' | 'descending' | null }) {
   if (!prop || !order) {
+    // 取消排序：回到后端默认顺序（id desc）
     query.sort_by = undefined
     query.sort_order = undefined
   } else {
     query.sort_by = SORT_BY_MAP[prop] || prop
     query.sort_order = order === 'ascending' ? 'asc' : 'desc'
   }
-  changePage(1) // 回到第 1 页
-  load()
+  // search() 会回到第 1 页并只发一次请求；排序字段跨分页一直生效
+  search()
 }
 </script>
 
@@ -160,7 +165,14 @@ function handleSortChange({ prop, order }: { prop: string; order: string | null 
         </el-form-item>
       </el-form>
 
-      <el-table v-loading="loading" :data="rows" border size="small" @sort-change="handleSortChange">
+      <el-table
+        ref="tableRef"
+        v-loading="loading"
+        :data="rows"
+        border
+        size="small"
+        @sort-change="handleSortChange"
+      >
         <el-table-column label="物料编码" prop="material_code" min-width="130" sortable="custom" />
         <el-table-column label="物料名称" prop="material_name" min-width="160" sortable="custom" />
         <el-table-column label="销售类别" width="100" sortable="custom" prop="material_sales_category">

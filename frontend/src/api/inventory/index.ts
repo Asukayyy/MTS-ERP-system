@@ -67,7 +67,7 @@ export function stockDecrease(payload: Record<string, unknown>): Promise<StockCh
 
 // ---------------- 库存操作单（移库 / 盘点共用） ----------------
 
-/** op_type：TRANSFER 移库 / STOCKTAKE 盘点 */
+/** op_type：TRANSFER 移库 / STOCKTAKE 盘点 / INBOUND 入库 / OUTBOUND 出库 */
 export function listStockOperations(
   params: Record<string, unknown> = {},
 ): Promise<PageData<StockOperation>> {
@@ -78,10 +78,17 @@ export function createStockOperation(payload: Record<string, unknown>): Promise<
   return post<StockOperation>('/inventory/stock-operations', payload)
 }
 
-export function confirmStockOperation(id: number, operatorId?: number): Promise<StockOperation> {
-  return post<StockOperation>(`/inventory/stock-operations/${id}/confirm`, undefined, {
-    params: operatorId ? { operator_id: operatorId } : undefined,
-  })
+/** 确认库存单据：INBOUND / OUTBOUND 由仓库管理人员在此指定仓库 */
+export function confirmStockOperation(
+  id: number,
+  options: { operator_id?: number; warehouse_id?: number } = {},
+): Promise<StockOperation> {
+  const { operator_id: operatorId, warehouse_id: warehouseId } = options
+  return post<StockOperation>(
+    `/inventory/stock-operations/${id}/confirm`,
+    { warehouse_id: warehouseId ?? null },
+    { params: operatorId ? { operator_id: operatorId } : undefined },
+  )
 }
 
 export function cancelStockOperation(id: number, operatorId?: number): Promise<StockOperation> {

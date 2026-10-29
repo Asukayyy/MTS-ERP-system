@@ -227,19 +227,29 @@ class InvReplenishmentRequest(Base, AuditMixin):
 
 
 class InvStockOperation(Base, AuditMixin):
-    """库存操作单头：移库（TRANSFER）与盘点（STOCKTAKE）共用。
+    """库存单据头：移库（TRANSFER）、盘点（STOCKTAKE）、入库（INBOUND）、出库（OUTBOUND）共用。
 
     - TRANSFER：`from_warehouse_id → to_warehouse_id`，明细带移库数量；
       确认时对调出/调入两个仓库的结存各更新一次。
     - STOCKTAKE：`warehouse_id`，明细带账面数/实盘数/差异；
       确认时按盘盈/盘亏差异直接调整结存。
+    - INBOUND / OUTBOUND：**由业务单据（采购到货、销售发货/退货、生产领料/完工）或
+      仓库手工建单产生，只登记「待入库 / 待出库」，不直接改结存**；
+      仓库管理人员确认时才指定 `warehouse_id` 并真正更新结存 + 写流水。
+      单头通过 `source_module / source_type / source_reference_id / source_no`
+      记录来源，备注写清来源单据信息。
     """
 
     __tablename__ = "inv_stock_operation"
 
     id: Mapped[BigIntPk]
-    operation_no: Mapped[CodeStr] = mapped_column(unique=True, comment="操作单号（TRF/STK 前缀）")
-    op_type: Mapped[str] = mapped_column(String(20), nullable=False, index=True, comment="操作类型 TRANSFER/STOCKTAKE")
+    operation_no: Mapped[CodeStr] = mapped_column(unique=True, comment="单据号（TRF/STK/INB/OUT 前缀）")
+    op_type: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        index=True,
+        comment="单据类型 TRANSFER 移库 / STOCKTAKE 盘点 / INBOUND 入库 / OUTBOUND 出库",
+    )
     from_warehouse_id: Mapped[Optional[BigIntFk]] = mapped_column(
         ForeignKey("inv_warehouse.id", ondelete="RESTRICT"), nullable=True, comment="源仓库ID（TRANSFER 用）"
     )
@@ -247,40 +257,80 @@ class InvStockOperation(Base, AuditMixin):
         ForeignKey("inv_warehouse.id", ondelete="RESTRICT"), nullable=True, comment="目标仓库ID（TRANSFER 用）"
     )
     warehouse_id: Mapped[Optional[BigIntFk]] = mapped_column(
-        ForeignKey("inv_warehouse.id", ondelete="RESTRICT"), nullable=True, comment="仓库ID（STOCKTAKE 用）"
+        ForeignKey("inv_warehouse.id", ondelete="RESTRICT"),
+        nullable=True,
+        comment="仓库ID（STOCKTAKE 用；入/出库在仓库确认时写入）",
     )
-    op_date: Mapped[date] = mapped_column(Date, nullable=False, comment="业务日期（移库/盘点日期）")
+    op_date: Mapped[date] = mapped_column(Date, nullable=False, comment="业务日期（移库/盘点/出入库日期）")
     status: Mapped[str] = mapped_column(
-        String(20), nullable=False, default="DRAFT", index=True, comment="状态"
+        String(20),
+        nullable=False,
+        default="DRAFT",
+        index=True,
+        comment="状态：DRAFT 待处理 / COMPLETED 已完成 / CANCELLED 已作废",
     )
-    remark: Mapped[Optional[str]] = mapped_column(Text, nullable=True, comment="备注")
+    source_module: Mapped[Optional[str]] = mapped_column(
+        String(32), nullable=True, comment="来源模块（sales / procurement / planning / inventory）"
+    )
+    source_type: Mapped[Optional[str]] = mapped_column(
+        String(64), nullable=True, comment="来源业务类型（SALES_SHIPMENT 等）"
+    )
+    source_reference_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger, nullable=True, comment="来源单据ID"
+    )
+    source_no: Mapped[Optional[str]] = mapped_column(
+        String(64), nullable=True, comment="来源单据号"
+    )
+    confirmed_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime, nullable=True, comment="仓库确认出入库时间"
+    )
+    remark: Mapped[Optional[str]] = mapped_column(Text, nullable=True, comment="备注（写明来源单据）")
 
     items: Mapped[List["InvStockOperationItem"]] = relationship(
         back_populates="operation", cascade="all, delete-orphan", lazy="selectin"
     )
 
     __table_args__ = (
-        CheckConstraint("op_type IN ('TRANSFER','STOCKTAKE')", name="ck_inv_stock_op_type"),
+        CheckConstraint(
+            "op_type IN ('TRANSFER','STOCKTAKE','INBOUND','OUTBOUND')",
+            name="ck_inv_stock_op_type",
+        ),
         CheckConstraint(
             "status IN ('DRAFT','COMPLETED','CANCELLED')", name="ck_inv_stock_op_status"
         ),
+        Index("idx_inv_stock_op_source", "source_module", "source_type", "source_reference_id"),
     )
 
 
 class InvStockOperationItem(Base, AuditMixin):
-    """库存操作单明细行：移库明细（quantity）与盘点明细（book/actual/difference）共用。"""
+    """库存单据明细行：移库明细（quantity）、盘点明细（book/actual/difference）、
+    入/出库明细（quantity）共用。
+
+    `material_code / material_name / material_spec / unit` 为建单时的物料快照，
+    保证仓库人员在出入库单里能直接看到完整信息（不依赖实时主数据）。
+    """
 
     __tablename__ = "inv_stock_operation_item"
 
     id: Mapped[BigIntPk]
     operation_id: Mapped[BigIntFk] = mapped_column(
-        ForeignKey("inv_stock_operation.id", ondelete="CASCADE"), nullable=False, index=True, comment="操作单头ID"
+        ForeignKey("inv_stock_operation.id", ondelete="CASCADE"), nullable=False, index=True, comment="单据头ID"
     )
     material_id: Mapped[BigIntFk] = mapped_column(
         ForeignKey("sys_material.id", ondelete="RESTRICT"), nullable=False, comment="物料ID"
     )
+    material_code: Mapped[Optional[str]] = mapped_column(
+        String(64), nullable=True, comment="物料编码快照"
+    )
+    material_name: Mapped[Optional[str]] = mapped_column(
+        String(128), nullable=True, comment="物料名称快照"
+    )
+    material_spec: Mapped[Optional[str]] = mapped_column(
+        String(200), nullable=True, comment="规格型号快照"
+    )
+    unit: Mapped[Optional[str]] = mapped_column(String(32), nullable=True, comment="计量单位快照")
     quantity: Mapped[Optional[Decimal]] = mapped_column(
-        Numeric(18, 4), nullable=True, comment="移库数量（TRANSFER 用）"
+        Numeric(18, 4), nullable=True, comment="数量（移库 / 入库 / 出库用）"
     )
     book_qty: Mapped[Optional[Decimal]] = mapped_column(
         Numeric(18, 4), nullable=True, comment="账面数量（STOCKTAKE 用）"
