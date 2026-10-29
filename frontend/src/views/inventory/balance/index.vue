@@ -58,6 +58,13 @@ onMounted(() => {
             <span :class="{ 'qty-zero': toNumber(row.available_quantity) <= 0 }">{{ row.available_quantity }}</span>
           </template>
         </el-table-column>
+        <el-table-column label="安全库存" width="110" align="right">
+          <template #default="{ row }">
+            <span :class="{ 'qty-zero': toNumber(row.available_quantity) < toNumber(row.safety_stock) }">{{
+              row.safety_stock
+            }}</span>
+          </template>
+        </el-table-column>
         <template #empty>暂无库存结存数据</template>
       </el-table>
 

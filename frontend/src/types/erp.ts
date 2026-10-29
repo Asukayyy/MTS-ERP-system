@@ -591,6 +591,7 @@ export interface Balance {
   on_hand: Num
   locked_quantity: Num
   available_quantity: Num
+  safety_stock?: Num
   reorder_point?: Num | null
   reorder_quantity?: Num | null
 }

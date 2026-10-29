@@ -535,6 +535,7 @@ def list_balances(
                 "warehouse_id": row.warehouse_id,
                 "warehouse_code": warehouse.get("warehouse_code"),
                 "warehouse_name": warehouse.get("warehouse_name"),
+                "safety_stock": _as_decimal(material.get("safety_stock")),
                 "reorder_point": row.reorder_point,
                 "reorder_quantity": row.reorder_quantity,
                 **_balance_dict(row),
