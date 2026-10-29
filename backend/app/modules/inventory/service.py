@@ -132,6 +132,54 @@ def _balance_dict(balance: models.InvBalance) -> Dict[str, Any]:
 # ==================== 库存引擎（核心） ====================
 
 
+def _append_stock_journal(
+    db: Session,
+    *,
+    op_date: date,
+    material_id: int,
+    warehouse_id: int,
+    direction: str,  # IN / OUT / ADJUST
+    delta_qty: Decimal,
+    qty_before: Decimal,
+    qty_after: Decimal,
+    source_module: str,
+    source_type: Optional[str],
+    source_reference_id: Optional[int],
+    source_no: Optional[str],
+    remark: Optional[str],
+    operator_id: Optional[int],
+) -> None:
+    """在同一事务内追加一条库存变动流水（inv_stock_journal）。
+
+    调用方：increase_stock / decrease_stock / _apply_adjust / 移库确认 / 盘点确认。
+    """
+    # 拿物料/仓库快照（保持当时的 code/name，不受后续改名影响）
+    material_info = _material_map(db, [material_id]).get(material_id, {})
+    warehouse_info = _warehouse_map(db, [warehouse_id]).get(warehouse_id, {})
+
+    journal = models.InvStockJournal(
+        op_date=op_date,
+        material_id=material_id,
+        material_code=material_info.get("material_code"),
+        material_name=material_info.get("material_name"),
+        warehouse_id=warehouse_id,
+        warehouse_code=warehouse_info.get("warehouse_code"),
+        warehouse_name=warehouse_info.get("warehouse_name"),
+        direction=direction,
+        delta_qty=delta_qty,
+        qty_before=qty_before,
+        qty_after=qty_after,
+        source_module=source_module,
+        source_type=source_type,
+        source_reference_id=source_reference_id,
+        source_no=source_no,
+        remark=remark,
+        operator_id=operator_id,
+        created_at=datetime.now(),
+    )
+    db.add(journal)
+
+
 def _lock_or_create_balance(db: Session, warehouse_id: int, material_id: int) -> models.InvBalance:
     """取或建结存桶，并对已存在的行加锁（`SELECT ... FOR UPDATE`）。"""
     balance = repository.get_balance_for_update(db, warehouse_id, material_id)
@@ -186,7 +234,7 @@ def _increase_stock(
     operator_id: Optional[int] = None,
     remark: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """入库内部实现：加锁后直接给结存加数量（同一事务，不写独立流水表）。"""
+    """入库内部实现：加锁后直接给结存加数量（同一事务，追加 journal 流水）。"""
     qty = _validate_stock_args(
         db,
         material_id=material_id,
@@ -197,11 +245,18 @@ def _increase_stock(
     )
     biz = biz_date or date.today()
     balance = _lock_or_create_balance(db, warehouse_id, material_id)
-    balance.quantity = _as_decimal(balance.quantity) + qty
+    before = _as_decimal(balance.quantity)
+    after = before + qty
+    balance.quantity = after
     balance.updated_at_txn = datetime.now()
-    return {
-        "quantity_after": _as_decimal(balance.quantity),
-    }
+    _append_stock_journal(
+        db, op_date=biz, material_id=material_id, warehouse_id=warehouse_id,
+        direction="IN", delta_qty=qty, qty_before=before, qty_after=after,
+        source_module=source_module, source_type=source_type,
+        source_reference_id=source_reference_id, source_no=source_no,
+        remark=remark, operator_id=operator_id,
+    )
+    return {"quantity_after": after}
 
 
 def increase_stock(
@@ -253,7 +308,7 @@ def _decrease_stock(
     operator_id: Optional[int] = None,
     remark: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """出库内部实现：加锁复核可用量 → 直接减结存（不写独立流水表）。"""
+    """出库内部实现：加锁复核可用量 → 直接减结存（同一事务，追加 journal）。"""
     qty = _validate_stock_args(
         db,
         material_id=material_id,
@@ -276,15 +331,21 @@ def _decrease_stock(
             CODE_STOCK_INSUFFICIENT,
             f"库存不足：物料 {material_id} 可用量 {available}，需求 {qty}",
         )
-    new_qty = on_hand - qty
-    if new_qty < 0:  # 防御性校验，禁止负库存
+    before = on_hand
+    after = before - qty
+    if after < 0:  # 防御性校验，禁止负库存
         raise BusinessException(CODE_STOCK_INSUFFICIENT, "库存不足：出库后将出现负库存")
-    balance.quantity = new_qty
+    balance.quantity = after
     balance.updated_at_txn = datetime.now()
+    _append_stock_journal(
+        db, op_date=biz, material_id=material_id, warehouse_id=warehouse_id,
+        direction="OUT", delta_qty=-qty, qty_before=before, qty_after=after,
+        source_module=source_module, source_type=source_type,
+        source_reference_id=source_reference_id, source_no=source_no,
+        remark=remark, operator_id=operator_id,
+    )
     _auto_replenish_if_needed(db, material_id, operator_id)
-    return {
-        "quantity_after": new_qty,
-    }
+    return {"quantity_after": after}
 
 
 def decrease_stock(
@@ -335,20 +396,28 @@ def _apply_adjust(
     operator_id: Optional[int] = None,
     remark: Optional[str] = None,
 ) -> Decimal:
-    """盘点调整：直接改结存（delta 可为负，调整后结存不得为负）。"""
+    """盘点调整：直接改结存（delta 可为负，调整后结存不得为负，追加 journal）。"""
     biz = biz_date or date.today()
     balance = _lock_or_create_balance(db, warehouse_id, material_id)
-    new_qty = _as_decimal(balance.quantity) + delta
-    if new_qty < 0:
+    before = _as_decimal(balance.quantity)
+    after = before + delta
+    if after < 0:
         raise BusinessException(
             CODE_BALANCE_NEGATIVE,
-            f"盘点调整后库存为负：物料 {material_id} 调整后 {new_qty}",
+            f"盘点调整后库存为负：物料 {material_id} 调整后 {after}",
         )
-    balance.quantity = new_qty
+    balance.quantity = after
     balance.updated_at_txn = datetime.now()
+    _append_stock_journal(
+        db, op_date=biz, material_id=material_id, warehouse_id=warehouse_id,
+        direction="ADJUST", delta_qty=delta, qty_before=before, qty_after=after,
+        source_module=source_module, source_type=source_type,
+        source_reference_id=source_reference_id, source_no=source_no,
+        remark=remark, operator_id=operator_id,
+    )
     if delta < 0:
         _auto_replenish_if_needed(db, material_id, operator_id)
-    return new_qty
+    return after
 
 
 # ---- 只读查询（契约导出） ----
@@ -678,6 +747,30 @@ def list_stock_operations(
     warehouse_id: Optional[int] = None,
 ):
     return repository.list_stock_operations(db, page, page_size, op_type, status, warehouse_id)
+
+
+def list_stock_journal(
+    db: Session,
+    *,
+    page: int = 1,
+    page_size: int = 20,
+    keyword: Optional[str] = None,
+    material_id: Optional[int] = None,
+    warehouse_id: Optional[int] = None,
+    direction: Optional[str] = None,
+    source_module: Optional[str] = None,
+    source_type: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+) -> Tuple[List[models.InvStockJournal], int]:
+    """库存变动流水列表。"""
+    return repository.list_stock_journal(
+        db,
+        page=page, page_size=page_size,
+        keyword=keyword, material_id=material_id, warehouse_id=warehouse_id,
+        direction=direction, source_module=source_module, source_type=source_type,
+        date_from=date_from, date_to=date_to,
+    )
 
 
 def get_stock_operation(db: Session, operation_id: int) -> models.InvStockOperation:

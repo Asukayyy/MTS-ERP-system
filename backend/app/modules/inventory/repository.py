@@ -358,6 +358,51 @@ def add_operation_item(
     return item
 
 
+# ==================== 库存流水（inv_stock_journal） ====================
+
+
+def list_stock_journal(
+    db: Session,
+    *,
+    page: int = 1,
+    page_size: int = 20,
+    keyword: Optional[str] = None,
+    material_id: Optional[int] = None,
+    warehouse_id: Optional[int] = None,
+    direction: Optional[str] = None,
+    source_module: Optional[str] = None,
+    source_type: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+) -> Tuple[List[models.InvStockJournal], int]:
+    """分页查询库存变动流水。按 created_at / id 倒序。"""
+    stmt = select(models.InvStockJournal).order_by(
+        models.InvStockJournal.id.desc()
+    )
+    if keyword:
+        like = f"%{keyword}%"
+        stmt = stmt.where(
+            (models.InvStockJournal.material_code.like(like))
+            | (models.InvStockJournal.material_name.like(like))
+            | (models.InvStockJournal.source_no.like(like))
+        )
+    if material_id:
+        stmt = stmt.where(models.InvStockJournal.material_id == material_id)
+    if warehouse_id:
+        stmt = stmt.where(models.InvStockJournal.warehouse_id == warehouse_id)
+    if direction:
+        stmt = stmt.where(models.InvStockJournal.direction == direction)
+    if source_module:
+        stmt = stmt.where(models.InvStockJournal.source_module == source_module)
+    if source_type:
+        stmt = stmt.where(models.InvStockJournal.source_type == source_type)
+    if date_from:
+        stmt = stmt.where(models.InvStockJournal.op_date >= date_from)
+    if date_to:
+        stmt = stmt.where(models.InvStockJournal.op_date <= date_to)
+    return _paginate(db, stmt, page, page_size)
+
+
 def count_operations_by_type(db: Session, op_type: str) -> int:
     return count_where(db, models.InvStockOperation, models.InvStockOperation.op_type == op_type)
 

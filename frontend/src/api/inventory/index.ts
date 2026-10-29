@@ -11,6 +11,7 @@ import type {
   ReplenishmentRequest,
   SafetyStockSuggestion,
   StockChangeResult,
+  StockJournal,
   StockOperation,
   StockSummary,
   StocktakeSummary,
@@ -200,4 +201,11 @@ export function confirmInitialStockImport(
   payload: InitialStockImportPayload,
 ): Promise<InitialStockConfirm> {
   return post<InitialStockConfirm>('/inventory/import/initial-stock/confirm', payload)
+}
+
+/** 库存变动流水列表 */
+export function listStockJournal(
+  params: Record<string, unknown> = {},
+): Promise<PageData<StockJournal>> {
+  return get<PageData<StockJournal>>('/inventory/stock-journal', params)
 }

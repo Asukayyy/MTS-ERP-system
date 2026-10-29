@@ -215,6 +215,12 @@ export const constantRoutes: RouteRecordRaw[] = [
         component: () => import('@/views/inventory/replenishment/index.vue'),
         meta: { title: '补库需求', perm: 'inventory:replenishment' },
       },
+      {
+        path: 'inventory/stock-journal',
+        name: 'InventoryStockJournal',
+        component: () => import('@/views/inventory/stock-journal/index.vue'),
+        meta: { title: '库存流水', perm: 'inventory:balance' },
+      },
 
       // ---------- 人事管理 ----------
       {

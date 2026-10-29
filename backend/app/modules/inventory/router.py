@@ -392,6 +392,47 @@ def cancel_stock_operation(
     return success(operation)
 
 
+# ==================== 库存变动流水 ====================
+
+
+@router.get(
+    "/stock-journal",
+    response_model=ApiResponse[PageData[schemas.StockJournalOut]],
+    summary="库存变动流水列表",
+)
+def list_stock_journal(
+    params: PageParams = Depends(PageParams.as_dependency),
+    keyword: Optional[str] = Query(default=None, description="物料编码/名称/单据号关键字"),
+    material_id: Optional[int] = Query(default=None, description="物料ID过滤"),
+    warehouse_id: Optional[int] = Query(default=None, description="仓库ID过滤"),
+    direction: Optional[str] = Query(default=None, description="方向 IN/OUT/ADJUST"),
+    source_module: Optional[str] = Query(default=None, description="来源模块"),
+    source_type: Optional[str] = Query(default=None, description="来源类型"),
+    date_from: Optional[str] = Query(default=None, description="起始日期 YYYY-MM-DD"),
+    date_to: Optional[str] = Query(default=None, description="结束日期 YYYY-MM-DD"),
+    db: Session = Depends(get_db),
+) -> ApiResponse[PageData[schemas.StockJournalOut]]:
+    """分页查询库存变动流水。"""
+    rows, total = service.list_stock_journal(
+        db,
+        page=params.page,
+        page_size=params.page_size,
+        keyword=keyword,
+        material_id=material_id,
+        warehouse_id=warehouse_id,
+        direction=direction,
+        source_module=source_module,
+        source_type=source_type,
+        date_from=date_from,
+        date_to=date_to,
+    )
+    return success(
+        PageData[schemas.StockJournalOut](
+            page=params.page, page_size=params.page_size, total=total, items=rows
+        )
+    )
+
+
 # ==================== 补库需求 ====================
 
 
