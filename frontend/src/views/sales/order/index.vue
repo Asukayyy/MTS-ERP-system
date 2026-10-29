@@ -9,6 +9,7 @@ import {
   createReturn,
   createShipment,
   deleteOrder,
+  getProductPrice,
   listCustomers,
   listOrders,
   listProducts,
@@ -95,6 +96,43 @@ async function loadMaterialStock(materialId: number | undefined): Promise<void> 
   stockMap.value = { ...stockMap.value, [materialId]: { onHand, available } }
 }
 
+/** 物料ID -> 产品当前价格（来自「销售管理 → 产品价格」） */
+const priceMap = ref<Record<number, number>>({})
+
+async function loadMaterialPrice(materialId: number | undefined): Promise<void> {
+  if (!materialId || priceMap.value[materialId] !== undefined) return
+  try {
+    const product = await getProductPrice(materialId)
+    priceMap.value = { ...priceMap.value, [materialId]: toNumber(product.current_price) }
+  } catch {
+    priceMap.value = { ...priceMap.value, [materialId]: 0 }
+  }
+}
+
+function currentPrice(materialId: number | undefined): number | undefined {
+  const price = materialId ? priceMap.value[materialId] : undefined
+  if (price === undefined || price <= 0) return undefined
+  return price
+}
+
+function priceText(materialId: number | undefined): string {
+  const price = currentPrice(materialId)
+  if (price === undefined) return '该物料尚未维护产品价格，请到「产品价格」中定价'
+  return `当前价格 ${price.toFixed(2)}`
+}
+
+function materialHint(materialId: number | undefined): string {
+  return [stockText(materialId), priceText(materialId)].filter(Boolean).join('；')
+}
+
+/** 选物料后加载库存与当前价格，单价直接取产品当前价格 */
+async function onMaterialChange(row: OrderLineForm, materialId: number | undefined): Promise<void> {
+  await Promise.all([loadMaterialStock(materialId), loadMaterialPrice(materialId)])
+  if (materialId === undefined) return
+  const price = currentPrice(materialId)
+  if (price !== undefined) row.unit_price = price
+}
+
 // ---------------- 新增 / 修改订单 ----------------
 interface OrderLineForm {
   material_id: number | undefined
@@ -171,7 +209,10 @@ function openEdit(row: Order): void {
     })),
   })
   if (!form.items.length) addLine()
-  form.items.forEach((item) => void loadMaterialStock(item.material_id))
+  form.items.forEach((item) => {
+    void loadMaterialStock(item.material_id)
+    void loadMaterialPrice(item.material_id)
+  })
   dialogVisible.value = true
 }
 
@@ -696,10 +737,10 @@ onMounted(load)
               v-model="row.material_id"
               :loader="loadProductOptions"
               style="width: 100%"
-              @change="loadMaterialStock"
+              @change="onMaterialChange(row, $event)"
             />
-            <div v-if="stockText(row.material_id)" class="stock-hint">
-              {{ stockText(row.material_id) }}
+            <div v-if="materialHint(row.material_id)" class="stock-hint">
+              {{ materialHint(row.material_id) }}
             </div>
           </template>
         </el-table-column>

@@ -259,6 +259,28 @@ export interface Product {
   status: string
 }
 
+export interface ProductPrice {
+  material_id: number
+  material_code: string
+  material_name: string
+  sales_category?: string | null
+  unit_code?: string | null
+  standard_cost?: Num | null
+  /** 当前价格，未定价时为 null */
+  current_price?: Num | null
+  effective_date?: string | null
+  remark?: string | null
+  history_count: number
+}
+
+export interface ProductPriceHistory {
+  id: number
+  material_id: number
+  price: Num
+  effective_date: string
+  remark?: string | null
+}
+
 export interface Forecast {
   id: number
   forecast_no: string

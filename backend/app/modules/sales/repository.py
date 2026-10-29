@@ -14,7 +14,7 @@ from datetime import date
 from decimal import Decimal
 from typing import List, Optional, Sequence, Tuple
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.modules.sales import models
@@ -154,6 +154,89 @@ def count_customer_references(db: Session, customer_id: int) -> int:
 def delete_customer(db: Session, customer: models.SalCustomer) -> None:
     db.delete(customer)
     db.flush()
+
+
+# ==================== 产品价格 ====================
+
+
+def get_price(db: Session, material_id: int) -> Optional[models.SalProductPrice]:
+    return db.scalar(
+        select(models.SalProductPrice).where(
+            models.SalProductPrice.material_id == material_id
+        )
+    )
+
+
+def get_prices(db: Session, material_ids: Sequence[int]) -> dict:
+    """批量取当前价格 `{material_id: SalProductPrice}`。"""
+    ids = [int(i) for i in material_ids if i]
+    if not ids:
+        return {}
+    rows = db.scalars(
+        select(models.SalProductPrice).where(models.SalProductPrice.material_id.in_(ids))
+    )
+    return {row.material_id: row for row in rows}
+
+
+def list_prices(db: Session) -> List[models.SalProductPrice]:
+    """全部当前价格（用于找出「已定价但不在可售清单」的物料）。"""
+    return list(db.scalars(select(models.SalProductPrice)))
+
+
+def delete_price(db: Session, row: models.SalProductPrice) -> None:
+    db.delete(row)
+    db.flush()
+
+
+def delete_price_history(db: Session, material_id: int) -> None:
+    db.execute(
+        delete(models.SalProductPriceHistory).where(
+            models.SalProductPriceHistory.material_id == material_id
+        )
+    )
+
+
+def price_history_counts(db: Session, material_ids: Sequence[int]) -> dict:
+    """批量统计价格变动记录数 `{material_id: count}`。"""
+    ids = [int(i) for i in material_ids if i]
+    if not ids:
+        return {}
+    stmt = (
+        select(
+            models.SalProductPriceHistory.material_id,
+            func.count(),
+        )
+        .where(models.SalProductPriceHistory.material_id.in_(ids))
+        .group_by(models.SalProductPriceHistory.material_id)
+    )
+    return {int(material_id): int(count) for material_id, count in db.execute(stmt).all()}
+
+
+def add_price(db: Session, price: models.SalProductPrice) -> models.SalProductPrice:
+    db.add(price)
+    db.flush()
+    return price
+
+
+def list_price_history(db: Session, material_id: int) -> List[models.SalProductPriceHistory]:
+    return list(
+        db.scalars(
+            select(models.SalProductPriceHistory)
+            .where(models.SalProductPriceHistory.material_id == material_id)
+            .order_by(
+                models.SalProductPriceHistory.effective_date,
+                models.SalProductPriceHistory.id,
+            )
+        )
+    )
+
+
+def add_price_history(
+    db: Session, row: models.SalProductPriceHistory
+) -> models.SalProductPriceHistory:
+    db.add(row)
+    db.flush()
+    return row
 
 
 # ==================== 销售预测 ====================

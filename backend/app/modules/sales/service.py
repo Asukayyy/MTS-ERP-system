@@ -514,6 +514,180 @@ def list_products(db: Session, keyword: Optional[str] = None) -> List[Dict[str, 
     return get_sellable_materials(db, keyword)
 
 
+# ==================== 产品价格（仅可售物料） ====================
+
+
+def _product_price_dict(
+    material: Dict[str, Any],
+    price: Optional[models.SalProductPrice],
+    history_count: int = 0,
+) -> Dict[str, Any]:
+    return {
+        "material_id": material["id"],
+        "material_code": material.get("material_code") or "",
+        "material_name": material.get("material_name") or "",
+        "sales_category": material.get("sales_category"),
+        "unit_code": material.get("unit_code"),
+        "standard_cost": _as_decimal(material.get("standard_cost")),
+        "current_price": _as_decimal(price.price) if price else None,
+        "effective_date": price.effective_date if price else None,
+        "remark": price.remark if price else None,
+        "history_count": history_count,
+    }
+
+
+def list_product_prices(
+    db: Session,
+    page: int = 1,
+    page_size: int = 20,
+    keyword: Optional[str] = None,
+) -> Tuple[List[Dict[str, Any]], int]:
+    """分页查询产品价格：可售物料（含未定价）+ 已定价的其他仓库物料。"""
+    materials = list(get_sellable_materials(db, keyword))
+    sellable_ids = {int(item["id"]) for item in materials}
+    # 新增价格时允许从全部仓库物料中选取，这些物料也要在列表中可见
+    extra_ids = [
+        row.material_id for row in repository.list_prices(db) if row.material_id not in sellable_ids
+    ]
+    if extra_ids:
+        extra_map = get_materials(db, extra_ids)
+        needle = (keyword or "").strip().lower()
+        for material_id in extra_ids:
+            material = extra_map.get(int(material_id))
+            if not material:
+                continue
+            haystack = f"{material.get('material_code') or ''} {material.get('material_name') or ''}".lower()
+            if needle and needle not in haystack:
+                continue
+            materials.append(material)
+    materials.sort(key=lambda item: str(item.get("material_code") or ""))
+    material_ids = [int(item["id"]) for item in materials]
+    prices = repository.get_prices(db, material_ids)
+    counts = repository.price_history_counts(db, material_ids)
+    total = len(materials)
+    start = (page - 1) * page_size
+    page_materials = materials[start:start + page_size]
+    items = [
+        _product_price_dict(
+            material,
+            prices.get(int(material["id"])),
+            counts.get(int(material["id"]), 0),
+        )
+        for material in page_materials
+    ]
+    return items, total
+
+
+def get_product_price(db: Session, material_id: int) -> Dict[str, Any]:
+    """查询单个可售物料的当前价格。"""
+    material = _require_material(db, material_id)
+    price = repository.get_price(db, material_id)
+    count = len(repository.list_price_history(db, material_id))
+    return _product_price_dict(material, price, count)
+
+
+def set_product_price(
+    db: Session,
+    material_id: int,
+    *,
+    price: Decimal,
+    effective_date: Optional[date] = None,
+    remark: Optional[str] = None,
+    operator_id: Optional[int] = None,
+) -> Dict[str, Any]:
+    """调整产品价格：更新当前价并追加一条价格变动记录。
+
+    价格未变化时只更新备注 / 生效日期，不写变动记录（避免详细页被重复
+    提交的同价记录刷屏）。
+    """
+    material = _require_material(db, material_id)
+    if material.get("status") != RecordStatus.ACTIVE.value:
+        raise BusinessException(
+            CODE_PARAM_INVALID,
+            f"物料 {material.get('material_code')} 已停用，不能定价",
+        )
+    new_price = _money(price)
+    if new_price < 0:
+        raise BusinessException(CODE_PARAM_INVALID, "产品价格不能为负数")
+    effective = effective_date or date.today()
+    row = repository.get_price(db, material_id)
+    changed = row is None or _as_decimal(row.price) != new_price
+    if row is None:
+        row = models.SalProductPrice(
+            material_id=material_id,
+            price=new_price,
+            effective_date=effective,
+            remark=remark,
+            created_by=operator_id,
+            updated_by=operator_id,
+        )
+        repository.add_price(db, row)
+    else:
+        row.price = new_price
+        row.effective_date = effective
+        row.remark = remark
+        row.updated_by = operator_id
+    if changed:
+        repository.add_price_history(
+            db,
+            models.SalProductPriceHistory(
+                material_id=material_id,
+                price=new_price,
+                effective_date=effective,
+                remark=remark,
+                created_by=operator_id,
+                updated_by=operator_id,
+            ),
+        )
+        log_operation(
+            db,
+            module=MODULE,
+            action="UPDATE",
+            target_type="sal_product_price",
+            target_id=material_id,
+            operator_id=operator_id,
+            detail=f"调整产品价格 {material.get('material_code')} → {new_price}",
+        )
+    count = len(repository.list_price_history(db, material_id))
+    return _product_price_dict(material, row, count)
+
+
+def product_price_history(db: Session, material_id: int) -> List[Dict[str, Any]]:
+    """某物料的产品价格变动记录（按生效日期升序）。"""
+    _require_material(db, material_id)
+    return [
+        {
+            "id": row.id,
+            "material_id": row.material_id,
+            "price": _as_decimal(row.price),
+            "effective_date": row.effective_date,
+            "remark": row.remark,
+        }
+        for row in repository.list_price_history(db, material_id)
+    ]
+
+
+def delete_product_price(
+    db: Session, material_id: int, operator_id: Optional[int] = None
+) -> None:
+    """删除产品价格及其全部价格变动记录，物料回到「未定价」。"""
+    material = _require_material(db, material_id)
+    price = repository.get_price(db, material_id)
+    if price is None:
+        raise BusinessException(CODE_NOT_FOUND, "该物料尚未维护产品价格")
+    repository.delete_price_history(db, material_id)
+    repository.delete_price(db, price)
+    log_operation(
+        db,
+        module=MODULE,
+        action="DELETE",
+        target_type="sal_product_price",
+        target_id=material_id,
+        operator_id=operator_id,
+        detail=f"删除产品价格 {material.get('material_code')}",
+    )
+
+
 # ==================== 销售预测 ====================
 
 
@@ -754,6 +928,11 @@ def _build_order_items(
         unit_price = _as_decimal(raw.get("unit_price"))
         if unit_price < 0:
             raise BusinessException(CODE_PARAM_INVALID, "单价不能为负数")
+        if unit_price == 0:
+            # 未传单价时按产品当前价格兜底，保证下单价格与「产品价格」一致
+            price_row = repository.get_price(db, material_id)
+            if price_row is not None:
+                unit_price = _money(price_row.price)
         amount = _money(qty * unit_price)
         total += amount
         repository.add_order_item(
