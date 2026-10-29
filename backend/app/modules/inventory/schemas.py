@@ -105,6 +105,10 @@ class BalanceOut(_IdOut):
         default=True,
         description="所在仓库是否计入可用量（废品仓为 false，可用量固定 0）",
     )
+    material_total_available: Decimal = Field(
+        default=0,
+        description="该物料跨仓库可用量合计（排除废品仓），用于安全库存总量判断",
+    )
 
 
 class BalanceSummaryOut(BaseModel):
