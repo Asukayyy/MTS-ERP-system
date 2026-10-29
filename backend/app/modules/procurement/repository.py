@@ -163,6 +163,60 @@ def delete_supplier_material(db: Session, link: models.PurSupplierMaterial) -> N
     db.delete(link)
 
 
+def unset_primary_for_material(
+    db: Session, material_id: int, exclude_link_id: Optional[int] = None
+) -> None:
+    """取消某物料其他供货关系的主供应商标记（同一物料最多一个主供应商）。"""
+    stmt = select(models.PurSupplierMaterial).where(
+        models.PurSupplierMaterial.material_id == material_id,
+        models.PurSupplierMaterial.is_primary.is_(True),
+    )
+    if exclude_link_id:
+        stmt = stmt.where(models.PurSupplierMaterial.id != exclude_link_id)
+    for link in db.scalars(stmt):
+        link.is_primary = False
+
+
+def primary_supplier_ids_for_materials(
+    db: Session, material_ids: Sequence[int]
+) -> set[int]:
+    """一批物料的主供应商 ID 集合（供选择供应商时置顶参考）。"""
+    ids = [int(i) for i in material_ids if i]
+    if not ids:
+        return set()
+    rows = db.scalars(
+        select(models.PurSupplierMaterial.supplier_id).where(
+            models.PurSupplierMaterial.material_id.in_(ids),
+            models.PurSupplierMaterial.is_primary.is_(True),
+            models.PurSupplierMaterial.status == "ACTIVE",
+        )
+    )
+    return set(rows)
+
+
+def latest_evaluations_map(
+    db: Session, supplier_ids: Sequence[int]
+) -> Dict[int, models.PurSupplierEvaluation]:
+    """每个供应商最新一条评价 `{supplier_id: PurSupplierEvaluation}`（按评价日期+ID 取新）。"""
+    ids = [int(i) for i in supplier_ids if i]
+    if not ids:
+        return {}
+    rows = db.scalars(
+        select(models.PurSupplierEvaluation)
+        .where(models.PurSupplierEvaluation.supplier_id.in_(ids))
+        .order_by(
+            models.PurSupplierEvaluation.supplier_id,
+            models.PurSupplierEvaluation.evaluate_date.desc(),
+            models.PurSupplierEvaluation.id.desc(),
+        )
+    ).all()
+    latest: Dict[int, models.PurSupplierEvaluation] = {}
+    for row in rows:
+        if row.supplier_id not in latest:
+            latest[row.supplier_id] = row
+    return latest
+
+
 def supplier_material_terms(
     db: Session, supplier_id: int, material_ids: Sequence[int]
 ) -> Dict[int, models.PurSupplierMaterial]:

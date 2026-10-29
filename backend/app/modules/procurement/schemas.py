@@ -75,6 +75,24 @@ class SupplierOut(_IdOut):
     address: Optional[str] = None
     status: str
     remark: Optional[str] = None
+    # 最新一次评价得分（无评价时为 None），供选择主供应商参考
+    quality_score: Optional[Decimal] = None
+    delivery_score: Optional[Decimal] = None
+    price_score: Optional[Decimal] = None
+    total_score: Optional[Decimal] = None
+
+
+class SupplierOptionOut(BaseModel):
+    """供应商下拉选项：带最新评价得分与主供应商标记（针对指定物料）。"""
+
+    id: int
+    supplier_code: str
+    supplier_name: str
+    is_primary: bool = False
+    quality_score: Optional[Decimal] = None
+    delivery_score: Optional[Decimal] = None
+    price_score: Optional[Decimal] = None
+    total_score: Optional[Decimal] = None
 
 
 # ==================== 供应商-物料关系 ====================

@@ -619,3 +619,115 @@ def test_auto_evaluation_api(client: TestClient, db: Session) -> None:
     assert data["remark"].startswith("[自动评价]")
     assert data["on_time_rate"] is not None
     assert data["receipt_total"] == 1
+
+
+# ==================== 10. 主供应商与供应商选项 ====================
+
+
+def _is_primary(db: Session, link_id: int) -> int:
+    return int(
+        db.execute(
+            text("SELECT is_primary FROM pur_supplier_material WHERE id = :i"), {"i": link_id}
+        ).scalar()
+    )
+
+
+def test_multiple_primary_suppliers_per_material(db: Session) -> None:
+    """同一物料允许标记多个主供应商（不再互斥），所有主供在供应商选项中一并置顶。"""
+    material_id = _create_material(db)
+    supplier_a = _create_supplier(db, name=f"多主供A{_tag()}")
+    supplier_b = _create_supplier(db, name=f"多主供B{_tag()}")
+    supplier_c = _create_supplier(db, name=f"多主供C{_tag()}")
+
+    # 新增路径：A、B 先后都设为主供，互不清除
+    link_a = service.create_supplier_material(
+        db, supplier_id=supplier_a["id"], material_id=material_id, is_primary=True
+    )
+    link_b = service.create_supplier_material(
+        db, supplier_id=supplier_b["id"], material_id=material_id, is_primary=True
+    )
+    db.commit()
+    assert _is_primary(db, link_a["id"]) == 1
+    assert _is_primary(db, link_b["id"]) == 1
+
+    # 编辑路径：C 也设为主供，前两个保持不变
+    link_c = service.create_supplier_material(
+        db, supplier_id=supplier_c["id"], material_id=material_id, is_primary=False
+    )
+    db.commit()
+    service.update_supplier_material(db, link_c["id"], is_primary=True)
+    db.commit()
+    assert _is_primary(db, link_a["id"]) == 1
+    assert _is_primary(db, link_b["id"]) == 1
+    assert _is_primary(db, link_c["id"]) == 1
+
+    # 取消 C 的主供标记，不影响 A、B
+    service.update_supplier_material(db, link_c["id"], is_primary=False)
+    db.commit()
+    assert _is_primary(db, link_a["id"]) == 1
+    assert _is_primary(db, link_b["id"]) == 1
+    assert _is_primary(db, link_c["id"]) == 0
+
+
+def test_supplier_options_primary_first_with_scores(db: Session) -> None:
+    """供应商选项：指定物料的主供应商置顶（即使无评价），其余按综合分降序，得分字段带出。"""
+    marker = _tag()
+    material_id = _create_material(db)
+    sup_primary = _create_supplier(db, name=f"选项{marker}主供")  # 主供，无评价
+    sup_high = _create_supplier(db, name=f"选项{marker}高分")  # 综合 90
+    sup_low = _create_supplier(db, name=f"选项{marker}低分")  # 综合 60
+
+    service.create_supplier_material(
+        db, supplier_id=sup_primary["id"], material_id=material_id, is_primary=True
+    )
+    service.create_evaluation(
+        db, supplier_id=sup_high["id"],
+        quality_score=Decimal("90"), delivery_score=Decimal("90"), price_score=Decimal("90"),
+    )
+    service.create_evaluation(
+        db, supplier_id=sup_low["id"],
+        quality_score=Decimal("60"), delivery_score=Decimal("60"), price_score=Decimal("60"),
+    )
+    db.commit()
+
+    # 用唯一名称关键字过滤，避免共享库基线供应商干扰排序断言
+    options = service.list_supplier_options(db, keyword=marker, material_ids=[material_id])
+    assert [o["id"] for o in options] == [sup_primary["id"], sup_high["id"], sup_low["id"]]
+    assert options[0]["is_primary"] is True
+    assert options[0]["total_score"] is None  # 主供无评价仍置顶
+    assert options[1]["is_primary"] is False
+    assert options[1]["total_score"] == Decimal("90.0000")
+    assert options[1]["quality_score"] == Decimal("90.0000")
+    assert options[1]["delivery_score"] == Decimal("90.0000")
+    assert options[1]["price_score"] == Decimal("90.0000")
+    assert options[2]["total_score"] == Decimal("60.0000")
+
+    # 不传物料时退化为纯按分排序：主供标记全为 False，高分在前
+    plain = service.list_supplier_options(db, keyword=marker)
+    assert [o["id"] for o in plain] == [sup_high["id"], sup_low["id"], sup_primary["id"]]
+    assert all(o["is_primary"] is False for o in plain)
+
+
+def test_supplier_options_api(client: TestClient, db: Session) -> None:
+    """GET /suppliers/options：验证路由不被 /suppliers/{supplier_id} 吃掉，返回主供标记与得分。"""
+    marker = _tag()
+    material_id = _create_material(db)
+    supplier = _create_supplier(db, name=f"选项接口{marker}")
+    service.create_supplier_material(
+        db, supplier_id=supplier["id"], material_id=material_id, is_primary=True
+    )
+    db.commit()
+
+    resp = client.get(
+        "/api/v1/procurement/suppliers/options",
+        params={"keyword": marker, "material_ids": str(material_id)},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["code"] == 0
+    items = body["data"]
+    assert len(items) == 1
+    item = items[0]
+    assert item["id"] == supplier["id"]
+    assert item["is_primary"] is True
+    assert {"quality_score", "delivery_score", "price_score", "total_score"} <= set(item)

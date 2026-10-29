@@ -7,12 +7,13 @@ import {
   deleteSupplierMaterial,
   listPurchaseMaterials,
   listSupplierMaterials,
-  listSuppliers,
+  listSupplierOptions,
   updateSupplierMaterial,
 } from '@/api/procurement'
 import RemoteSelect from '@/components/common/RemoteSelect.vue'
 import StatusTag from '@/components/common/StatusTag.vue'
 import { usePagedTable, toNumber } from '@/composables/usePagedTable'
+import { supplierOptionLabel } from '@/utils/format'
 import type { RemoteOption, SupplierMaterial } from '@/types/erp'
 
 /** 供应商-物料供货关系：维护供货价、最小起订量，供采购计划取价 */
@@ -22,9 +23,16 @@ const { loading, rows, total, page, pageSize, query, load, search, reset, change
     { supplier_id: undefined, material_id: undefined },
   )
 
+/** 筛选区供应商下拉：带最新评价得分 */
 async function loadSupplierOptions(keyword: string): Promise<RemoteOption[]> {
-  const data = await listSuppliers({ keyword, status: 'ACTIVE', page: 1, page_size: 50 })
-  return data.items.map((item) => ({ id: item.id, label: `${item.supplier_code} ${item.supplier_name}` }))
+  const data = await listSupplierOptions(keyword)
+  return data.map((item) => ({ id: item.id, label: supplierOptionLabel(item) }))
+}
+
+/** 对话框供应商下拉：已选物料时该物料主供应商置顶，作为设置主供应商的参考 */
+async function loadFormSupplierOptions(keyword: string): Promise<RemoteOption[]> {
+  const data = await listSupplierOptions(keyword, form.material_id ? [form.material_id] : [])
+  return data.map((item) => ({ id: item.id, label: supplierOptionLabel(item) }))
 }
 
 async function loadMaterialOptions(keyword: string): Promise<RemoteOption[]> {
@@ -202,8 +210,8 @@ onMounted(load)
         <el-form-item label="供应商" required>
           <RemoteSelect
             v-model="form.supplier_id"
-            :loader="loadSupplierOptions"
-            placeholder="请选择供应商"
+            :loader="loadFormSupplierOptions"
+            placeholder="请选择供应商（带最新评价得分）"
             :disabled="editingId !== null"
             style="width: 100%"
           />
@@ -219,6 +227,7 @@ onMounted(load)
         </el-form-item>
         <el-form-item label="主供应商">
           <el-switch v-model="form.is_primary" />
+          <span class="form-tip" style="margin-left: 8px">主供应商针对该物料生效，同一物料可设置多个主供应商，选择采购时主供优先置顶</span>
         </el-form-item>
         <el-form-item label="供货单价">
           <el-input-number v-model="form.supply_price" :min="0" :precision="2" :controls="false" style="width: 100%" />

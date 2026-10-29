@@ -14,6 +14,7 @@ import type {
   SupplierEvaluation,
   SupplierEvaluationSummary,
   SupplierMaterial,
+  SupplierOption,
 } from '@/types/erp'
 
 /**
@@ -30,6 +31,17 @@ export function getProcurementStats(): Promise<ProcurementStats> {
 
 export function listSuppliers(params: Record<string, unknown> = {}): Promise<PageData<Supplier>> {
   return get<PageData<Supplier>>('/procurement/suppliers', params)
+}
+
+/** 供应商下拉选项：带最新评价得分；传 materialIds 时其主供应商置顶 */
+export function listSupplierOptions(
+  keyword = '',
+  materialIds: number[] = [],
+): Promise<SupplierOption[]> {
+  return get<SupplierOption[]>('/procurement/suppliers/options', {
+    keyword: keyword || undefined,
+    material_ids: materialIds.length ? materialIds.join(',') : undefined,
+  })
 }
 
 export function createSupplier(payload: Record<string, unknown>): Promise<Supplier> {

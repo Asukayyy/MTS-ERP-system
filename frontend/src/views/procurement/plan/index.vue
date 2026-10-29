@@ -8,7 +8,7 @@ import {
   createPurchasePlan,
   getPurchasePlan,
   listPurchasePlans,
-  listSuppliers,
+  listSupplierOptions,
   setPurchasePlanStatus,
   updatePurchasePlan,
 } from '@/api/procurement'
@@ -16,6 +16,7 @@ import { listMaterials } from '@/api/system'
 import RemoteSelect from '@/components/common/RemoteSelect.vue'
 import StatusTag from '@/components/common/StatusTag.vue'
 import { usePagedTable } from '@/composables/usePagedTable'
+import { supplierOptionLabel } from '@/utils/format'
 import type { PurchasePlan, RemoteOption } from '@/types/erp'
 
 const SOURCE_LABELS: Record<string, string> = {
@@ -32,9 +33,10 @@ async function loadMaterialOptions(keyword: string): Promise<RemoteOption[]> {
   return data.items.map((item) => ({ id: item.id, label: `${item.material_code} ${item.material_name}` }))
 }
 
-async function loadSupplierOptions(keyword: string): Promise<RemoteOption[]> {
-  const data = await listSuppliers({ keyword, status: 'ACTIVE', page: 1, page_size: 50 })
-  return data.items.map((item) => ({ id: item.id, label: `${item.supplier_code} ${item.supplier_name}` }))
+/** 供应商下拉：带最新评价得分；传入物料时其主供应商置顶 */
+async function loadSupplierOptions(keyword: string, materialIds: number[] = []): Promise<RemoteOption[]> {
+  const data = await listSupplierOptions(keyword, materialIds)
+  return data.map((item) => ({ id: item.id, label: supplierOptionLabel(item) }))
 }
 
 interface PlanLineForm {
@@ -185,6 +187,8 @@ async function changeStatus(row: PurchasePlan, status: string): Promise<void> {
 const orderVisible = ref(false)
 const orderSubmitting = ref(false)
 const orderPlan = ref<PurchasePlan | null>(null)
+/** 当前待下单计划的物料集合（用于置顶其主供应商） */
+const orderPlanMaterialIds = ref<number[]>([])
 const orderForm = reactive<{
   supplier_id: number | undefined
   order_date: string
@@ -192,10 +196,23 @@ const orderForm = reactive<{
   remark: string
 }>({ supplier_id: undefined, order_date: '', expected_date: '', remark: '' })
 
-function openOrder(row: PurchasePlan): void {
+/** 生成订单对话框的供应商下拉：计划物料的主供应商置顶，带评价得分 */
+async function loadOrderSupplierOptions(keyword: string): Promise<RemoteOption[]> {
+  return loadSupplierOptions(keyword, orderPlanMaterialIds.value)
+}
+
+async function openOrder(row: PurchasePlan): Promise<void> {
   orderPlan.value = row
+  orderPlanMaterialIds.value = []
   Object.assign(orderForm, { supplier_id: undefined, order_date: '', expected_date: '', remark: '' })
   orderVisible.value = true
+  try {
+    const detail = await getPurchasePlan(row.id)
+    orderPlanMaterialIds.value = (detail.items || []).map((item) => item.material_id)
+  } catch {
+    // 明细拉取失败时退化为不带主供置顶的供应商列表
+    orderPlanMaterialIds.value = []
+  }
 }
 
 async function submitOrder(): Promise<void> {
@@ -362,7 +379,12 @@ onMounted(load)
           </el-table-column>
           <el-table-column label="建议供应商" min-width="180">
             <template #default="{ row }">
-              <RemoteSelect v-model="row.supplier_id" :loader="loadSupplierOptions" placeholder="可选" style="width: 100%" />
+              <RemoteSelect
+                v-model="row.supplier_id"
+                :loader="(kw: string) => loadSupplierOptions(kw, row.material_id ? [row.material_id] : [])"
+                placeholder="可选（主供置顶）"
+                style="width: 100%"
+              />
             </template>
           </el-table-column>
           <el-table-column label="操作" width="80" align="center">
@@ -419,8 +441,8 @@ onMounted(load)
         <el-form-item label="供应商" required>
           <RemoteSelect
             v-model="orderForm.supplier_id"
-            :loader="loadSupplierOptions"
-            placeholder="请选择供应商（决定供货价）"
+            :loader="loadOrderSupplierOptions"
+            placeholder="请选择供应商（主供置顶，带评价得分）"
             style="width: 100%"
           />
         </el-form-item>

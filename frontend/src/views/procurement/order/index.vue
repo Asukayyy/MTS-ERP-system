@@ -9,9 +9,10 @@ import {
   createPurchaseOrder,
   createReceipt,
   getPurchaseOrder,
+  getPurchasePlan,
   listPurchaseOrders,
   listPurchasePlans,
-  listSuppliers,
+  listSupplierOptions,
   setPurchaseOrderStatus,
   updatePurchaseOrder,
 } from '@/api/procurement'
@@ -20,6 +21,7 @@ import { listMaterials, listPersonnel } from '@/api/system'
 import RemoteSelect from '@/components/common/RemoteSelect.vue'
 import StatusTag from '@/components/common/StatusTag.vue'
 import { usePagedTable, toNumber } from '@/composables/usePagedTable'
+import { supplierOptionLabel } from '@/utils/format'
 import type { PurchaseOrder, RemoteOption } from '@/types/erp'
 
 const { loading, rows, total, page, pageSize, query, load, search, reset, changePage, changeSize } =
@@ -33,9 +35,16 @@ async function loadMaterialOptions(keyword: string): Promise<RemoteOption[]> {
   return data.items.map((item) => ({ id: item.id, label: `${item.material_code} ${item.material_name}` }))
 }
 
-async function loadSupplierOptions(keyword: string): Promise<RemoteOption[]> {
-  const data = await listSuppliers({ keyword, status: 'ACTIVE', page: 1, page_size: 50 })
-  return data.items.map((item) => ({ id: item.id, label: `${item.supplier_code} ${item.supplier_name}` }))
+/** 供应商下拉：带最新评价得分；传入物料时其主供应商置顶 */
+async function loadSupplierOptions(keyword: string, materialIds: number[] = []): Promise<RemoteOption[]> {
+  const data = await listSupplierOptions(keyword, materialIds)
+  return data.map((item) => ({ id: item.id, label: supplierOptionLabel(item) }))
+}
+
+/** 新增/编辑订单对话框的供应商下拉：按已选物料的主供应商置顶 */
+async function loadFormSupplierOptions(keyword: string): Promise<RemoteOption[]> {
+  const ids = form.items.map((item) => item.material_id).filter((id): id is number => !!id)
+  return loadSupplierOptions(keyword, ids)
 }
 
 async function loadBuyerOptions(keyword: string): Promise<RemoteOption[]> {
@@ -297,6 +306,8 @@ const fromPlanForm = reactive<{
   remark: '',
 })
 
+const fromPlanMaterialIds = ref<number[]>([])
+
 function openFromPlan(): void {
   Object.assign(fromPlanForm, {
     plan_id: undefined,
@@ -306,7 +317,25 @@ function openFromPlan(): void {
     buyer_id: undefined,
     remark: '',
   })
+  fromPlanMaterialIds.value = []
   fromPlanVisible.value = true
+}
+
+/** 从计划生成订单：选中计划后拉取其物料集合，用于置顶主供应商 */
+async function onFromPlanChange(planId: number | undefined): Promise<void> {
+  fromPlanMaterialIds.value = []
+  if (!planId) return
+  try {
+    const detail = await getPurchasePlan(planId)
+    fromPlanMaterialIds.value = (detail.items || []).map((item) => item.material_id)
+  } catch {
+    fromPlanMaterialIds.value = []
+  }
+}
+
+/** 从计划生成订单对话框的供应商下拉：计划物料的主供应商置顶 */
+async function loadFromPlanSupplierOptions(keyword: string): Promise<RemoteOption[]> {
+  return loadSupplierOptions(keyword, fromPlanMaterialIds.value)
 }
 
 async function submitFromPlan(): Promise<void> {
@@ -467,7 +496,7 @@ onMounted(load)
           </el-col>
           <el-col :span="12">
             <el-form-item label="供应商" prop="supplier_id">
-              <RemoteSelect v-model="form.supplier_id" :loader="loadSupplierOptions" placeholder="请选择供应商" style="width: 100%" />
+              <RemoteSelect v-model="form.supplier_id" :loader="loadFormSupplierOptions" placeholder="请选择供应商（主供置顶，带评价得分）" style="width: 100%" />
             </el-form-item>
           </el-col>
           <el-col :span="8">
@@ -593,13 +622,14 @@ onMounted(load)
             :loader="loadPlanOptions"
             placeholder="请选择待下单的采购计划"
             style="width: 100%"
+            @change="onFromPlanChange"
           />
         </el-form-item>
         <el-form-item label="供应商" required>
           <RemoteSelect
             v-model="fromPlanForm.supplier_id"
-            :loader="loadSupplierOptions"
-            placeholder="请选择供应商（决定供货价）"
+            :loader="loadFromPlanSupplierOptions"
+            placeholder="请选择供应商（主供置顶，带评价得分）"
             style="width: 100%"
           />
         </el-form-item>

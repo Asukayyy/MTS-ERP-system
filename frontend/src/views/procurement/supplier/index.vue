@@ -147,6 +147,30 @@ onMounted(load)
         <el-table-column label="联系电话" prop="phone" min-width="130" />
         <el-table-column label="邮箱" prop="email" min-width="160" />
         <el-table-column label="地址" prop="address" min-width="180" />
+        <el-table-column label="综合分" width="90" align="right">
+          <template #default="{ row }">
+            <span v-if="row.total_score !== null && row.total_score !== undefined">{{ Number(row.total_score).toFixed(0) }}</span>
+            <span v-else>-</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="交期" width="80" align="right">
+          <template #default="{ row }">
+            <span v-if="row.delivery_score !== null && row.delivery_score !== undefined">{{ Number(row.delivery_score).toFixed(0) }}</span>
+            <span v-else>-</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="质量" width="80" align="right">
+          <template #default="{ row }">
+            <span v-if="row.quality_score !== null && row.quality_score !== undefined">{{ Number(row.quality_score).toFixed(0) }}</span>
+            <span v-else>-</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="价格" width="80" align="right">
+          <template #default="{ row }">
+            <span v-if="row.price_score !== null && row.price_score !== undefined">{{ Number(row.price_score).toFixed(0) }}</span>
+            <span v-else>-</span>
+          </template>
+        </el-table-column>
         <el-table-column label="状态" width="90">
           <template #default="{ row }"><StatusTag :status="row.status" /></template>
         </el-table-column>

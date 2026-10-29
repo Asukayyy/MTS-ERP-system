@@ -382,7 +382,56 @@ def list_suppliers(
     status: Optional[str] = None,
 ) -> Tuple[List[Dict[str, Any]], int]:
     rows, total = repository.list_suppliers(db, page, page_size, keyword, status)
-    return [_supplier_dict(row) for row in rows], total
+    evals = repository.latest_evaluations_map(db, [r.id for r in rows])
+    items = []
+    for row in rows:
+        data = _supplier_dict(row)
+        ev = evals.get(row.id)
+        # 最新一次评价得分，供列表页作为选择主供应商的参考
+        data["quality_score"] = _as_decimal(ev.quality_score) if ev else None
+        data["delivery_score"] = _as_decimal(ev.delivery_score) if ev else None
+        data["price_score"] = _as_decimal(ev.price_score) if ev else None
+        data["total_score"] = _as_decimal(ev.total_score) if ev else None
+        items.append(data)
+    return items, total
+
+
+def list_supplier_options(
+    db: Session,
+    keyword: Optional[str] = None,
+    material_ids: Optional[Sequence[int]] = None,
+    limit: int = 50,
+) -> List[Dict[str, Any]]:
+    """供应商选择下拉：带最新评价得分；指定物料的主供应商置顶，其余按综合分降序。"""
+    rows, _ = repository.list_suppliers(db, 1, limit, keyword, RecordStatus.ACTIVE.value)
+    if not rows:
+        return []
+    evals = repository.latest_evaluations_map(db, [r.id for r in rows])
+    primary_ids = repository.primary_supplier_ids_for_materials(db, material_ids or [])
+    options = []
+    for row in rows:
+        ev = evals.get(row.id)
+        options.append(
+            {
+                "id": row.id,
+                "supplier_code": row.supplier_code,
+                "supplier_name": row.supplier_name,
+                "is_primary": row.id in primary_ids,
+                "quality_score": _as_decimal(ev.quality_score) if ev else None,
+                "delivery_score": _as_decimal(ev.delivery_score) if ev else None,
+                "price_score": _as_decimal(ev.price_score) if ev else None,
+                "total_score": _as_decimal(ev.total_score) if ev else None,
+            }
+        )
+    # 主供应商优先 → 有综合分的按降序 → 无评价的排最后
+    options.sort(
+        key=lambda o: (
+            not o["is_primary"],
+            o["total_score"] is None,
+            -(float(o["total_score"]) if o["total_score"] is not None else 0.0),
+        )
+    )
+    return options
 
 
 def get_supplier(db: Session, supplier_id: int) -> Dict[str, Any]:
@@ -539,6 +588,7 @@ def create_supplier_material(
         created_by=operator_id,
     )
     repository.add_supplier_material(db, link)
+    # 主供应商标记针对特定物料，同一物料可标记多个主供应商，作为采购选择时的优先参考。
     log_operation(
         db,
         module=MODULE,
@@ -566,6 +616,7 @@ def update_supplier_material(
         raise BusinessException(CODE_NOT_FOUND, f"供应商-物料关系不存在：{link_id}")
     if is_primary is not None:
         link.is_primary = is_primary
+        # 同一物料可标记多个主供应商，不再互斥清除。
     if supply_price is not None:
         link.supply_price = _as_decimal(supply_price)
     if min_order_qty is not None:

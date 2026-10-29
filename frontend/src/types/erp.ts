@@ -864,6 +864,23 @@ export interface Supplier {
   address?: string | null
   status: string
   remark?: string | null
+  /** 最新一次评价得分（无评价时为 null），供选择主供应商参考 */
+  quality_score?: Num | null
+  delivery_score?: Num | null
+  price_score?: Num | null
+  total_score?: Num | null
+}
+
+/** 供应商下拉选项：带最新评价得分；is_primary 表示是指定物料的主供应商 */
+export interface SupplierOption {
+  id: number
+  supplier_code: string
+  supplier_name: string
+  is_primary: boolean
+  quality_score?: Num | null
+  delivery_score?: Num | null
+  price_score?: Num | null
+  total_score?: Num | null
 }
 
 /** 供应商-物料供货关系（含供货价与提前期） */

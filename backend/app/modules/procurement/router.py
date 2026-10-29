@@ -80,6 +80,23 @@ def create_supplier(
 
 
 @router.get(
+    "/suppliers/options",
+    response_model=ApiResponse[List[schemas.SupplierOptionOut]],
+    summary="供应商下拉选项（带评价得分，主供应商置顶）",
+)
+def list_supplier_options(
+    keyword: Optional[str] = Query(default=None),
+    material_ids: Optional[str] = Query(
+        default=None, description="逗号分隔的物料ID，其主供应商将置顶"
+    ),
+    db: Session = Depends(get_db),
+) -> ApiResponse[List[schemas.SupplierOptionOut]]:
+    """供应商下拉选项：返回启用供应商及最新评价得分；传入物料时其主供应商置顶。"""
+    ids = [int(x) for x in (material_ids or "").split(",") if x.strip().isdigit()]
+    return success(service.list_supplier_options(db, keyword, ids))
+
+
+@router.get(
     "/suppliers/{supplier_id}",
     response_model=ApiResponse[schemas.SupplierOut],
     summary="供应商详情",
