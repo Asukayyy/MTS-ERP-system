@@ -441,6 +441,7 @@
 | `POST /api/v1/planning/completion-reports/{report_id}/confirm` | `push_inbound_order`（`source_type=PRODUCTION_COMPLETION`，按合格数量） |
 | `POST /api/v1/sales/shipments/{shipment_id}/confirm` | `push_outbound_order`（`source_type=SALES_SHIPMENT`） |
 | `POST /api/v1/sales/returns/{return_id}/confirm` | `push_inbound_order`（`source_type=SALES_RETURN`） |
+| `POST /api/v1/inventory/stock-operations` | 新建入库单 / 出库单（库存自建）：`INBOUND` 来源限 `SALES_RETURN` / `PURCHASE_RECEIPT` / `PRODUCTION_COMPLETION` / `MANUAL`，`OUTBOUND` 来源限 `SALES_SHIPMENT` / `MATERIAL_REQUISITION` / `MANUAL`，交叉来源报 5000；建单为 `DRAFT`，不改结存 |
 | `POST /api/v1/inventory/stock-operations/{operation_id}/confirm` | `INBOUND` / `OUTBOUND` 在此指定 `warehouse_id` 后增减结存；`TRANSFER` 双仓结存变动；`STOCKTAKE` 差异调整 |
 | `PATCH /api/v1/sales/orders/{order_id}/status`（`CONFIRMED`） | `get_available_by_warehouse` 查可用量 → 库存够的自动建 `DRAFT` 发货单；存在缺口时经 `planning.contract.create_sales_demand_from_order` 登记 `SALES` 需求（数量为订单未交付总量） |
 | `POST /api/v1/inventory/replenishment-requests/{request_id}/confirm` | `REORDER` → `procurement.contract`；`PRODUCTION` → `planning.contract` |

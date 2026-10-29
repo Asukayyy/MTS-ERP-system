@@ -113,6 +113,9 @@ async function doCancel(row: StockOperation): Promise<void> {
 }
 
 onMounted(load)
+
+/** 供页面在「新建单据成功」后刷新列表 */
+defineExpose({ reload: load })
 </script>
 
 <template>

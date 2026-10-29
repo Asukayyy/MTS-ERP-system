@@ -754,6 +754,14 @@ _OP_TYPE_NAMES = {
     "OUTBOUND": "出库单",
 }
 
+#: 每种单据允许的来源类型（UI 下拉同口径）：
+#: 入库只有销售退货 / 采购到货 / 生产完工；出库只有销售发货 / 生产领料；
+#: 另外保留 INBOUND / OUTBOUND / MANUAL 给库存自己发起的单据。
+_SOURCE_TYPES_BY_OP: Dict[str, set] = {
+    "INBOUND": {"SALES_RETURN", "PURCHASE_RECEIPT", "PRODUCTION_COMPLETION", "INBOUND", "MANUAL"},
+    "OUTBOUND": {"SALES_SHIPMENT", "MATERIAL_REQUISITION", "OUTBOUND", "MANUAL"},
+}
+
 
 def list_stock_operations(
     db: Session,
@@ -959,6 +967,14 @@ def create_stock_operation(
         raise BusinessException(CODE_PARAM_INVALID, "单据至少需要一条明细")
     if operation_no and repository.get_operation_by_no(db, operation_no):
         raise BusinessException(CODE_DUPLICATE, f"单据号已存在：{operation_no}")
+    if source_type:
+        _validate_source_type(source_type)
+        allowed = _SOURCE_TYPES_BY_OP.get(op_type)
+        if allowed is not None and source_type not in allowed:
+            raise BusinessException(
+                CODE_PARAM_INVALID,
+                f"{_OP_TYPE_NAMES[op_type]}不允许的来源类型：{source_type}",
+            )
 
     if op_type == "TRANSFER":
         if not from_warehouse_id or not to_warehouse_id:

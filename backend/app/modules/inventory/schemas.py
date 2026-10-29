@@ -203,6 +203,17 @@ class StockOperationCreate(BaseModel):
     op_date: date = Field(description="业务日期（移库/盘点/出入库日期）")
     remark: Optional[str] = None
     operator_id: Optional[int] = None
+    source_module: Optional[str] = Field(
+        default=None, description="来源模块（库存自建单填 inventory）"
+    )
+    source_type: Optional[str] = Field(
+        default=None,
+        description=(
+            "来源业务类型：入库限 SALES_RETURN/PURCHASE_RECEIPT/PRODUCTION_COMPLETION/MANUAL，"
+            "出库限 SALES_SHIPMENT/MATERIAL_REQUISITION/MANUAL"
+        ),
+    )
+    source_no: Optional[str] = Field(default=None, description="来源单号（可手工填业务单据号）")
     items: List[StockOperationItemCreate] = Field(default_factory=list, description="明细")
 
 

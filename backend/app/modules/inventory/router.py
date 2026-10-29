@@ -353,6 +353,8 @@ def create_stock_operation(
     """新增库存操作单：op_type=TRANSFER 需源/目标仓库；STOCKTAKE 需仓库。
 
     盘点明细的 book_qty 留空时按当前结存自动带出。
+    INBOUND / OUTBOUND 可带 `source_type`（入库限销售退货 / 采购到货 / 生产完工，
+    出库限销售发货 / 生产领料），库存自建单默认 `MANUAL`。
     """
     operation = service.create_stock_operation(
         db,
@@ -363,6 +365,9 @@ def create_stock_operation(
         from_warehouse_id=payload.from_warehouse_id,
         to_warehouse_id=payload.to_warehouse_id,
         warehouse_id=payload.warehouse_id,
+        source_module=payload.source_module,
+        source_type=payload.source_type,
+        source_no=payload.source_no,
         remark=payload.remark,
         operator_id=payload.operator_id,
     )

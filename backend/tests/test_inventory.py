@@ -446,6 +446,126 @@ def test_stock_journal_api_lists_changes_newest_first(
     assert newest["warehouse_id"] == warehouse_id
 
 
+# ==================== 库存自建入库单 / 出库单（新建按钮） ====================
+
+OPS_API = "/api/v1/inventory/stock-operations"
+
+
+def test_manual_inbound_order_draft_then_confirm_increases_stock(
+    client: TestClient, db: Session
+) -> None:
+    """新建入库单：建单为 DRAFT 不动结存，确认后才加库存并写来源流水。"""
+    material_id, material_code = _create_material_with_code(db)
+    warehouse_id = _create_warehouse(db)
+
+    created = client.post(
+        OPS_API,
+        json={
+            "op_type": "INBOUND",
+            "op_date": "2026-10-29",
+            "warehouse_id": warehouse_id,
+            "source_module": "inventory",
+            "source_type": "SALES_RETURN",
+            "source_no": "RT-MANUAL-0001",
+            "remark": "手工补录退货入库",
+            "items": [{"material_id": material_id, "quantity": 7, "remark": "退货补录"}],
+        },
+    )
+    assert created.status_code == 200
+    created_body = created.json()
+    assert created_body["code"] == 0
+    operation = created_body["data"]
+    assert operation["status"] == "DRAFT"
+    assert operation["op_type"] == "INBOUND"
+    assert operation["source_type"] == "SALES_RETURN"
+    assert operation["warehouse_id"] == warehouse_id
+    # 建单不改结存
+    assert service.get_on_hand_qty(db, material_id, warehouse_id) == Decimal("0")
+
+    confirmed = client.post(
+        f"{OPS_API}/{operation['id']}/confirm", json={"warehouse_id": warehouse_id}
+    )
+    assert confirmed.status_code == 200
+    confirmed_body = confirmed.json()
+    assert confirmed_body["code"] == 0
+    assert confirmed_body["data"]["status"] == "COMPLETED"
+    assert service.get_on_hand_qty(db, material_id, warehouse_id) == Decimal("7.0000")
+
+    journal = client.get(
+        "/api/v1/inventory/stock-journal",
+        params={"material_id": material_id, "page": 1, "page_size": 10},
+    ).json()["data"]
+    assert journal["total"] == 1
+    row = journal["items"][0]
+    assert row["direction"] == "IN"
+    assert row["source_type"] == "SALES_RETURN"
+    assert row["source_no"] == "RT-MANUAL-0001"
+    assert row["material_code"] == material_code
+
+
+@pytest.mark.parametrize(
+    ("op_type", "source_type"),
+    [
+        ("INBOUND", "SALES_SHIPMENT"),
+        ("INBOUND", "MATERIAL_REQUISITION"),
+        ("OUTBOUND", "SALES_RETURN"),
+        ("OUTBOUND", "PURCHASE_RECEIPT"),
+        ("OUTBOUND", "PRODUCTION_COMPLETION"),
+    ],
+)
+def test_manual_inout_rejects_cross_direction_source_type(
+    client: TestClient, db: Session, op_type: str, source_type: str
+) -> None:
+    """来源类型按方向收敛：入库不接受发货/领料，出库不接受退货/到货/完工。"""
+    material_id = _create_material(db)
+    warehouse_id = _create_warehouse(db)
+    response = client.post(
+        OPS_API,
+        json={
+            "op_type": op_type,
+            "op_date": "2026-10-29",
+            "warehouse_id": warehouse_id,
+            "source_module": "inventory",
+            "source_type": source_type,
+            "items": [{"material_id": material_id, "quantity": 1}],
+        },
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["code"] == 5000
+    assert "来源类型" in body["message"]
+
+
+def test_manual_outbound_order_insufficient_stock_rejected(client: TestClient, db: Session) -> None:
+    """新建出库单确认时可用量不足：返回 5001，单据保持 DRAFT，结存不变。"""
+    material_id = _create_material(db)
+    warehouse_id = _create_warehouse(db)
+
+    created = client.post(
+        OPS_API,
+        json={
+            "op_type": "OUTBOUND",
+            "op_date": "2026-10-29",
+            "warehouse_id": warehouse_id,
+            "source_module": "inventory",
+            "source_type": "MATERIAL_REQUISITION",
+            "items": [{"material_id": material_id, "quantity": 3}],
+        },
+    ).json()["data"]
+
+    confirmed = client.post(
+        f"{OPS_API}/{created['id']}/confirm", json={"warehouse_id": warehouse_id}
+    )
+    assert confirmed.status_code == 200
+    assert confirmed.json()["code"] == 5001
+    assert service.get_on_hand_qty(db, material_id, warehouse_id) == Decimal("0")
+
+    listed = client.get(
+        OPS_API,
+        params={"op_type": "OUTBOUND", "status": "DRAFT", "page": 1, "page_size": 50},
+    ).json()["data"]
+    assert created["id"] in [item["id"] for item in listed["items"]]
+
 
 # ==================== 契约：补库需求只读读取 ====================
 
