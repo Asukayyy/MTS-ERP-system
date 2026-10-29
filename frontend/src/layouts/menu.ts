@@ -77,8 +77,6 @@ export const menuItems: MenuItem[] = [
       { path: '/inventory/outbound', title: '出库' },
       { path: '/inventory/transfer', title: '移库' },
       { path: '/inventory/stocktake', title: '盘点' },
-      { path: '/inventory/transaction', title: '库存流水' },
-      { path: '/inventory/reorder', title: '订货点' },
       { path: '/inventory/replenishment', title: '补库需求' },
     ],
   },

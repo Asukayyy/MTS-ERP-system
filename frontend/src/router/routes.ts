@@ -210,18 +210,6 @@ export const constantRoutes: RouteRecordRaw[] = [
         meta: { title: '盘点', perm: 'inventory:stocktake' },
       },
       {
-        path: 'inventory/transaction',
-        name: 'InventoryTransaction',
-        component: () => import('@/views/inventory/transaction/index.vue'),
-        meta: { title: '库存流水', perm: 'inventory:ledger' },
-      },
-      {
-        path: 'inventory/reorder',
-        name: 'InventoryReorder',
-        component: () => import('@/views/inventory/reorder/index.vue'),
-        meta: { title: '订货点', perm: 'inventory:reorder' },
-      },
-      {
         path: 'inventory/replenishment',
         name: 'InventoryReplenishment',
         component: () => import('@/views/inventory/replenishment/index.vue'),

@@ -1069,7 +1069,7 @@ def _accumulate(
 def _ceil_units(value: Decimal) -> Decimal:
     """把生产数量向上取整为整数件（离散制造不生产 0.02 件）。
 
-    损耗率与安全库存会带来小数，向下取整会缺料，因此一律向上取整。
+    安全库存会带来小数，向下取整会缺料，因此一律向上取整。
     """
     return Decimal(value).to_integral_value(rounding=ROUND_CEILING)
 
@@ -1080,7 +1080,7 @@ def _explode_level(
 ) -> Dict[int, Dict[str, Any]]:
     """用**父件的净需求（建议下达量）**展开下一层直接子件。
 
-    子件毛需求 = 父件净需求 × 单位用量 × (1 + 损耗率)；
+    子件毛需求 = 父件净需求 × 单位用量；
     子件需求日期 = 父件需求日期 − 提前期偏置（`lead_time_offset`）。
     """
     next_map: Dict[int, Dict[str, Any]] = {}
@@ -1142,7 +1142,7 @@ def run_mrp(
     1. **第 0 层毛需求**只来自指定 MPS 的行（`planned_qty` / `end_date`）。
        需求必须先汇总为 MPS，MRP 不接受需求 ID 或销售订单直算。
     2. **逐层展开（广度优先）**：对每层物料先做净算，再用**父件的净需求**
-       （而非毛需求）展开下一层：`子件毛需求 = 父件净需求 × 用量 × (1 + 损耗率)`，
+       （而非毛需求）展开下一层：`子件毛需求 = 父件净需求 × 用量`，
        `子件需求日期 = 父件需求日期 − lead_time_offset`。无生效 BOM 的物料为叶子，停止展开。
        同一层内若某物料有多个父件，则**毛需求求和、需求日期取最早、父件取首次出现者**。
        分支祖先路径上重现物料即判定 **BOM 循环**，抛 3001。
@@ -1193,7 +1193,7 @@ def run_mrp(
             if net < 0:
                 net = Decimal("0")
             supply_type = material.get("supply_type") or "BUY"
-            # 自制件要下达生产作业计划，数量必须是整数件（损耗率 / 安全库存会带小数）
+            # 自制件要下达生产作业计划，数量必须是整数件（安全库存净算会带小数）
             order_qty = _ceil_units(net) if supply_type == "MAKE" else net
             # 本行消耗的可用库存；剩余额度保留给本批次后续出现的同一物料
             consumed = usable if usable < gross + safety else gross + safety
@@ -2092,8 +2092,8 @@ def create_requisitions_from_plans(
 ) -> Dict[str, Any]:
     """按选定的生产作业计划，取物料生效 BOM 直接子件生成 DRAFT 领料单。
 
-    数量口径：`需求量 = Σ(子件单位用量 × 计划量 × (1 + 损耗率))`，按物料聚合后
-    4 位小数 HALF_UP 舍入。**领料日期留空**（由人工指定）、仓库取调用方传入值（可空），
+    数量口径：`需求量 = Σ(子件单位用量 × 计划量)`，按物料聚合后
+    4 位小数 HALF_UP 舍入（**不乘损耗率**）。**领料日期留空**（由人工指定）、仓库取调用方传入值（可空），
     明细按 BOM 预填，均可再修改。
     幂等口径：一张计划只生成一张领料单（按 `(source_type='PLAN', source_reference_id)`
     判重）；无生效 BOM / 终态计划 / 计划缺失计入 `errors`，不中断批量。

@@ -436,6 +436,21 @@ def generate_from_reorder_rules(
 
 
 @router.post(
+    "/replenishment-requests/generate-from-safety-stock",
+    response_model=ApiResponse[schemas.GenerateFromRulesOut],
+    summary="按安全库存批量生成补库需求",
+)
+def generate_from_safety_stock(
+    operator_id: Optional[int] = Query(default=None, description="操作人ID"),
+    db: Session = Depends(get_db),
+) -> ApiResponse[schemas.GenerateFromRulesOut]:
+    """按安全库存建议批量创建 DRAFT 补库需求（采购 / 生产按 supply_type 分流）。"""
+    result = service.generate_from_safety_stock(db, operator_id)
+    db.commit()
+    return success(result)
+
+
+@router.post(
     "/replenishment-requests",
     response_model=ApiResponse[schemas.ReplenishmentRequestOut],
     summary="新增补库需求",
@@ -528,6 +543,33 @@ def stock_summary_report(
 def low_stock_report(db: Session = Depends(get_db)) -> ApiResponse[List[schemas.LowStockOut]]:
     """可用量低于安全库存的物料（缺料预警）。"""
     return success(service.low_stock_report(db))
+
+
+@router.get(
+    "/reports/safety-stock-suggestions",
+    response_model=ApiResponse[List[schemas.SafetyStockSuggestionOut]],
+    summary="安全库存补库建议",
+)
+def safety_stock_suggestions(
+    db: Session = Depends(get_db),
+) -> ApiResponse[List[schemas.SafetyStockSuggestionOut]]:
+    """按物料安全库存生成补库建议（BUY→采购补库，MAKE→生产补库）。"""
+    return success(service.safety_stock_suggestions(db))
+
+
+@router.get(
+    "/reports/stocktake-summary",
+    response_model=ApiResponse[schemas.StocktakeSummaryOut],
+    summary="盘点汇总（盘盈盘亏）",
+)
+def stocktake_summary(
+    date_from: Optional[date] = Query(default=None, description="盘点日期起（含）"),
+    date_to: Optional[date] = Query(default=None, description="盘点日期止（含）"),
+    warehouse_id: Optional[int] = Query(default=None, description="仓库ID"),
+    db: Session = Depends(get_db),
+) -> ApiResponse[schemas.StocktakeSummaryOut]:
+    """已确认盘点单的盘盈盘亏汇总（差异 = 实盘 − 账面）。"""
+    return success(service.stocktake_summary(db, date_from, date_to, warehouse_id))
 
 
 @router.get(
