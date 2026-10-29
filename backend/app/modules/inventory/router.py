@@ -295,24 +295,38 @@ def stock_decrease(
     return success(result)
 
 
-# ==================== 库存操作单（移库 / 盘点） ====================
+# ==================== 库存操作单（移库 / 盘点 / 入库 / 出库） ====================
 
 
 @router.get(
     "/stock-operations",
     response_model=ApiResponse[PageData[schemas.StockOperationOut]],
-    summary="库存操作单列表（op_type=TRANSFER/STOCKTAKE）",
+    summary="库存单据列表（含业务模块推送的待入库 / 待出库单）",
 )
 def list_stock_operations(
     params: PageParams = Depends(PageParams.as_dependency),
-    op_type: Optional[str] = Query(default=None, description="TRANSFER/STOCKTAKE"),
+    op_type: Optional[str] = Query(default=None, description="TRANSFER/STOCKTAKE/INBOUND/OUTBOUND"),
     status: Optional[str] = Query(default=None, description="DRAFT/COMPLETED/CANCELLED"),
     warehouse_id: Optional[int] = Query(default=None, description="涉及仓库ID"),
+    source_module: Optional[str] = Query(default=None, description="来源模块 sales/procurement/planning"),
+    source_type: Optional[str] = Query(
+        default=None,
+        description="来源业务类型 SALES_SHIPMENT/SALES_RETURN/PURCHASE_RECEIPT/MATERIAL_REQUISITION/PRODUCTION_COMPLETION",
+    ),
+    keyword: Optional[str] = Query(default=None, description="单号 / 来源单号 / 备注关键字"),
     db: Session = Depends(get_db),
 ) -> ApiResponse[PageData[schemas.StockOperationOut]]:
-    """分页查询库存操作单（移库与盘点合并，按 op_type 区分）。"""
+    """分页查询库存单据：移库、盘点与业务模块推送的入库 / 出库单统一在此查看。"""
     rows, total = service.list_stock_operations(
-        db, params.page, params.page_size, op_type, status, warehouse_id
+        db,
+        params.page,
+        params.page_size,
+        op_type,
+        status,
+        warehouse_id,
+        source_module,
+        source_type,
+        keyword,
     )
     return success(
         PageData[schemas.StockOperationOut](
@@ -364,18 +378,23 @@ def get_stock_operation(
 @router.post(
     "/stock-operations/{operation_id}/confirm",
     response_model=ApiResponse[schemas.StockOperationOut],
-    summary="确认库存操作单",
+    summary="确认库存单据（入库 / 出库在此选择仓库）",
 )
 def confirm_stock_operation(
     operation_id: int,
+    payload: Optional[schemas.StockOperationConfirm] = None,
     operator_id: Optional[int] = Query(default=None, description="操作人ID"),
     db: Session = Depends(get_db),
 ) -> ApiResponse[schemas.StockOperationOut]:
-    """确认执行：TRANSFER 更新调出/调入两边结存；STOCKTAKE 按盘盈/盘亏差异调整结存。
+    """确认执行：TRANSFER 更新调出/调入两边结存；STOCKTAKE 按盘盈/盘亏差异调整结存；
+    INBOUND / OUTBOUND 由仓库管理人员在此指定仓库，再增加 / 减少结存。
 
     状态 → COMPLETED；库存不足返回 5001，整单不改动任何结存。
     """
-    operation = service.confirm_stock_operation(db, operation_id, operator_id)
+    data = payload or schemas.StockOperationConfirm()
+    operation = service.confirm_stock_operation(
+        db, operation_id, data.operator_id or operator_id, data.warehouse_id
+    )
     db.commit()
     return success(operation)
 

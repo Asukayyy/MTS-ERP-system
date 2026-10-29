@@ -3,7 +3,6 @@ import { onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 
-import { listWarehouses } from '@/api/inventory'
 import {
   batchDeleteRequisitions,
   cancelRequisition,
@@ -37,10 +36,7 @@ async function loadMaterialOptions(keyword: string): Promise<RemoteOption[]> {
   return data.items.map((item) => ({ id: item.id, label: `${item.material_code} ${item.material_name}` }))
 }
 
-async function loadWarehouseOptions(keyword: string): Promise<RemoteOption[]> {
-  const data = await listWarehouses({ keyword, status: 'ACTIVE', page: 1, page_size: 50 })
-  return data.items.map((item) => ({ id: item.id, label: `${item.warehouse_code} ${item.warehouse_name}` }))
-}
+/** 领料单不再选择仓库：确认后推送「库存管理 → 出库管理」待出库单，由仓库管理指定仓库 */
 
 interface ReqLineForm {
   material_id: number | undefined
@@ -56,20 +52,18 @@ const generateRef = ref<InstanceType<typeof GenerateFromPlansDialog>>()
 const form = reactive<{
   req_no: string
   plan_id: number | undefined
-  warehouse_id: number | undefined
   req_date: string | null
   remark: string
   items: ReqLineForm[]
 }>({
   req_no: '',
   plan_id: undefined,
-  warehouse_id: undefined,
   req_date: null,
   remark: '',
   items: [],
 })
 
-// 领料日期与仓库为草稿阶段可留空的字段，由人工指定；确认领料前服务端会校验
+// 领料日期为草稿阶段可留空的字段，由人工指定；确认领料前服务端会校验
 const rules: FormRules = {}
 
 function addLine(): void {
@@ -85,7 +79,6 @@ function openCreate(): void {
   Object.assign(form, {
     req_no: '',
     plan_id: undefined,
-    warehouse_id: undefined,
     req_date: null,
     remark: '',
     items: [],
@@ -99,7 +92,6 @@ function openEdit(row: Requisition): void {
   Object.assign(form, {
     req_no: row.req_no,
     plan_id: row.plan_id ?? undefined,
-    warehouse_id: row.warehouse_id ?? undefined,
     req_date: row.req_date ?? null,
     remark: row.remark ?? '',
     items: row.items.map((item) => ({
@@ -134,7 +126,6 @@ async function submit(): Promise<void> {
       await createRequisition({
         req_no: form.req_no || null,
         plan_id: form.plan_id ?? null,
-        warehouse_id: form.warehouse_id ?? null,
         req_date: form.req_date || null,
         remark: form.remark || null,
         items,
@@ -142,7 +133,6 @@ async function submit(): Promise<void> {
       ElMessage.success('领料单已新增')
     } else {
       await updateRequisition(editingId.value, {
-        warehouse_id: form.warehouse_id ?? null,
         req_date: form.req_date || null,
         remark: form.remark || null,
         items,
@@ -161,7 +151,7 @@ async function submit(): Promise<void> {
 async function doConfirm(row: Requisition): Promise<void> {
   try {
     await confirmRequisition(row.id)
-    ElMessage.success('领料已确认，库存已出库')
+    ElMessage.success('领料已确认，已推送库存出库单（待仓库确认出库）')
     await load()
   } catch (error) {
     ElMessage.error((error as Error).message)
@@ -296,8 +286,10 @@ onMounted(load)
           <template #default="{ row }"><StatusTag :status="row.source_type" /></template>
         </el-table-column>
         <el-table-column label="作业计划编号" prop="plan_no" min-width="150" />
-        <el-table-column label="领料仓库" prop="warehouse_name" width="130">
-          <template #default="{ row }">{{ row.warehouse_name ?? '待指定' }}</template>
+        <el-table-column label="出库仓库" prop="warehouse_name" width="130">
+          <template #default="{ row }">
+            {{ row.warehouse_name ?? '库存管理指定' }}
+          </template>
         </el-table-column>
         <el-table-column label="领料日期" prop="req_date" width="110">
           <template #default="{ row }">{{ row.req_date || '待填写' }}</template>
@@ -372,21 +364,19 @@ onMounted(load)
             </el-form-item>
           </el-col>
           <el-col :span="12">
-            <el-form-item label="领料仓库">
-              <RemoteSelect
-                v-model="form.warehouse_id"
-                :loader="loadWarehouseOptions"
-                placeholder="可留空后补填"
-                style="width: 100%"
-              />
-            </el-form-item>
-          </el-col>
-          <el-col :span="24">
             <el-form-item label="备注">
               <el-input v-model="form.remark" type="textarea" :rows="2" />
             </el-form-item>
           </el-col>
         </el-row>
+
+        <el-alert
+          type="info"
+          :closable="false"
+          show-icon
+          title="领料单不再选择仓库"
+          description="确认领料后只向「库存管理 → 出库管理」推送待出库单，由仓库管理人员决定出库仓库并确认后，库存才真正减少。"
+        />
 
         <el-divider content-position="left">领料明细</el-divider>
         <div class="table-toolbar">

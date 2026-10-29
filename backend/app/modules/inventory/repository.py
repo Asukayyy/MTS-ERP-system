@@ -10,7 +10,7 @@ from datetime import date
 from decimal import Decimal
 from typing import Dict, List, Optional, Sequence, Tuple
 
-from sqlalchemy import case, func, or_, select
+from sqlalchemy import and_, case, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.modules.inventory import models
@@ -365,12 +365,20 @@ def aggregate_by_material(
 # ==================== 库存流水 ====================
 
 
-# ==================== 库存操作单（移库 / 盘点） ====================
+# ==================== 库存操作单（移库 / 盘点 / 入库 / 出库） ====================
+
+#: 各单据类型对应的单号前缀
+_OP_NO_PREFIX = {
+    "TRANSFER": "TRF",
+    "STOCKTAKE": "STK",
+    "INBOUND": "INB",
+    "OUTBOUND": "OUT",
+}
 
 
 def next_operation_no(db: Session, biz_date: date, op_type: str) -> str:
-    """生成操作单号：移库 `TRF` + 日期 + 序号，盘点 `STK` + 日期 + 序号。"""
-    prefix = f"{'TRF' if op_type == 'TRANSFER' else 'STK'}{biz_date.strftime('%Y%m%d')}"
+    """生成单据号：`前缀 + 日期 + 序号`（TRF 移库 / STK 盘点 / INB 入库 / OUT 出库）。"""
+    prefix = f"{_OP_NO_PREFIX.get(op_type, 'OPS')}{biz_date.strftime('%Y%m%d')}"
     return _next_doc_no(db, models.InvStockOperation, models.InvStockOperation.operation_no, prefix)
 
 
@@ -381,8 +389,11 @@ def list_stock_operations(
     op_type: Optional[str] = None,
     status: Optional[str] = None,
     warehouse_id: Optional[int] = None,
+    source_module: Optional[str] = None,
+    source_type: Optional[str] = None,
+    keyword: Optional[str] = None,
 ):
-    """分页查询库存操作单，可按类型 / 状态 / 仓库过滤。"""
+    """分页查询库存单据，可按类型 / 状态 / 仓库 / 来源过滤，`keyword` 匹配单号或来源单号。"""
     stmt = select(models.InvStockOperation).order_by(models.InvStockOperation.id.desc())
     if op_type:
         stmt = stmt.where(models.InvStockOperation.op_type == op_type)
@@ -396,7 +407,67 @@ def list_stock_operations(
                 models.InvStockOperation.warehouse_id == warehouse_id,
             )
         )
+    if source_module:
+        stmt = stmt.where(models.InvStockOperation.source_module == source_module)
+    if source_type:
+        stmt = stmt.where(models.InvStockOperation.source_type == source_type)
+    if keyword:
+        like = f"%{keyword.strip()}%"
+        stmt = stmt.where(
+            or_(
+                models.InvStockOperation.operation_no.like(like),
+                models.InvStockOperation.source_no.like(like),
+                models.InvStockOperation.remark.like(like),
+            )
+        )
     return _paginate(db, stmt, page, page_size)
+
+
+def find_pending_by_source(
+    db: Session, source_module: str, source_type: str, source_reference_id: int
+) -> Optional[models.InvStockOperation]:
+    """按来源单据查仍在待处理（DRAFT）的出入库单，用于重复推送去重。"""
+    return db.scalar(
+        select(models.InvStockOperation).where(
+            models.InvStockOperation.source_module == source_module,
+            models.InvStockOperation.source_type == source_type,
+            models.InvStockOperation.source_reference_id == source_reference_id,
+            models.InvStockOperation.status == "DRAFT",
+        )
+    )
+
+
+def list_pending_by_source(
+    db: Session, source_module: str, source_type: str, source_reference_id: int
+) -> List[models.InvStockOperation]:
+    """列出某来源单据下所有待处理的出入库单（取消 / 作废时批量撤销）。"""
+    return list(
+        db.scalars(
+            select(models.InvStockOperation).where(
+                models.InvStockOperation.source_module == source_module,
+                models.InvStockOperation.source_type == source_type,
+                models.InvStockOperation.source_reference_id == source_reference_id,
+                models.InvStockOperation.status == "DRAFT",
+            )
+        ).all()
+    )
+
+
+def list_operations_by_sources(
+    db: Session, sources: Sequence[Tuple[str, str, int]]
+) -> List[models.InvStockOperation]:
+    """按 `(module, type, reference_id)` 批量取单据（业务列表回填「库存单状态」用）。"""
+    if not sources:
+        return []
+    conditions = [
+        and_(
+            models.InvStockOperation.source_module == module,
+            models.InvStockOperation.source_type == source_type,
+            models.InvStockOperation.source_reference_id == ref_id,
+        )
+        for module, source_type, ref_id in sources
+    ]
+    return list(db.scalars(select(models.InvStockOperation).where(or_(*conditions))).all())
 
 
 def get_stock_operation(db: Session, operation_id: int) -> Optional[models.InvStockOperation]:

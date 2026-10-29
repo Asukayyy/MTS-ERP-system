@@ -385,8 +385,11 @@ def test_order_from_plan_explicit_expected_date_wins(db: Session) -> None:
 # ==================== 6. 到货确认（调用库存入库） ====================
 
 
-def test_receipt_confirm_increases_stock_and_writes_ledger(db: Session) -> None:
-    """到货确认：库存增加、写 PURCHASE_RECEIPT 流水、回写 received_qty、订单转 IN_PROGRESS。"""
+def test_receipt_confirm_pushes_inbound_then_warehouse_confirm_increases_stock(
+    db: Session,
+) -> None:
+    """到货确认：只推送待入库单（不改结存）、回写 received_qty、订单转 IN_PROGRESS；
+    仓库管理人员指定仓库并确认后结存才增加。"""
     material_id = _create_material(db)
     warehouse_id = _create_warehouse(db)
     supplier = _create_supplier(db)
@@ -405,7 +408,6 @@ def test_receipt_confirm_increases_stock_and_writes_ledger(db: Session) -> None:
     receipt = service.create_receipt(
         db,
         purchase_order_id=order["id"],
-        warehouse_id=warehouse_id,
         receipt_date=date.today(),
         items=[{"order_item_id": order_item_id, "quantity": Decimal("40")}],
     )
@@ -416,8 +418,14 @@ def test_receipt_confirm_increases_stock_and_writes_ledger(db: Session) -> None:
     db.commit()
 
     assert confirmed["status"] == "COMPLETED"
-    # 库存增加（qualified_qty 默认 = quantity）
-    assert inventory_service.get_on_hand_qty(db, material_id, warehouse_id) == Decimal("40.0000")
+    # 业务确认不改结存，只登记待入库单（合格数量 = 到货数量）
+    assert inventory_service.get_on_hand_qty(db, material_id, warehouse_id) == Decimal("0")
+    pending = inventory_service.get_inout_status_map(
+        db, [("procurement", "PURCHASE_RECEIPT", receipt["id"])]
+    )[("procurement", "PURCHASE_RECEIPT", receipt["id"])]
+    assert pending["op_type"] == "INBOUND"
+    assert pending["status"] == "DRAFT"
+
     # 采购订单行已到货数量回写（直接读库校验）
     db.expire_all()
     received_qty = db.execute(
@@ -426,6 +434,12 @@ def test_receipt_confirm_increases_stock_and_writes_ledger(db: Session) -> None:
     assert Decimal(str(received_qty)) == Decimal("40.0000")
     # 订单状态 → IN_PROGRESS
     assert service.get_order(db, order["id"])["status"] == "IN_PROGRESS"
+
+    inventory_service.confirm_stock_operation(
+        db, pending["operation_id"], warehouse_id=warehouse_id
+    )
+    db.commit()
+    assert inventory_service.get_on_hand_qty(db, material_id, warehouse_id) == Decimal("40.0000")
 
 
 # ==================== 7. 到货超量拒绝 ====================

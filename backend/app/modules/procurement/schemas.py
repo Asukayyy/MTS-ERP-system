@@ -281,7 +281,9 @@ class ReceiptCreate(BaseModel):
 
     receipt_no: Optional[str] = Field(default=None, max_length=50, description="到货单号，留空自动生成")
     purchase_order_id: int = Field(description="采购订单ID")
-    warehouse_id: int = Field(description="收货仓库ID")
+    warehouse_id: Optional[int] = Field(
+        default=None, description="收货仓库ID（不再必填，由仓库管理在入库单中指定）"
+    )
     receipt_date: date = Field(description="到货日期")
     remark: Optional[str] = None
     operator_id: Optional[int] = None
@@ -305,7 +307,7 @@ class ReceiptOut(_IdOut):
     order_no: Optional[str] = None
     supplier_id: int
     supplier_name: Optional[str] = None
-    warehouse_id: int
+    warehouse_id: Optional[int] = None
     receipt_date: date
     status: str
     remark: Optional[str] = None
@@ -418,7 +420,7 @@ class ReceiptReportOut(BaseModel):
     material_id: int
     material_code: Optional[str] = None
     material_name: Optional[str] = None
-    warehouse_id: int
+    warehouse_id: Optional[int] = None
     quantity: Decimal
     qualified_qty: Decimal
 

@@ -15,7 +15,7 @@
 | 供应商-物料关系 | 供应关系与价格维护，重复关系抛 `4002` |
 | 采购计划 | 头 + 明细；来源可为 MRP 结果或补库需求 |
 | 采购订单 | `/orders/from-plan` 从采购计划生成；状态流转 |
-| 到货登记 | 新建 / 确认 / 取消；确认时经 `inventory.contract.increase_stock` 入库（`PURCHASE_RECEIPT`） |
+| 到货登记 | 新建 / 确认 / 取消；确认时经 `inventory.contract.push_inbound_order` 推送**待入库单**（`PURCHASE_RECEIPT`，不改结存，仓库由库存管理指定并确认） |
 | 供应商评价 | 交付 / 质量 / 服务三项评分取简单平均（4 位小数），可按供应商查询 |
 | 报表与统计 | 订单 / 计划 / 到货 / 待交 / 供应商评价报表 + `/stats` |
 
@@ -28,7 +28,7 @@
 ## 输出
 
 - 采购计划、采购订单
-- 到货信息（经 `inventory.contract.increase_stock` 完成入库）
+- 到货信息（确认后推送库存「入库管理」待入库单，由仓库管理指定仓库并确认入库）
 
 ## 数据表（Owner: procurement，共 9 张）
 
@@ -54,7 +54,8 @@
 | `system.contract.get_material` / `search_materials` / `log_operation` | 物料校验、日志 |
 | `planning.contract.get_mrp_results` | MRP BUY 结果转采购计划 |
 | `inventory.contract.get_replenishment_request` | 补库需求转采购计划 |
-| `inventory.contract.increase_stock` | 到货确认入库 |
+| `inventory.contract.push_inbound_order` | 到货确认推送待入库单 |
+| `inventory.contract.cancel_pending_inout_orders` | 到货单取消时撤销尚未确认的入库单 |
 
 ## 主要接口分组
 

@@ -24,8 +24,8 @@ BUY 件通过契约交给 procurement 生成采购计划。
 | 结果分流 | `/mrp/runs/{id}/create-production-plans`（MAKE→生产计划）、`/mrp/runs/{id}/create-purchase-plan`（BUY→采购计划） |
 | 生产计划 | 增删改查、状态流转、`/production-plans/from-mrp` |
 | 派工单 | 增删改查、状态流转；`/dispatch-orders/from-plans` 按生产计划的工艺路线**逐工序自动生成** DRAFT 单据（作业人员留空待指派），`PATCH /dispatch-orders/{id}` 人工审核调整 |
-| 领料单 | 头 + 明细，确认时经 `inventory.contract.decrease_stock` 出库；`/requisitions/from-plans` 按生产计划的 BOM 直接子件自动生成 DRAFT 领料单，`PATCH /requisitions/{id}` 人工审核调整（含明细整表替换） |
-| 完工报告 | 头 + 明细，确认时经 `inventory.contract.increase_stock` 入库；`/completion-reports/from-plans` 按生产计划自动生成 DRAFT 完工报告（产出物料与剩余完工数量预填，报工日期/入库仓库留空），`PATCH /completion-reports/{id}` 人工补填 |
+| 领料单 | 头 + 明细，确认时经 `inventory.contract.push_outbound_order` 推送**待出库单**（`MATERIAL_REQUISITION`，不改结存，仓库由库存管理指定并确认）；`/requisitions/from-plans` 按生产计划的 BOM 直接子件自动生成 DRAFT 领料单，`PATCH /requisitions/{id}` 人工审核调整（含明细整表替换） |
+| 完工报告 | 头 + 明细，确认时经 `inventory.contract.push_inbound_order` 推送**待入库单**（`PRODUCTION_COMPLETION`，按合格数量，不改结存）；`/completion-reports/from-plans` 按生产计划自动生成 DRAFT 完工报告（产出物料与剩余完工数量预填，报工日期留空），`PATCH /completion-reports/{id}` 人工补填 |
 | 单据删除 | 生产作业计划 / 派工单 / 领料单 / 完工报告均支持单条 `DELETE` 与批量 `POST /batch-delete`；**仅 DRAFT / CANCELLED 可删**，其余状态报 `3006`（只能取消）。已确认入库的领料单 / 完工报告写有库存流水，不可删除 |
 | 统计 | `/stats` |
 
@@ -92,7 +92,8 @@ BUY 件通过契约交给 procurement 生成采购计划。
 | `system.contract.get_material` / `log_operation` | 提前期与供应类型、操作日志 |
 | `sales.contract.get_open_order_demand` / `get_confirmed_forecast_demand` | 需求汇总 |
 | `inventory.contract.get_stock_snapshot` | 可用库存快照 |
-| `inventory.contract.decrease_stock` / `increase_stock` | 领料出库 / 完工入库 |
+| `inventory.contract.push_outbound_order` / `push_inbound_order` | 领料推送待出库单 / 完工推送待入库单 |
+| `inventory.contract.cancel_pending_inout_orders` | 领料 / 完工取消时撤销尚未确认的出入库单 |
 | `inventory.contract.get_replenishment_request` | 补库需求转生产计划 |
 
 ## 主要接口分组

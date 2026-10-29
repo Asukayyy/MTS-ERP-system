@@ -741,6 +741,10 @@ export interface StockOperationItem {
   id: number
   operation_id: number
   material_id: number
+  material_code?: string | null
+  material_name?: string | null
+  material_spec?: string | null
+  unit?: string | null
   quantity?: Num | null
   book_qty?: Num | null
   actual_qty?: Num | null
@@ -757,6 +761,12 @@ export interface StockOperation {
   warehouse_id?: number | null
   op_date: string
   status: string
+  /** 来源模块 / 来源业务类型 / 来源单据，业务模块推送的待出入库单会带出 */
+  source_module?: string | null
+  source_type?: string | null
+  source_reference_id?: number | null
+  source_no?: string | null
+  confirmed_at?: string | null
   remark?: string | null
   items: StockOperationItem[]
 }

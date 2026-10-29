@@ -6,9 +6,18 @@ import type { FormInstance, FormRules } from 'element-plus'
 import { listWarehouses, stockIncrease } from '@/api/inventory'
 import { listMaterials, listPersonnel } from '@/api/system'
 import RemoteSelect from '@/components/common/RemoteSelect.vue'
+import InoutPendingTable from '@/components/inventory/InoutPendingTable.vue'
 import type { RemoteOption } from '@/types/erp'
 
-/** 手工入库：直接更新库存结存（不再维护独立流水表） */
+/**
+ * 入库管理。
+ *
+ * - 「待入库 / 入库单」：业务模块（采购到货、销售退货、生产完工）推送的单据，
+ *   由仓库管理人员在此指定仓库并确认，确认后才真正增加结存；
+ * - 「手工入库」：仓库自行发起的直接入库（仓库自己决定，天然满足收口要求）。
+ */
+const activeTab = ref<'pending' | 'manual'>('pending')
+
 const submitting = ref(false)
 const formRef = ref<FormInstance>()
 const form = reactive<{
@@ -81,53 +90,66 @@ async function submit(): Promise<void> {
     <el-card shadow="never">
       <template #header>
         <div class="table-toolbar">
-          <span class="page-title">手工入库</span>
+          <span class="page-title">入库管理</span>
         </div>
       </template>
-      <el-form ref="formRef" :model="form" :rules="rules" label-width="110px">
-        <el-row :gutter="12">
-          <el-col :span="8">
-            <el-form-item label="物料" prop="material_id">
-              <RemoteSelect v-model="form.material_id" :loader="loadMaterialOptions" placeholder="请选择物料" style="width: 100%" />
-            </el-form-item>
-          </el-col>
-          <el-col :span="8">
-            <el-form-item label="仓库" prop="warehouse_id">
-              <RemoteSelect v-model="form.warehouse_id" :loader="loadWarehouseOptions" placeholder="请选择仓库" style="width: 100%" />
-            </el-form-item>
-          </el-col>
-          <el-col :span="8">
-            <el-form-item label="入库数量" prop="quantity">
-              <el-input-number v-model="form.quantity" :min="0.0001" :controls="false" style="width: 100%" />
-            </el-form-item>
-          </el-col>
-          <el-col :span="8">
-            <el-form-item label="单位成本">
-              <el-input-number v-model="form.unit_cost" :min="0" :precision="2" :controls="false" style="width: 100%" />
-            </el-form-item>
-          </el-col>
-          <el-col :span="8">
-            <el-form-item label="业务日期">
-              <el-date-picker v-model="form.biz_date" type="date" value-format="YYYY-MM-DD" placeholder="缺省为当天" style="width: 100%" />
-            </el-form-item>
-          </el-col>
-          <el-col :span="8">
-            <el-form-item label="操作人">
-              <RemoteSelect v-model="form.operator_id" :loader="loadOperatorOptions" placeholder="可选" style="width: 100%" />
-            </el-form-item>
-          </el-col>
-          <el-col :span="16">
-            <el-form-item label="备注">
-              <el-input v-model="form.remark" placeholder="入库原因 / 说明" />
-            </el-form-item>
-          </el-col>
-          <el-col :span="24">
-            <el-form-item>
-              <el-button type="primary" :loading="submitting" @click="submit">提交入库</el-button>
-            </el-form-item>
-          </el-col>
-        </el-row>
-      </el-form>
+
+      <el-tabs v-model="activeTab">
+        <el-tab-pane label="待入库 / 入库单" name="pending">
+          <div class="form-tip">
+            采购到货、销售退货、生产完工等业务单据确认后在此生成待入库单，由仓库管理人员选择仓库并确认，结存才真正增加。
+          </div>
+          <InoutPendingTable op-type="INBOUND" />
+        </el-tab-pane>
+
+        <el-tab-pane label="手工入库" name="manual">
+          <el-form ref="formRef" :model="form" :rules="rules" label-width="110px">
+            <el-row :gutter="12">
+              <el-col :span="8">
+                <el-form-item label="物料" prop="material_id">
+                  <RemoteSelect v-model="form.material_id" :loader="loadMaterialOptions" placeholder="请选择物料" style="width: 100%" />
+                </el-form-item>
+              </el-col>
+              <el-col :span="8">
+                <el-form-item label="仓库" prop="warehouse_id">
+                  <RemoteSelect v-model="form.warehouse_id" :loader="loadWarehouseOptions" placeholder="请选择仓库" style="width: 100%" />
+                </el-form-item>
+              </el-col>
+              <el-col :span="8">
+                <el-form-item label="入库数量" prop="quantity">
+                  <el-input-number v-model="form.quantity" :min="0.0001" :controls="false" style="width: 100%" />
+                </el-form-item>
+              </el-col>
+              <el-col :span="8">
+                <el-form-item label="单位成本">
+                  <el-input-number v-model="form.unit_cost" :min="0" :precision="2" :controls="false" style="width: 100%" />
+                </el-form-item>
+              </el-col>
+              <el-col :span="8">
+                <el-form-item label="业务日期">
+                  <el-date-picker v-model="form.biz_date" type="date" value-format="YYYY-MM-DD" placeholder="缺省为当天" style="width: 100%" />
+                </el-form-item>
+              </el-col>
+              <el-col :span="8">
+                <el-form-item label="操作人">
+                  <RemoteSelect v-model="form.operator_id" :loader="loadOperatorOptions" placeholder="可选" style="width: 100%" />
+                </el-form-item>
+              </el-col>
+              <el-col :span="16">
+                <el-form-item label="备注">
+                  <el-input v-model="form.remark" placeholder="入库原因 / 说明" />
+                </el-form-item>
+              </el-col>
+              <el-col :span="24">
+                <el-form-item>
+                  <el-button type="primary" :loading="submitting" @click="submit">提交入库</el-button>
+                </el-form-item>
+              </el-col>
+            </el-row>
+            <div class="form-tip">手工入库由仓库自行发起，直接更新库存结存并写流水。</div>
+          </el-form>
+        </el-tab-pane>
+      </el-tabs>
     </el-card>
   </div>
 </template>

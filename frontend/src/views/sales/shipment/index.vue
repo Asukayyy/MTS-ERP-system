@@ -11,11 +11,9 @@ import {
   listOrders,
   listShipments,
 } from '@/api/sales'
-import { listBalances } from '@/api/inventory'
 import RemoteSelect from '@/components/common/RemoteSelect.vue'
 import StatusTag from '@/components/common/StatusTag.vue'
 import { usePagedTable, toNumber } from '@/composables/usePagedTable'
-import { fmtQty } from '@/utils/format'
 import type { RemoteOption, Shipment } from '@/types/erp'
 
 const { loading, rows, total, page, pageSize, query, load, search, reset, changePage, changeSize } =
@@ -32,77 +30,10 @@ async function loadOrderOptions(keyword: string): Promise<RemoteOption[]> {
     .map((item) => ({ id: item.id, label: `${item.order_no} · ${item.customer_name ?? ''}` }))
 }
 
-/** 废品仓编码：发货仓库不允许选择废品仓 */
-const SCRAP_WAREHOUSE_CODE = 'WH-SCRAP-01'
-/** 当前可选的发货仓库（已按「有目标物料库存」过滤，label 带可用量） */
-const warehouseOptions = ref<RemoteOption[]>([])
-/** 仓库候选版本号，用于强制重挂载下拉以刷新首屏选项 */
-const warehouseVersion = ref(0)
-/** 请求序号，丢弃过期的库存查询结果，避免快速改数量时旧结果覆盖新结果 */
-let warehouseRequestSeq = 0
-
-function replaceWarehouseOptions(options: RemoteOption[]): void {
-  warehouseOptions.value = options
-  warehouseVersion.value += 1
-  // 候选变化后，原先选中的仓库可能已不在范围内
-  if (form.warehouse_id !== undefined && !options.some((item) => item.id === form.warehouse_id)) {
-    form.warehouse_id = undefined
-  }
-}
-
-/** 发货仓库候选：同时备有本次发货全部物料且有可用量的仓库，排除废品仓 */
-async function refreshWarehouseOptions(): Promise<void> {
-  const seq = ++warehouseRequestSeq
-  const materialIds = [
-    ...new Set(
-      form.items.filter((item) => item.quantity > 0).map((item) => item.material_id),
-    ),
-  ]
-  if (!materialIds.length) {
-    replaceWarehouseOptions([])
-    return
-  }
-  try {
-    const pages = await Promise.all(
-      materialIds.map((materialId) =>
-        listBalances({ material_id: materialId, page: 1, page_size: 200 }),
-      ),
-    )
-    if (seq !== warehouseRequestSeq) return
-    const stockMaps = pages.map((data) => {
-      const map = new Map<number, { code: string; name: string; available: number }>()
-      data.items.forEach((balance) => {
-        if (balance.warehouse_code === SCRAP_WAREHOUSE_CODE) return
-        const available = toNumber(balance.available_quantity)
-        if (available <= 0) return
-        map.set(balance.warehouse_id, {
-          code: balance.warehouse_code ?? '',
-          name: balance.warehouse_name ?? '',
-          available,
-        })
-      })
-      return map
-    })
-    const ids = [...stockMaps[0].keys()].filter((id) => stockMaps.every((map) => map.has(id)))
-    replaceWarehouseOptions(
-      ids.map((id) => {
-        const base = stockMaps[0].get(id)!
-        // 多物料时取最小可用量，代表该仓库的最短板
-        const available = Math.min(...stockMaps.map((map) => map.get(id)!.available))
-        return { id, label: `${base.code} ${base.name} · 可用 ${fmtQty(available)}` }
-      }),
-    )
-  } catch (error) {
-    ElMessage.error((error as Error).message)
-  }
-}
-
-async function loadWarehouseOptions(keyword: string): Promise<RemoteOption[]> {
-  const kw = keyword.trim().toLowerCase()
-  if (!kw) return warehouseOptions.value
-  return warehouseOptions.value.filter((item) => item.label.toLowerCase().includes(kw))
-}
-
+/**
+ * 发货不再选择仓库：确认发货后只向「库存管理 → 出库管理」推送待出库单，
+ * 由仓库管理人员决定出库仓库并确认，库存才真正减少。
+ */
 interface ShipLineForm {
   order_item_id: number
   material_id: number
@@ -117,13 +48,11 @@ const formRef = ref<FormInstance>()
 const form = reactive<{
   order_id: number | undefined
   shipment_date: string
-  warehouse_id: number | undefined
   remark: string
   items: ShipLineForm[]
 }>({
   order_id: undefined,
   shipment_date: '',
-  warehouse_id: undefined,
   remark: '',
   items: [],
 })
@@ -131,14 +60,11 @@ const form = reactive<{
 const rules: FormRules = {
   order_id: [{ required: true, message: '请选择销售订单', trigger: 'change' }],
   shipment_date: [{ required: true, message: '请选择发货日期', trigger: 'change' }],
-  warehouse_id: [{ required: true, message: '请选择发货仓库', trigger: 'change' }],
 }
 
-/** 选择订单后带出订单行，并按本次发货物料刷新可选仓库 */
+/** 选择订单后带出订单行（仓库由仓库管理人员在库存出库单中指定） */
 async function onOrderChange(orderId: number | undefined): Promise<void> {
   form.items = []
-  form.warehouse_id = undefined
-  replaceWarehouseOptions([])
   if (orderId === undefined) return
   try {
     const order = await getOrder(orderId)
@@ -149,7 +75,6 @@ async function onOrderChange(orderId: number | undefined): Promise<void> {
       remaining: toNumber(item.quantity) - toNumber(item.delivered_qty),
       quantity: toNumber(item.quantity) - toNumber(item.delivered_qty),
     }))
-    await refreshWarehouseOptions()
   } catch (error) {
     ElMessage.error((error as Error).message)
   }
@@ -159,18 +84,16 @@ function openCreate(): void {
   Object.assign(form, {
     order_id: undefined,
     shipment_date: '',
-    warehouse_id: undefined,
     remark: '',
     items: [],
   })
-  replaceWarehouseOptions([])
   dialogVisible.value = true
 }
 
 async function submit(): Promise<void> {
   const valid = await formRef.value?.validate().catch(() => false)
   if (!valid) return
-  if (form.order_id === undefined || form.warehouse_id === undefined) return
+  if (form.order_id === undefined) return
   const items = form.items.filter((item) => item.quantity > 0)
   if (!items.length) {
     ElMessage.warning('请填写发货数量')
@@ -184,7 +107,6 @@ async function submit(): Promise<void> {
       remark: form.remark || null,
       items: items.map((item) => ({
         order_item_id: item.order_item_id,
-        warehouse_id: form.warehouse_id,
         quantity: item.quantity,
       })),
     })
@@ -201,7 +123,7 @@ async function submit(): Promise<void> {
 async function doConfirm(row: Shipment): Promise<void> {
   try {
     await confirmShipment(row.id)
-    ElMessage.success('发货已确认，库存已出库')
+    ElMessage.success('发货已确认，已推送库存出库单（待仓库确认出库）')
     await load()
   } catch (error) {
     ElMessage.error((error as Error).message)
@@ -255,7 +177,6 @@ onMounted(load)
             <el-table :data="row.items" size="small" border class="nested-table">
               <el-table-column label="物料编码" prop="material_code" min-width="130" />
               <el-table-column label="物料名称" prop="material_name" min-width="150" />
-              <el-table-column label="仓库ID" prop="warehouse_id" width="100" align="right" />
               <el-table-column label="发货数量" prop="quantity" width="110" align="right" />
               <el-table-column label="备注" prop="remark" min-width="140" />
             </el-table>
@@ -310,17 +231,6 @@ onMounted(load)
             </el-form-item>
           </el-col>
           <el-col :span="12">
-            <el-form-item label="发货仓库" prop="warehouse_id">
-              <RemoteSelect
-                :key="`wh-${warehouseVersion}`"
-                v-model="form.warehouse_id"
-                :loader="loadWarehouseOptions"
-                placeholder="请先选择销售订单"
-                style="width: 100%"
-              />
-            </el-form-item>
-          </el-col>
-          <el-col :span="12">
             <el-form-item label="备注"><el-input v-model="form.remark" /></el-form-item>
           </el-col>
         </el-row>
@@ -337,14 +247,13 @@ onMounted(load)
               :max="row.remaining"
               :controls="false"
               style="width: 100%"
-              @change="refreshWarehouseOptions"
             />
           </template>
         </el-table-column>
       </el-table>
       <p class="form-tip">
-        选择订单后自动带出订单行；发货仓库只列出同时备有本次发货全部物料且有可用量的仓库（不含废品仓），标签中的「可用 X」为实时可用库存。
-        保存后请在列表中「确认发货」以实际出库。
+        选择订单后自动带出订单行。<strong>本单不再选择发货仓库</strong>：点击「确认发货」后只向
+        「库存管理 → 出库管理」推送待出库单，由仓库管理人员决定出库仓库并确认，库存才真正减少。
       </p>
       <template #footer>
         <el-button @click="dialogVisible = false">取消</el-button>
