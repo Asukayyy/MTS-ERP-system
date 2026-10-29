@@ -30,10 +30,6 @@ function onCreated(): void {
         </div>
       </template>
 
-      <div class="form-tip">
-        采购到货、销售退货、生产完工确认后在此生成入库单；确认入库时选择仓库，结存才真正增加。
-      </div>
-
       <InoutPendingTable ref="tableRef" op-type="INBOUND" />
     </el-card>
 

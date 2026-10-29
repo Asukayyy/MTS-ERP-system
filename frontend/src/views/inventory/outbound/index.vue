@@ -30,10 +30,6 @@ function onCreated(): void {
         </div>
       </template>
 
-      <div class="form-tip">
-        销售发货、生产领料确认后在此生成出库单；确认出库时选择仓库，结存才真正减少。
-      </div>
-
       <InoutPendingTable ref="tableRef" op-type="OUTBOUND" />
     </el-card>
 
