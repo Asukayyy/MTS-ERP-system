@@ -63,10 +63,6 @@ async function loadSupplierOptionsForMaterials(
     .sort((a, b) => Number(primaryIds.has(b.id)) - Number(primaryIds.has(a.id)))
 }
 
-function loadSupplierOptions(keyword: string): Promise<RemoteOption[]> {
-  return loadSupplierOptionsForMaterials(keyword)
-}
-
 function loadOrderSupplierOptions(keyword: string): Promise<RemoteOption[]> {
   return loadSupplierOptionsForMaterials(keyword, orderPlan.value?.items.map((i) => i.material_id) ?? [])
 }
