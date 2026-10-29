@@ -330,7 +330,7 @@ class SafetyStockSuggestionOut(BaseModel):
 # ==================== 库存变动流水 ====================
 
 
-class StockJournalOut(BaseModel):
+class StockJournalOut(_OrmBase):
     """库存变动流水出参。"""
 
     id: int
