@@ -11,15 +11,24 @@ import { usePagedTable, toNumber } from '@/composables/usePagedTable'
 import { fmtQty } from '@/utils/format'
 import type { Balance, BalanceSummary, RemoteOption } from '@/types/erp'
 
+type SortQuery = {
+  sort_by?: string
+  sort_order?: 'asc' | 'desc'
+}
+
+const sortQuery = ref<SortQuery>({ sort_by: undefined, sort_order: undefined })
+
 const { loading, rows, total, page, pageSize, query, load, search, reset, changePage, changeSize } =
   usePagedTable<
     Balance,
-    { keyword: string; warehouse_id: number | undefined; sales_category: string; quantity_gt: number | undefined }
+    { keyword: string; warehouse_id: number | undefined; sales_category: string; quantity_gt: number | undefined } & SortQuery
   >((params) => listBalances(params), {
     keyword: '',
     warehouse_id: undefined,
     sales_category: '',
     quantity_gt: 0,
+    sort_by: undefined,
+    sort_order: undefined,
   })
 
 /** 销售类别：整机 / 可售备件（如转椅轮子）/ 内部件 */
@@ -71,6 +80,31 @@ onMounted(() => {
   load()
   loadSummary()
 })
+
+/** 点击表头排序 → 全量后端排序（跨分页） */
+const SORT_BY_MAP: Record<string, string> = {
+  material_code: 'material_code',
+  material_name: 'material_name',
+  material_sales_category: 'material_sales_category',
+  material_abc_class: 'material_abc_class',
+  warehouse_name: 'warehouse_name',
+  warehouse_code: 'warehouse_code',
+  on_hand: 'quantity',
+  available_quantity: 'available_quantity',
+  safety_stock: 'safety_stock',
+}
+
+function handleSortChange({ prop, order }: { prop: string; order: string | null }) {
+  if (!prop || !order) {
+    query.sort_by = undefined
+    query.sort_order = undefined
+  } else {
+    query.sort_by = SORT_BY_MAP[prop] || prop
+    query.sort_order = order === 'ascending' ? 'asc' : 'desc'
+  }
+  changePage(1) // 回到第 1 页
+  load()
+}
 </script>
 
 <template>
@@ -126,15 +160,15 @@ onMounted(() => {
         </el-form-item>
       </el-form>
 
-      <el-table v-loading="loading" :data="rows" border size="small">
-        <el-table-column label="物料编码" prop="material_code" min-width="130" sortable />
-        <el-table-column label="物料名称" prop="material_name" min-width="160" sortable />
-        <el-table-column label="销售类别" width="100" sortable prop="material_sales_category">
+      <el-table v-loading="loading" :data="rows" border size="small" @sort-change="handleSortChange">
+        <el-table-column label="物料编码" prop="material_code" min-width="130" sortable="custom" />
+        <el-table-column label="物料名称" prop="material_name" min-width="160" sortable="custom" />
+        <el-table-column label="销售类别" width="100" sortable="custom" prop="material_sales_category">
           <template #default="{ row }">
             {{ SALES_CATEGORIES.find((item) => item.value === row.material_sales_category)?.label ?? '内部件' }}
           </template>
         </el-table-column>
-        <el-table-column label="ABC" width="70" align="center" sortable prop="material_abc_class">
+        <el-table-column label="ABC" width="70" align="center" sortable="custom" prop="material_abc_class">
           <template #default="{ row }">
             <el-tag v-if="row.material_abc_class" :type="row.material_abc_class === 'A' ? 'danger' : row.material_abc_class === 'B' ? 'warning' : 'info'" size="small">
               {{ row.material_abc_class }}
@@ -142,7 +176,7 @@ onMounted(() => {
             <span v-else>—</span>
           </template>
         </el-table-column>
-        <el-table-column label="仓库" min-width="180" sortable prop="warehouse_name">
+        <el-table-column label="仓库" min-width="180" sortable="custom" prop="warehouse_name">
           <template #default="{ row }">
             {{ row.warehouse_name || `ID ${row.warehouse_id}` }}
             <span style="color: #98a2ad; font-size: 12px; margin-left: 4px" v-if="row.warehouse_code">
@@ -153,10 +187,10 @@ onMounted(() => {
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="现有量" width="110" align="right" sortable>
+        <el-table-column label="现有量" width="110" align="right" prop="on_hand" sortable="custom">
           <template #default="{ row }">{{ fmtQty(row.on_hand) }}</template>
         </el-table-column>
-        <el-table-column label="可用量" width="110" align="right" sortable>
+        <el-table-column label="可用量" width="110" align="right" prop="available_quantity" sortable="custom">
           <template #default="{ row }">
             <template v-if="row.is_available_warehouse === false">
               <span style="color: #98a2ad">已报废</span>
@@ -166,7 +200,7 @@ onMounted(() => {
             </template>
           </template>
         </el-table-column>
-        <el-table-column label="安全库存" width="110" align="right" sortable>
+        <el-table-column label="安全库存" width="110" align="right" prop="safety_stock" sortable="custom">
           <template #default="{ row }">
             <template v-if="row.is_available_warehouse === false">
               <span style="color: #c0c4cc">—</span>

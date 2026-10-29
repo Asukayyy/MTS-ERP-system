@@ -606,6 +606,8 @@ def list_balances(
     sales_category: Optional[str] = None,
     abc_class: Optional[str] = None,
     quantity_gt: Optional[Decimal] = None,
+    sort_by: Optional[str] = None,
+    sort_order: str = "asc",
 ) -> Tuple[List[Dict[str, Any]], int]:
     """分页查询实时库存，附带物料编码/名称、ABC 分类、销售类别与可用量。"""
     material_ids: Optional[List[int]] = None
@@ -626,6 +628,8 @@ def list_balances(
         db, page, page_size, material_id, warehouse_id, material_ids,
         has_reorder_point=has_reorder_point,
         quantity_gt=quantity_gt,
+        sort_by=sort_by,
+        sort_order=sort_order,
     )
     materials = _material_map(db, [r.material_id for r in rows])
     warehouses = _warehouse_map(db, [r.warehouse_id for r in rows])
@@ -1417,6 +1421,7 @@ def _auto_replenish_if_needed(
         available = repository.sum_available(db, material_id)
         if available >= safety:
             return None
+        # 只要有在途补货单就跳过（含 DRAFT/CONFIRMED/RELEASED）——幂等防重复
         pending = repository.count_where(
             db,
             models.InvReplenishmentRequest,
@@ -1440,10 +1445,13 @@ def _auto_replenish_if_needed(
             source_type="REORDER" if supply_type == "BUY" else "PRODUCTION",
             current_qty=available,
             target_qty=safety,
-            remark="安全库存自动生成",
+            remark="安全库存自动生成（系统直接发单）",
             operator_id=operator_id,
         )
-        db.flush()  # 让新建单据对同事务内的后续去重查询可见
+        # ← 直接升级为 CONFIRMED / RELEASED，跳过人工确认环节
+        request = repository.get_replenishment_request(db, result["id"])
+        request.status = "CONFIRMED"
+        db.flush()
         return result["id"]
     except Exception:  # noqa: BLE001 - 自动补库失败不阻断出库 / 盘点
         return None

@@ -145,9 +145,11 @@ def list_balances(
     sales_category: Optional[str] = Query(default=None, description="MACHINE/SPARE/INTERNAL"),
     abc_class: Optional[str] = Query(default=None, description="ABC 分类 A/B/C"),
     quantity_gt: Optional[float] = Query(default=None, description="仅返回现存量 > 该值的结存，设 0 可过滤零行"),
+    sort_by: Optional[str] = Query(default=None, description="排序字段: material_code/material_name/warehouse_name/quantity/available_quantity/safety_stock/abc_class/sales_category"),
+    sort_order: str = Query(default="asc", description="asc 或 desc"),
     db: Session = Depends(get_db),
 ) -> ApiResponse[PageData[schemas.BalanceOut]]:
-    """分页查询实时库存（含现存量/锁定量/可用量/订货点），可按销售类别与 ABC 分类筛选。"""
+    """分页查询实时库存（含现存量/锁定量/可用量/订货点），可按销售类别与 ABC 分类筛选，支持全量后端排序。"""
     from decimal import Decimal
     rows, total = service.list_balances(
         db,
@@ -160,6 +162,8 @@ def list_balances(
         sales_category=sales_category,
         abc_class=abc_class,
         quantity_gt=Decimal(str(quantity_gt)) if quantity_gt is not None else None,
+        sort_by=sort_by,
+        sort_order=sort_order,
     )
     return success(
         PageData[schemas.BalanceOut](

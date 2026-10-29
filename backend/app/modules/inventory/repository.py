@@ -2,7 +2,8 @@
 
 只负责数据库读写与查询拼装，**不写业务规则**。
 只允许被本模块的 `service.py` / `contract.py` 调用；其它模块禁止直接 import 本文件。
-跨模块数据（物料、安全库存）通过 `system.contract` 获取，本层**不跨模块 JOIN**。
+跨模块数据（物料、安全库存）通过 `system.contract` 获取，本层**不跨模块 JOIN**，
+仅在需要按物料/仓库字段排序时才临时 JOIN system.models.SysMaterial。
 """
 
 from datetime import date
@@ -13,6 +14,7 @@ from sqlalchemy import case, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.modules.inventory import models
+from app.modules.system.models import SysMaterial  # 仅用于排序时跨模块 JOIN
 
 # 不计入可用量的仓库编码：废品仓内的物资已报废，仅作资产登记，
 # 不参与可用量、安全库存判断与补库建议（现存量仍然照实记录）。
@@ -161,9 +163,19 @@ def list_balances(
     material_ids: Optional[Sequence[int]] = None,
     has_reorder_point: bool = False,
     quantity_gt: Optional[Decimal] = None,
+    sort_by: Optional[str] = None,
+    sort_order: str = "asc",
 ):
-    """分页查询结存。`material_ids` 用于把跨模块的关键字检索结果收敛到本模块 SQL。"""
-    stmt = select(models.InvBalance).order_by(models.InvBalance.id.desc())
+    """分页查询结存。`material_ids` 用于把跨模块的关键字检索结果收敛到本模块 SQL。
+
+    sort_by 可选值：
+      id / quantity / locked_qty / safety_stock / reorder_point /
+      material_code / material_name / material_abc_class / material_sales_category /
+      warehouse_name / warehouse_code /
+      available_quantity（= quantity - locked_qty，后端计算字段）
+    默认按 id desc（最新建的结存在前）。
+    """
+    stmt = select(models.InvBalance)
     if material_id:
         stmt = stmt.where(models.InvBalance.material_id == material_id)
     if warehouse_id:
@@ -177,6 +189,60 @@ def list_balances(
         if not ids:
             return [], 0
         stmt = stmt.where(models.InvBalance.material_id.in_(ids))
+
+    # --- 排序 ---
+    asc = sort_order.lower() == "asc"
+    B = models.InvBalance     # inv_balance
+    W = models.InvWarehouse   # inv_warehouse（本模块）
+    SM = SysMaterial          # sys_material（跨模块）
+    direction = lambda col: col if asc else col.desc()
+
+    # 需要联表的排序列
+    _need_material_join = sort_by in (
+        "material_code", "material_name", "material_abc_class",
+        "material_sales_category", "safety_stock",
+    )
+    _need_warehouse_join = sort_by in ("warehouse_name", "warehouse_code")
+
+    if sort_by is None:
+        stmt = stmt.order_by(B.id.desc())
+    elif _need_material_join or _need_warehouse_join:
+        if _need_material_join:
+            stmt = stmt.join(SM, SM.id == B.material_id)
+        if _need_warehouse_join:
+            stmt = stmt.join(W, W.id == B.warehouse_id)
+        _ORDER_MAP = {
+            "material_code": SM.material_code,
+            "material_name": SM.material_name,
+            "material_abc_class": SM.abc_class,
+            "material_sales_category": SM.sales_category,
+            "safety_stock": SM.safety_stock,
+            "warehouse_name": W.warehouse_name,
+            "warehouse_code": W.warehouse_code,
+        }
+        col = _ORDER_MAP.get(sort_by)
+        if col is not None:
+            stmt = stmt.order_by(direction(col), B.id)
+        else:
+            stmt = stmt.order_by(B.id.desc())
+    elif sort_by == "available_quantity":
+        available = (B.quantity - B.locked_quantity).label("available_quantity")
+        stmt = stmt.order_by(direction(available), B.id)
+    else:
+        # InvBalance 自身字段
+        _DIRECT_MAP = {
+            "id": B.id,
+            "quantity": B.quantity,
+            "locked_quantity": B.locked_quantity,
+            "reorder_point": B.reorder_point,
+            "reorder_quantity": B.reorder_quantity,
+        }
+        col = _DIRECT_MAP.get(sort_by)
+        if col is not None:
+            stmt = stmt.order_by(direction(col), B.id)
+        else:
+            stmt = stmt.order_by(B.id.desc())
+
     return _paginate(db, stmt, page, page_size)
 
 
