@@ -145,7 +145,14 @@ def list_balances(
     sales_category: Optional[str] = Query(default=None, description="MACHINE/SPARE/INTERNAL"),
     abc_class: Optional[str] = Query(default=None, description="ABC 分类 A/B/C"),
     quantity_gt: Optional[float] = Query(default=None, description="仅返回现存量 > 该值的结存，设 0 可过滤零行"),
-    sort_by: Optional[str] = Query(default=None, description="排序字段: material_code/material_name/warehouse_name/quantity/available_quantity/safety_stock/abc_class/sales_category"),
+    sort_by: Optional[str] = Query(
+        default=None,
+        description=(
+            "排序字段（白名单）：material_code / material_name / material_abc_class / "
+            "material_sales_category / warehouse_name / warehouse_code / quantity / "
+            "available_quantity / safety_stock；其它值回落到默认 id desc"
+        ),
+    ),
     sort_order: str = Query(default="asc", description="asc 或 desc"),
     db: Session = Depends(get_db),
 ) -> ApiResponse[PageData[schemas.BalanceOut]]:
