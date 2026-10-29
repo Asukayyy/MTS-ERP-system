@@ -142,7 +142,12 @@ onMounted(() => {
           </template>
         </el-table-column>
         <el-table-column label="仓库" min-width="150">
-          <template #default="{ row }">{{ row.warehouse_name || `ID ${row.warehouse_id}` }}</template>
+          <template #default="{ row }">
+            {{ row.warehouse_name || `ID ${row.warehouse_id}` }}
+            <el-tag v-if="row.is_available_warehouse === false" type="info" size="small" style="margin-left: 4px">
+              废品
+            </el-tag>
+          </template>
         </el-table-column>
         <el-table-column label="现有量" width="110" align="right">
           <template #default="{ row }">{{ fmtQty(row.on_hand) }}</template>
@@ -154,9 +159,14 @@ onMounted(() => {
         </el-table-column>
         <el-table-column label="安全库存" width="110" align="right">
           <template #default="{ row }">
-            <span :class="{ 'qty-zero': toNumber(row.available_quantity) < toNumber(row.safety_stock) }">{{
-              fmtQty(row.safety_stock)
-            }}</span>
+            <span
+              :class="{
+                'qty-zero':
+                  row.is_available_warehouse !== false &&
+                  toNumber(row.available_quantity) < toNumber(row.safety_stock),
+              }"
+              >{{ fmtQty(row.safety_stock) }}</span
+            >
           </template>
         </el-table-column>
         <template #empty>暂无库存结存数据</template>
