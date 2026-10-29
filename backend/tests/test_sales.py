@@ -375,6 +375,32 @@ def test_confirm_order_does_not_double_allocate_stock(
     assert Decimal(str(second["allocation"]["shortage_qty"])) == Decimal("10")
 
 
+def test_confirm_order_with_warehouse_less_draft_shipment(
+    client: TestClient, db: Session
+) -> None:
+    """回归：库里存在「未指定仓库」的发货草稿时，确认订单不应 500。
+
+    业务模块已不再选仓库，草稿发货可能 `warehouse_id = NULL`；此类占用按物料
+    整体抵扣可用池。库存 30、草稿占 10 → 新订单要 30 只能分配 20，缺口 10。
+    """
+    material_id = _create_material(db)
+    warehouse_id = _create_warehouse(client)
+    _set_stock(db, material_id, warehouse_id, "30")
+    customer = _create_customer(client)
+
+    # 先造一张草稿发货（自动分配会带仓库），再把仓库置空，模拟业务模块不选仓的草稿
+    first = _create_confirmed_order(client, customer["id"], material_id, quantity="10")
+    db.execute(
+        text("UPDATE sal_shipment_item SET warehouse_id = NULL WHERE shipment_id = :s"),
+        {"s": first["allocation"]["shipment_id"]},
+    )
+    db.commit()
+
+    second = _create_confirmed_order(client, customer["id"], material_id, quantity="30")
+    assert Decimal(str(second["allocation"]["stock_qty"])) == Decimal("20")
+    assert Decimal(str(second["allocation"]["shortage_qty"])) == Decimal("10")
+
+
 def test_cancel_order_releases_auto_shipment_and_demand(
     client: TestClient, db: Session
 ) -> None:
