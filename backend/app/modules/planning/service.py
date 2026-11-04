@@ -4,7 +4,8 @@
 
 - Planning **负责计划**：需求归集、MPS 录入、MRP 多层 BOM 展开、净需求计算、MAKE/BUY 分流。
 - 生产业务（生产作业计划 / 派工 / 领料 / 完工）**统一归 Planning**，不建独立 Production 模块。
-- Planning **不直接改库存**：领料 / 完工一律通过 `inventory.contract`，由库存引擎写真实流水。
+- Planning **不直接改库存**：领料 / 完工只向库存管理推送**待出库 / 待入库单**，
+  由仓库管理人员在「库存管理 → 出库管理 / 入库管理」中指定仓库并确认后，结存才真正变动。
 - 本层**不调用 `db.commit()`**：由 router 提交；contract 函数运行在调用方事务里。
 
 错误码区段：`3000~3999`。
@@ -21,9 +22,10 @@ from sqlalchemy.orm import Session
 
 from app.common.exceptions import BusinessException
 from app.modules.inventory.contract import (
-    decrease_stock,
+    cancel_pending_inout_orders,
     get_stock_snapshot,
-    increase_stock,
+    push_inbound_order,
+    push_outbound_order,
 )
 from app.modules.planning import models, repository
 from app.modules.system.contract import (
@@ -2028,7 +2030,12 @@ def create_requisition(
     remark: Optional[str] = None,
     operator_id: Optional[int] = None,
 ) -> models.PlnMaterialRequisition:
-    """新增领料单（头 + 行），默认 DRAFT：领料日期与仓库可留空，确认前必须补齐。"""
+    """新增领料单（头 + 行），默认 DRAFT。
+
+    领料日期可留空（确认前需补齐）；**领料仓库不再由计划模块指定**，
+    出库仓库由仓库管理人员在「库存管理 → 出库管理」确认时选择，
+    因此 `warehouse_id` 仅作历史字段保留，不参与库存变动。
+    """
     if not items:
         raise BusinessException(CODE_PARAM_INVALID, "领料单至少需要一条明细")
     if plan_id is not None:
@@ -2254,38 +2261,50 @@ def create_requisitions_from_plans(
 def confirm_requisition(
     db: Session, req_id: int, operator_id: Optional[int] = None
 ) -> models.PlnMaterialRequisition:
-    """确认领料（原子）：逐行走 `inventory.contract.decrease_stock` 写真实出库流水。
+    """确认领料（业务审核完成）：向库存管理推送**待出库单**，不改结存。
 
-    任一物料库存不足（inventory 抛 5001）则整体回滚，领料单状态与库存均不变。
+    - **不再由计划模块指定领料仓库**：单据进入「库存管理 → 出库管理」待办列表，
+      由仓库管理人员选择仓库并确认后，结存才真正减少（禁止负库存仍由库存引擎复核）；
+    - 推送数量口径：`需求数量 − 已领数量`，推送后回写已领数量，重复确认幂等；
+    - 领料确认即代表车间已开始生产，上游作业计划自动转「进行中」（业务口径不变）。
     """
     req = _require_requisition(db, req_id)
     if req.status != "DRAFT":
         raise BusinessException(CODE_STATUS_INVALID, f"领料单当前状态为 {req.status}，不能确认")
-    if req.warehouse_id is None:
-        raise BusinessException(CODE_PARAM_INVALID, "领料单未指定领料仓库，不能确认")
     if req.req_date is None:
         raise BusinessException(CODE_PARAM_INVALID, "领料单未指定领料日期，不能确认")
     items = repository.get_requisition_items(db, req_id)
     if not items:
         raise BusinessException(CODE_PARAM_INVALID, "领料单没有明细，不能确认")
+    push_items: List[Dict[str, Any]] = []
     for item in items:
         outstanding = _as_decimal(item.required_qty) - _as_decimal(item.issued_qty)
         if outstanding <= 0:
             continue
-        decrease_stock(
-            db,
-            material_id=item.material_id,
-            quantity=outstanding,
-            warehouse_id=req.warehouse_id,
-            source_module=MODULE,
-            source_type="MATERIAL_REQUISITION",
-            source_reference_id=req.id,
-            source_no=req.req_no,
-            biz_date=req.req_date,
-            operator_id=operator_id,
-            remark=f"生产领料 {req.req_no}",
+        push_items.append(
+            {
+                "material_id": item.material_id,
+                "quantity": outstanding,
+                "remark": item.remark,
+            }
         )
         item.issued_qty = _as_decimal(item.required_qty)
+    if not push_items:
+        raise BusinessException(CODE_PARAM_INVALID, "领料单没有待领数量，不能确认")
+    pushed = push_outbound_order(
+        db,
+        op_date=req.req_date,
+        items=push_items,
+        source_module=MODULE,
+        source_type="MATERIAL_REQUISITION",
+        source_reference_id=req.id,
+        source_no=req.req_no,
+        remark=(
+            (f"领料日期 {req.req_date}，" if req.req_date else "")
+            + f"共 {len(push_items)} 项，请仓库指定仓库后出库"
+        ),
+        operator_id=operator_id,
+    )
     req.status = "COMPLETED"
     req.updated_by = operator_id
     log_operation(
@@ -2295,9 +2314,9 @@ def confirm_requisition(
         target_type="pln_material_requisition",
         target_id=req.id,
         operator_id=operator_id,
-        detail=f"确认领料单 {req.req_no}",
+        detail=f"确认领料单 {req.req_no}，推送库存出库单 {pushed['operation_no']}",
     )
-    # 领料出库即代表车间已开始生产，上游作业计划自动转「进行中」
+    # 领料确认即代表车间已开始生产，上游作业计划自动转「进行中」
     if req.plan_id is not None:
         plan = repository.get_production_plan(db, req.plan_id)
         if plan is not None:
@@ -2310,10 +2329,18 @@ def confirm_requisition(
 def cancel_requisition(
     db: Session, req_id: int, operator_id: Optional[int] = None
 ) -> models.PlnMaterialRequisition:
-    """取消领料单（DRAFT / CONFIRMED 可取消）。"""
+    """取消领料单（DRAFT / CONFIRMED 可取消），并撤销尚未确认的库存出库单。"""
     req = _require_requisition(db, req_id)
     if req.status not in {"DRAFT", "CONFIRMED"}:
         raise BusinessException(CODE_STATUS_INVALID, f"领料单当前状态为 {req.status}，不能取消")
+    cancel_pending_inout_orders(
+        db,
+        source_module=MODULE,
+        source_type="MATERIAL_REQUISITION",
+        source_reference_id=req.id,
+        operator_id=operator_id,
+        reason=f"领料单 {req.req_no} 取消",
+    )
     req.status = "CANCELLED"
     req.updated_by = operator_id
     log_operation(
@@ -2617,10 +2644,11 @@ def create_completion_report(
     remark: Optional[str] = None,
     operator_id: Optional[int] = None,
 ) -> models.PlnCompletionReport:
-    """新增完工报告（默认 DRAFT），确认后才入库。
+    """新增完工报告（默认 DRAFT），确认后推送库存待入库单。
 
-    报工日期与入库仓库可留空：按计划生成的完工报告以 DRAFT 预填草稿形态存在，
-    确认（入库）前必须补齐，由 `confirm_completion_report` 校验。
+    报工日期可留空（确认前需补齐）；**入库仓库不再由计划模块指定**，
+    由仓库管理人员在「库存管理 → 入库管理」确认时选择，
+    因此 `warehouse_id` 仅作历史字段保留，不参与库存变动。
     """
     _require_material(db, material_id)
     if plan_id is not None:
@@ -2820,46 +2848,65 @@ def create_completion_reports_from_plans(
 def confirm_completion_report(
     db: Session, report_id: int, operator_id: Optional[int] = None
 ) -> models.PlnCompletionReport:
-    """确认完工（原子）：走 `inventory.contract.increase_stock` 写真实入库流水，
-    并回写作业计划 / 派工单的已完工数量。"""
+    """确认完工（业务审核完成）：向库存管理推送**待入库单**，并回写计划 / 派工的已完工数量。
+
+    - **不再由计划模块指定入库仓库**：单据进入「库存管理 → 入库管理」待办列表，
+      由仓库管理人员选择仓库并确认后，结存才真正增加；
+    - 推送数量口径：合格数量（报废 / 不合格不入库），备注写清完工 / 合格 / 报废数量与来源；
+    - 作业计划 / 派工单的已完工数量与状态推进保持原有业务口径不变。
+    """
     report = _require_completion(db, report_id)
     if report.status != "DRAFT":
         raise BusinessException(CODE_STATUS_INVALID, f"完工报告当前状态为 {report.status}，不能确认")
-    if report.warehouse_id is None:
-        raise BusinessException(CODE_PARAM_INVALID, "完工报告未指定入库仓库，不能确认")
     if report.report_date is None:
         raise BusinessException(CODE_PARAM_INVALID, "完工报告未指定报工日期，不能确认")
     qualified = _as_decimal(report.qualified_qty)
     if qualified <= 0:
         raise BusinessException(CODE_PARAM_INVALID, "合格数量为 0，无需入库")
-    increase_stock(
-        db,
-        material_id=report.material_id,
-        quantity=qualified,
-        warehouse_id=report.warehouse_id,
-        source_module=MODULE,
-        source_type="PRODUCTION_COMPLETION",
-        source_reference_id=report.id,
-        source_no=report.report_no,
-        biz_date=report.report_date,
-        operator_id=operator_id,
-        remark=f"生产完工入库 {report.report_no}",
-    )
+
     plan: Optional[models.PlnProductionPlan] = None
     dispatch: Optional[models.PlnDispatchOrder] = None
     if report.plan_id is not None:
         plan = repository.get_production_plan(db, report.plan_id)
-        if plan:
-            plan.completed_qty = _as_decimal(plan.completed_qty) + qualified
-            plan.updated_by = operator_id
     if report.dispatch_id is not None:
         dispatch = repository.get_dispatch_order(db, report.dispatch_id)
-        if dispatch:
-            dispatch.completed_qty = _as_decimal(dispatch.completed_qty) + qualified
-            dispatch.updated_by = operator_id
-            # 报告只填了派工单时，作业计划从派工单反查，保证状态照样能向上汇总
-            if plan is None and dispatch.plan_id is not None:
-                plan = repository.get_production_plan(db, dispatch.plan_id)
+        # 报告只填了派工单时，作业计划从派工单反查，保证状态照样能向上汇总
+        if plan is None and dispatch is not None and dispatch.plan_id is not None:
+            plan = repository.get_production_plan(db, dispatch.plan_id)
+
+    remark_parts: List[str] = []
+    if plan is not None:
+        remark_parts.append(f"作业计划 {plan.plan_no}")
+    if dispatch is not None:
+        remark_parts.append(f"派工单 {dispatch.dispatch_no}")
+    remark_parts.append(
+        f"完工 {_as_decimal(report.completed_qty)}，合格 {qualified}，"
+        f"报废 {_as_decimal(report.scrap_qty)}，请仓库指定仓库后入库"
+    )
+    pushed = push_inbound_order(
+        db,
+        op_date=report.report_date,
+        items=[
+            {
+                "material_id": report.material_id,
+                "quantity": qualified,
+                "remark": f"合格数量 {qualified}",
+            }
+        ],
+        source_module=MODULE,
+        source_type="PRODUCTION_COMPLETION",
+        source_reference_id=report.id,
+        source_no=report.report_no,
+        remark="，".join(remark_parts),
+        operator_id=operator_id,
+    )
+
+    if report.plan_id is not None and plan is not None:
+        plan.completed_qty = _as_decimal(plan.completed_qty) + qualified
+        plan.updated_by = operator_id
+    if dispatch is not None:
+        dispatch.completed_qty = _as_decimal(dispatch.completed_qty) + qualified
+        dispatch.updated_by = operator_id
     report.status = "COMPLETED"
     report.updated_by = operator_id
     log_operation(
@@ -2869,7 +2916,10 @@ def confirm_completion_report(
         target_type="pln_completion_report",
         target_id=report.id,
         operator_id=operator_id,
-        detail=f"确认完工报告 {report.report_no}，入库 {qualified}",
+        detail=(
+            f"确认完工报告 {report.report_no}，推送库存入库单 {pushed['operation_no']}"
+            f"（合格 {qualified}）"
+        ),
     )
     _advance_after_completion(
         db, report, plan, dispatch, qualified, operator_id=operator_id
@@ -2880,10 +2930,18 @@ def confirm_completion_report(
 def cancel_completion_report(
     db: Session, report_id: int, operator_id: Optional[int] = None
 ) -> models.PlnCompletionReport:
-    """取消完工报告（仅 DRAFT）。"""
+    """取消完工报告（仅 DRAFT），并撤销尚未确认的库存入库单。"""
     report = _require_completion(db, report_id)
     if report.status != "DRAFT":
         raise BusinessException(CODE_STATUS_INVALID, f"完工报告当前状态为 {report.status}，不能取消")
+    cancel_pending_inout_orders(
+        db,
+        source_module=MODULE,
+        source_type="PRODUCTION_COMPLETION",
+        source_reference_id=report.id,
+        operator_id=operator_id,
+        reason=f"完工报告 {report.report_no} 取消",
+    )
     report.status = "CANCELLED"
     report.updated_by = operator_id
     log_operation(

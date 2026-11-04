@@ -332,8 +332,10 @@ def test_two_mrp_runs_are_preserved_separately(db: Session) -> None:
 # ==================== 9. 领料确认 ====================
 
 
-def test_requisition_confirm_writes_ledger_and_decreases_stock(db: Session) -> None:
-    """领料确认：写 MATERIAL_REQUISITION 流水、扣减库存、回写已领数量。"""
+def test_requisition_confirm_pushes_outbound_then_warehouse_confirm_decreases_stock(
+    db: Session,
+) -> None:
+    """领料确认：只推送待出库单（不改结存），仓库指定仓库确认后才扣减库存。"""
     material_id, code = _create_material(db, supply_type="BUY")
     warehouse_id = _create_warehouse(db)
     _add_stock(db, material_id, warehouse_id, 100)
@@ -341,7 +343,6 @@ def test_requisition_confirm_writes_ledger_and_decreases_stock(db: Session) -> N
     req = service.create_requisition(
         db,
         req_date=date.today(),
-        warehouse_id=warehouse_id,
         items=[{"material_id": material_id, "required_qty": Decimal("40")}],
     )
     db.commit()
@@ -350,12 +351,25 @@ def test_requisition_confirm_writes_ledger_and_decreases_stock(db: Session) -> N
     db.commit()
 
     assert confirmed.status == "COMPLETED"
-    assert inventory_service.get_on_hand_qty(db, material_id, warehouse_id) == Decimal("60.0000")
     assert confirmed.items[0].issued_qty == Decimal("40.0000")
+    # 业务确认只登记待出库单，结存保持不变
+    assert inventory_service.get_on_hand_qty(db, material_id, warehouse_id) == Decimal("100.0000")
+    pending = inventory_service.get_inout_status_map(
+        db, [("planning", "MATERIAL_REQUISITION", req.id)]
+    )[("planning", "MATERIAL_REQUISITION", req.id)]
+    assert pending["op_type"] == "OUTBOUND"
+    assert pending["status"] == "DRAFT"
+
+    # 仓库管理人员在库存管理里指定仓库并确认后，结存才减少
+    inventory_service.confirm_stock_operation(
+        db, pending["operation_id"], warehouse_id=warehouse_id
+    )
+    db.commit()
+    assert inventory_service.get_on_hand_qty(db, material_id, warehouse_id) == Decimal("60.0000")
 
 
-def test_requisition_confirm_insufficient_stock_rolls_back(db: Session) -> None:
-    """库存不足（5001）时整单回滚：状态与库存都不变。"""
+def test_requisition_outbound_insufficient_stock_rejected_by_warehouse(db: Session) -> None:
+    """库存不足（5001）由仓库确认环节拦下：整单回滚，结存不变。"""
     material_id, _ = _create_material(db, supply_type="BUY")
     warehouse_id = _create_warehouse(db)
     _add_stock(db, material_id, warehouse_id, 5)
@@ -363,25 +377,34 @@ def test_requisition_confirm_insufficient_stock_rolls_back(db: Session) -> None:
     req = service.create_requisition(
         db,
         req_date=date.today(),
-        warehouse_id=warehouse_id,
         items=[{"material_id": material_id, "required_qty": Decimal("50")}],
     )
     db.commit()
 
+    service.confirm_requisition(db, req.id)
+    db.commit()
+    pending = inventory_service.get_inout_status_map(
+        db, [("planning", "MATERIAL_REQUISITION", req.id)]
+    )[("planning", "MATERIAL_REQUISITION", req.id)]
+
     with pytest.raises(BusinessException) as exc:
-        service.confirm_requisition(db, req.id)
+        inventory_service.confirm_stock_operation(
+            db, pending["operation_id"], warehouse_id=warehouse_id
+        )
     assert exc.value.code == 5001
     db.rollback()
 
     assert inventory_service.get_on_hand_qty(db, material_id, warehouse_id) == Decimal("5.0000")
-    assert service.get_requisition(db, req.id).status == "DRAFT"
+    assert service.get_requisition(db, req.id).status == "COMPLETED"
 
 
 # ==================== 10. 完工确认 ====================
 
 
-def test_completion_confirm_writes_ledger_and_increases_stock(db: Session) -> None:
-    """完工确认：写 PRODUCTION_COMPLETION 流水、增加库存并回写作业计划已完工数量。"""
+def test_completion_confirm_pushes_inbound_then_warehouse_confirm_increases_stock(
+    db: Session,
+) -> None:
+    """完工确认：只推送待入库单（不改结存），仓库确认后才增加库存。"""
     material_id, _ = _create_material(db, supply_type="MAKE", material_type="FINISHED")
     warehouse_id = _create_warehouse(db)
     today = date.today()
@@ -401,7 +424,6 @@ def test_completion_confirm_writes_ledger_and_increases_stock(db: Session) -> No
         material_id=material_id,
         completed_qty=Decimal("10"),
         qualified_qty=Decimal("10"),
-        warehouse_id=warehouse_id,
         report_date=today,
         plan_id=plan.id,
     )
@@ -411,8 +433,20 @@ def test_completion_confirm_writes_ledger_and_increases_stock(db: Session) -> No
     db.commit()
 
     assert confirmed.status == "COMPLETED"
-    assert inventory_service.get_on_hand_qty(db, material_id, warehouse_id) == Decimal("10.0000")
+    # 业务确认不改结存，只登记待入库单
+    assert inventory_service.get_on_hand_qty(db, material_id, warehouse_id) == Decimal("0")
     assert service.get_production_plan(db, plan.id).completed_qty == Decimal("10.0000")
+    pending = inventory_service.get_inout_status_map(
+        db, [("planning", "PRODUCTION_COMPLETION", report.id)]
+    )[("planning", "PRODUCTION_COMPLETION", report.id)]
+    assert pending["op_type"] == "INBOUND"
+    assert pending["status"] == "DRAFT"
+
+    inventory_service.confirm_stock_operation(
+        db, pending["operation_id"], warehouse_id=warehouse_id
+    )
+    db.commit()
+    assert inventory_service.get_on_hand_qty(db, material_id, warehouse_id) == Decimal("10.0000")
 
 
 # ==================== 附加：MPS 只读与导入预览 ====================

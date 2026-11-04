@@ -11,7 +11,6 @@
 错误码区段：`1000~1999`。
 """
 
-import hashlib
 import json
 from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
@@ -21,6 +20,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 from sqlalchemy.orm import Session
 
 from app.common.exceptions import BusinessException
+from app.core.security import hash_password, verify_password
 from app.modules.inventory import contract as inventory_contract
 from app.modules.procurement import contract as procurement_contract
 from app.modules.sales import contract as sales_contract
@@ -106,11 +106,6 @@ def _validate_status(status: str) -> str:
     if status not in _ALLOWED_STATUS:
         raise BusinessException(CODE_INVALID_STATUS, f"状态不合法：{status}")
     return status
-
-
-def _hash_password(password: str) -> str:
-    """密码哈希（简化版：sha256，详见模块说明）。"""
-    return hashlib.sha256(password.encode("utf-8")).hexdigest()
 
 
 def _require(condition: bool, code: int, message: str) -> None:
@@ -474,8 +469,12 @@ def create_bom(db: Session, payload: BomCreate) -> models.SysBom:
         "失效日期不能早于生效日期",
     )
 
+    if payload.bom_code and repo.get_bom_by_code(db, payload.bom_code):
+        raise BusinessException(CODE_CODE_EXISTS, "BOM 编码已存在")
     bom = models.SysBom(
-        bom_code=payload.bom_code or repo.next_no(db, models.SysBom, "BOM"),
+        bom_code=payload.bom_code or repo.next_no(
+            db, models.SysBom, models.SysBom.bom_code, "BOM"
+        ),
         material_id=payload.material_id,
         bom_version=payload.bom_version,
         effective_date=payload.effective_date,
@@ -791,8 +790,12 @@ def create_routing(db: Session, payload: RoutingCreate) -> models.SysRouting:
         raise BusinessException(CODE_CODE_EXISTS, "工艺版本已存在")
     _validate_status(payload.status)
 
+    if payload.routing_code and repo.get_routing_by_code(db, payload.routing_code):
+        raise BusinessException(CODE_CODE_EXISTS, "工艺路线编码已存在")
     routing = models.SysRouting(
-        routing_code=payload.routing_code or repo.next_no(db, models.SysRouting, "RT"),
+        routing_code=payload.routing_code or repo.next_no(
+            db, models.SysRouting, models.SysRouting.routing_code, "RT"
+        ),
         material_id=payload.material_id,
         routing_version=payload.routing_version,
         status=payload.status,
@@ -913,11 +916,13 @@ def update_routing_operation(
     if not operation:
         raise BusinessException(CODE_NOT_FOUND, "工序不存在")
     data = payload.model_dump(exclude_unset=True)
-    if "sequence_no" in data and data["sequence_no"] != operation.sequence_no:
-        if repo.get_routing_operation_by_seq(
-            db, operation.routing_id, data["sequence_no"]
-        ):
-            raise BusinessException(CODE_INVALID_PARAM, "工序顺序号已存在")
+    if "sequence_no" in data:
+        _require(data["sequence_no"] >= 0, CODE_INVALID_PARAM, "工序顺序号不能为负数")
+        if data["sequence_no"] != operation.sequence_no:
+            if repo.get_routing_operation_by_seq(
+                db, operation.routing_id, data["sequence_no"]
+            ):
+                raise BusinessException(CODE_INVALID_PARAM, "工序顺序号已存在")
     if "setup_time" in data:
         _require(Decimal(data["setup_time"]) >= 0, CODE_INVALID_PARAM, "准备工时不能为负数")
     if "run_time" in data:
@@ -1016,6 +1021,12 @@ def _would_create_org_cycle(db: Session, org_id: int, new_parent_id: int) -> boo
     return False
 
 
+def _validate_org_manager(db: Session, manager_id: Optional[int]) -> None:
+    """组织负责人（如填写）必须是已存在的员工。"""
+    if manager_id is not None and not repo.get_personnel(db, manager_id):
+        raise BusinessException(CODE_NOT_FOUND, "负责人员工不存在")
+
+
 def create_organization(
     db: Session, payload: OrganizationCreate
 ) -> models.SysOrganization:
@@ -1026,6 +1037,7 @@ def create_organization(
     _validate_status(payload.status)
     if payload.parent_id is not None and not repo.get_organization(db, payload.parent_id):
         raise BusinessException(CODE_NOT_FOUND, "上级组织不存在")
+    _validate_org_manager(db, payload.manager_id)
 
     org = models.SysOrganization(
         org_code=payload.org_code,
@@ -1065,6 +1077,8 @@ def update_organization(
                 raise BusinessException(CODE_NOT_FOUND, "上级组织不存在")
             if new_parent_id == org.id or _would_create_org_cycle(db, org.id, new_parent_id):
                 raise BusinessException(CODE_INVALID_PARAM, "上级组织不能形成循环引用")
+    if "manager_id" in data:
+        _validate_org_manager(db, data["manager_id"])
     for field, value in data.items():
         setattr(org, field, value)
     log_operation(
@@ -1198,10 +1212,15 @@ def update_personnel(
 def change_personnel_status(
     db: Session, personnel_id: int, status: str
 ) -> models.SysPersonnel:
-    """员工状态流转。"""
+    """员工状态流转；离职 / 开除时同步停用其登录账号。"""
     _validate_status(status)
     personnel = get_personnel(db, personnel_id)
     personnel.status = status
+    if status != RecordStatus.ACTIVE.value:
+        # 账号不随复职自动恢复，避免离职人员账号被意外重新启用
+        user = repo.get_user_by_personnel(db, personnel.id)
+        if user:
+            user.status = RecordStatus.INACTIVE.value
     log_operation(
         db,
         module="system",
@@ -1382,6 +1401,8 @@ def create_user(db: Session, payload: UserCreate) -> models.SysUser:
         personnel = repo.get_personnel(db, payload.personnel_id)
         if not personnel:
             raise BusinessException(CODE_NOT_FOUND, "关联员工不存在")
+        if personnel.status != RecordStatus.ACTIVE.value:
+            raise BusinessException(CODE_INVALID_PARAM, "该员工已离职，不能开通账号")
         if repo.get_user_by_personnel(db, payload.personnel_id):
             raise BusinessException(CODE_INVALID_PARAM, "该员工已关联其它账号")
     elif payload.org_id is not None:
@@ -1405,7 +1426,7 @@ def create_user(db: Session, payload: UserCreate) -> models.SysUser:
 
     user = models.SysUser(
         username=payload.username,
-        password_hash=_hash_password(payload.password),
+        password_hash=hash_password(payload.password),
         display_name=payload.display_name,
         personnel_id=personnel.id if personnel else None,
         status=payload.status,
@@ -1452,7 +1473,7 @@ def update_user(db: Session, user_id: int, payload: UserUpdate) -> models.SysUse
     for field, value in data.items():
         setattr(user, field, value)
     if password:
-        user.password_hash = _hash_password(password)
+        user.password_hash = hash_password(password)
     log_operation(
         db,
         module="system",
@@ -1638,6 +1659,21 @@ def create_permission(
     return permission
 
 
+def _permission_has_descendant(
+    db: Session, ancestor_id: int, candidate_id: int
+) -> bool:
+    """判断 `candidate_id` 是否是 `ancestor_id` 的下级（沿 parent_id 向上回溯）。"""
+    seen: set = set()
+    current: Optional[int] = candidate_id
+    while current is not None and current not in seen:
+        if current == ancestor_id:
+            return True
+        seen.add(current)
+        parent = repo.get_permission(db, current)
+        current = parent.parent_id if parent else None
+    return False
+
+
 def update_permission(
     db: Session, permission_id: int, payload: PermissionUpdate
 ) -> models.SysPermission:
@@ -1659,6 +1695,8 @@ def update_permission(
             raise BusinessException(CODE_INVALID_PARAM, "上级权限不能是自身")
         if not repo.get_permission(db, data["parent_id"]):
             raise BusinessException(CODE_NOT_FOUND, "上级权限不存在")
+        if _permission_has_descendant(db, permission.id, data["parent_id"]):
+            raise BusinessException(CODE_INVALID_PARAM, "上级权限不能是自身的下级")
     for field, value in data.items():
         setattr(permission, field, value)
     log_operation(
@@ -1675,19 +1713,26 @@ def update_permission(
 def login(db: Session, username: str, password: str) -> Dict[str, object]:
     """登录校验。
 
-    校验 `sha256(password)` 是否匹配 `sys_user.password_hash`，
+    校验明文密码与 `sys_user.password_hash` 是否匹配（兼容旧版 sha256），
     成功则刷新 `last_login_at` 并返回用户、角色、权限集合。
     登录凭证（token）由路由层调用 `app/core/security.py` 签发，service 不参与鉴权。
     """
     user = repo.get_user_by_username(db, username)
     if not user or user.status != RecordStatus.ACTIVE.value:
         raise BusinessException(CODE_LOGIN_FAILED, "用户名或密码错误")
-    if user.password_hash != _hash_password(password):
+    if not verify_password(password, user.password_hash):
         raise BusinessException(CODE_LOGIN_FAILED, "用户名或密码错误")
+    # 员工已离职 / 被开除时，即使账号未停用也不允许登录
+    if user.personnel is not None and user.personnel.status != RecordStatus.ACTIVE.value:
+        raise BusinessException(CODE_LOGIN_FAILED, "该员工已离职，账号已停用")
 
     user.last_login_at = datetime.now()
-    roles = list(user.roles)
-    permissions = repo.list_role_permissions(db, [role.id for role in roles])
+    roles = [role for role in user.roles if role.status == RecordStatus.ACTIVE.value]
+    permissions = [
+        permission
+        for permission in repo.list_role_permissions(db, [role.id for role in roles])
+        if permission.status == RecordStatus.ACTIVE.value
+    ]
     log_operation(
         db,
         module="system",
@@ -1703,11 +1748,11 @@ def change_password(
     db: Session, user: models.SysUser, old_password: str, new_password: str
 ) -> models.SysUser:
     """登录用户自助修改密码：校验原密码后写入新密码。"""
-    if user.password_hash != _hash_password(old_password):
+    if not verify_password(old_password, user.password_hash):
         raise BusinessException(CODE_INVALID_PARAM, "原密码不正确")
     if old_password == new_password:
         raise BusinessException(CODE_INVALID_PARAM, "新密码不能与原密码相同")
-    user.password_hash = _hash_password(new_password)
+    user.password_hash = hash_password(new_password)
     log_operation(
         db,
         module="system",
@@ -2138,13 +2183,17 @@ def confirm_bom_import(db: Session, source: str) -> BomConfirmOut:
             skipped += 1
         else:
             bom = models.SysBom(
-                bom_code=repo.next_no(db, models.SysBom, "BOM"),
+                bom_code=repo.next_no(
+                    db, models.SysBom, models.SysBom.bom_code, "BOM"
+                ),
                 material_id=parent.id,
                 bom_version=version,
                 is_active=True,
                 status=RecordStatus.ACTIVE.value,
             )
             repo.add_bom(db, bom)
+            # 与界面新建保持一致：同一物料只保留一个激活版本
+            repo.deactivate_other_boms(db, parent.id, bom.id)
             headers_created += 1
 
         seen_children: set = set()

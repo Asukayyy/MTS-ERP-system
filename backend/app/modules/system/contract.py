@@ -43,6 +43,7 @@ def _material_dict(row: models.SysMaterial) -> Dict[str, Any]:
         "material_type": row.material_type,
         "supply_type": row.supply_type,
         "unit_code": row.unit_code,
+        "specification": row.specification,
         "abc_class": row.abc_class,
         "sales_category": row.sales_category,
         "lead_time_days": row.lead_time_days,

@@ -281,7 +281,9 @@ class ShipmentItemCreate(BaseModel):
     """发货行新增入参。物料由订单行带出，`material_id` 无需传入。"""
 
     order_item_id: int = Field(description="销售订单行ID")
-    warehouse_id: int = Field(description="发货仓库ID")
+    warehouse_id: Optional[int] = Field(
+        default=None, description="发货仓库ID（不再必填，由仓库管理在出库单中指定）"
+    )
     quantity: Decimal = Field(gt=0, description="发货数量")
     remark: Optional[str] = Field(default=None, max_length=200)
 
@@ -303,7 +305,7 @@ class ShipmentItemOut(_IdOut):
     material_id: int
     material_code: Optional[str] = None
     material_name: Optional[str] = None
-    warehouse_id: int
+    warehouse_id: Optional[int] = None
     quantity: Decimal
     remark: Optional[str] = None
 
@@ -327,7 +329,9 @@ class ReturnItemCreate(BaseModel):
     """退货行新增入参。"""
 
     material_id: int = Field(description="物料ID")
-    warehouse_id: int = Field(description="退回仓库ID")
+    warehouse_id: Optional[int] = Field(
+        default=None, description="退回仓库ID（不再必填，由仓库管理在入库单中指定）"
+    )
     quantity: Decimal = Field(gt=0, description="退货数量")
     quality_status: str = Field(default="QUALIFIED", description="质量状态 QUALIFIED/DEFECTIVE/SCRAP")
     reason: Optional[str] = Field(default=None, max_length=200)
@@ -352,7 +356,7 @@ class ReturnItemOut(_IdOut):
     material_id: int
     material_code: Optional[str] = None
     material_name: Optional[str] = None
-    warehouse_id: int
+    warehouse_id: Optional[int] = None
     quantity: Decimal
     quality_status: str
     reason: Optional[str] = None
@@ -398,7 +402,7 @@ class ShipmentReportOut(BaseModel):
     material_id: int
     material_code: Optional[str] = None
     material_name: Optional[str] = None
-    warehouse_id: int
+    warehouse_id: Optional[int] = None
     quantity: Decimal
 
 
@@ -413,7 +417,7 @@ class ReturnReportOut(BaseModel):
     material_id: int
     material_code: Optional[str] = None
     material_name: Optional[str] = None
-    warehouse_id: int
+    warehouse_id: Optional[int] = None
     quantity: Decimal
     quality_status: str
 

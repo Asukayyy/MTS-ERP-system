@@ -17,7 +17,7 @@ import {
   updateOrder,
 } from '@/api/sales'
 import { listOrganizationsFlat, listPersonnel } from '@/api/system'
-import { listBalances, listWarehouses } from '@/api/inventory'
+import { listBalances } from '@/api/inventory'
 import RemoteSelect from '@/components/common/RemoteSelect.vue'
 import StatusTag from '@/components/common/StatusTag.vue'
 import { usePagedTable, toNumber } from '@/composables/usePagedTable'
@@ -62,11 +62,6 @@ async function loadSalespersonOptions(keyword: string): Promise<RemoteOption[]> 
   if (!orgId) return []
   const data = await listPersonnel({ keyword, org_id: orgId, page: 1, page_size: 50 })
   return data.items.map((item) => ({ id: item.id, label: `${item.employee_no} ${item.person_name}` }))
-}
-
-async function loadWarehouseOptions(keyword: string): Promise<RemoteOption[]> {
-  const data = await listWarehouses({ keyword, page: 1, page_size: 50 })
-  return data.items.map((item) => ({ id: item.id, label: `${item.warehouse_code} ${item.warehouse_name}` }))
 }
 
 // ---------------- 物料库存提示 ----------------
@@ -325,98 +320,22 @@ const shipFormRef = ref<FormInstance>()
 const shipForm = reactive<{
   order_id: number | null
   shipment_date: string
-  warehouse_id: number | undefined
   remark: string
   items: ShipmentLineForm[]
 }>({
   order_id: null,
   shipment_date: '',
-  warehouse_id: undefined,
   remark: '',
   items: [],
 })
 
 const shipRules: FormRules = {
   shipment_date: [{ required: true, message: '请选择发货日期', trigger: 'change' }],
-  warehouse_id: [{ required: true, message: '请选择发货仓库', trigger: 'change' }],
-}
-
-/** 废品仓编码：发货仓库不允许选择废品仓 */
-const SCRAP_WAREHOUSE_CODE = 'WH-SCRAP-01'
-/** 生成发货单的可选仓库（按本次发货物料实时库存过滤，label 带可用量） */
-const shipWarehouseOptions = ref<RemoteOption[]>([])
-/** 仓库候选版本号，用于强制重挂载下拉以刷新首屏选项 */
-const shipWarehouseVersion = ref(0)
-/** 请求序号，丢弃过期的库存查询结果 */
-let shipWarehouseSeq = 0
-
-function replaceShipWarehouseOptions(options: RemoteOption[]): void {
-  shipWarehouseOptions.value = options
-  shipWarehouseVersion.value += 1
-  // 候选变化后，原先选中的仓库可能已不在范围内
-  if (
-    shipForm.warehouse_id !== undefined &&
-    !options.some((item) => item.id === shipForm.warehouse_id)
-  ) {
-    shipForm.warehouse_id = undefined
-  }
-}
-
-/** 发货仓库候选：同时备有本次发货全部物料且有可用量的仓库，排除废品仓 */
-async function refreshShipWarehouseOptions(): Promise<void> {
-  const seq = ++shipWarehouseSeq
-  const materialIds = [
-    ...new Set(shipForm.items.filter((item) => item.quantity > 0).map((item) => item.material_id)),
-  ]
-  if (!materialIds.length) {
-    replaceShipWarehouseOptions([])
-    return
-  }
-  try {
-    const pages = await Promise.all(
-      materialIds.map((materialId) =>
-        listBalances({ material_id: materialId, page: 1, page_size: 200 }),
-      ),
-    )
-    if (seq !== shipWarehouseSeq) return
-    const stockMaps = pages.map((data) => {
-      const map = new Map<number, { code: string; name: string; available: number }>()
-      data.items.forEach((balance) => {
-        if (balance.warehouse_code === SCRAP_WAREHOUSE_CODE) return
-        const available = toNumber(balance.available_quantity)
-        if (available <= 0) return
-        map.set(balance.warehouse_id, {
-          code: balance.warehouse_code ?? '',
-          name: balance.warehouse_name ?? '',
-          available,
-        })
-      })
-      return map
-    })
-    const ids = [...stockMaps[0].keys()].filter((id) => stockMaps.every((map) => map.has(id)))
-    replaceShipWarehouseOptions(
-      ids.map((id) => {
-        const base = stockMaps[0].get(id)!
-        // 多物料时取最小可用量，代表该仓库的最短板
-        const available = Math.min(...stockMaps.map((map) => map.get(id)!.available))
-        return { id, label: `${base.code} ${base.name} · 可用 ${formatQty(available)}` }
-      }),
-    )
-  } catch (error) {
-    ElMessage.error((error as Error).message)
-  }
-}
-
-async function loadShipWarehouseOptions(keyword: string): Promise<RemoteOption[]> {
-  const kw = keyword.trim().toLowerCase()
-  if (!kw) return shipWarehouseOptions.value
-  return shipWarehouseOptions.value.filter((item) => item.label.toLowerCase().includes(kw))
 }
 
 function openShipment(row: Order): void {
   shipForm.order_id = row.id
   shipForm.shipment_date = ''
-  shipForm.warehouse_id = undefined
   shipForm.remark = ''
   shipForm.items = row.items.map((item) => ({
     order_item_id: item.id,
@@ -425,15 +344,13 @@ function openShipment(row: Order): void {
     remaining: toNumber(item.quantity) - toNumber(item.delivered_qty),
     quantity: toNumber(item.quantity) - toNumber(item.delivered_qty),
   }))
-  replaceShipWarehouseOptions([])
   shipDialogVisible.value = true
-  void refreshShipWarehouseOptions()
 }
 
 async function submitShipment(): Promise<void> {
   const valid = await shipFormRef.value?.validate().catch(() => false)
   if (!valid) return
-  if (shipForm.order_id === null || shipForm.warehouse_id === undefined) return
+  if (shipForm.order_id === null) return
   const items = shipForm.items.filter((item) => item.quantity > 0)
   if (!items.length) {
     ElMessage.warning('请填写发货数量')
@@ -445,13 +362,13 @@ async function submitShipment(): Promise<void> {
       order_id: shipForm.order_id,
       shipment_date: shipForm.shipment_date,
       remark: shipForm.remark || null,
+      // 不再指定仓库：确认发货只推送库存「待出库单」，由仓库管理人员决定出库仓
       items: items.map((item) => ({
         order_item_id: item.order_item_id,
-        warehouse_id: shipForm.warehouse_id,
         quantity: item.quantity,
       })),
     })
-    ElMessage.success('发货单已生成（草稿）')
+    ElMessage.success('发货单已生成（草稿）；确认发货后会在库存管理生成待出库单')
     shipDialogVisible.value = false
     await load()
   } catch (error) {
@@ -477,14 +394,12 @@ const returnForm = reactive<{
   order_id: number | null
   customer_id: number | undefined
   return_date: string
-  warehouse_id: number | undefined
   reason: string
   items: ReturnLineForm[]
 }>({
   order_id: null,
   customer_id: undefined,
   return_date: '',
-  warehouse_id: undefined,
   reason: '',
   items: [],
 })
@@ -492,7 +407,6 @@ const returnForm = reactive<{
 const returnRules: FormRules = {
   customer_id: [{ required: true, message: '请选择客户', trigger: 'change' }],
   return_date: [{ required: true, message: '请选择退货日期', trigger: 'change' }],
-  warehouse_id: [{ required: true, message: '请选择退回仓库', trigger: 'change' }],
 }
 
 function addReturnLine(): void {
@@ -509,7 +423,6 @@ function openReturnFromOrder(row: Order): void {
   returnForm.order_id = row.id
   returnForm.customer_id = row.customer_id
   returnForm.return_date = ''
-  returnForm.warehouse_id = undefined
   returnForm.reason = ''
   returnForm.items = row.items.map((item) => ({
     material_id: item.material_id,
@@ -525,7 +438,6 @@ function openReturnBlank(): void {
   returnForm.order_id = null
   returnForm.customer_id = undefined
   returnForm.return_date = ''
-  returnForm.warehouse_id = undefined
   returnForm.reason = ''
   returnForm.items = []
   addReturnLine()
@@ -535,7 +447,7 @@ function openReturnBlank(): void {
 async function submitReturn(): Promise<void> {
   const valid = await returnFormRef.value?.validate().catch(() => false)
   if (!valid) return
-  if (returnForm.customer_id === undefined || returnForm.warehouse_id === undefined) return
+  if (returnForm.customer_id === undefined) return
   const items = returnForm.items.filter((item) => item.material_id !== undefined && item.quantity > 0)
   if (!items.length) {
     ElMessage.warning('请至少添加一行退货明细')
@@ -550,14 +462,13 @@ async function submitReturn(): Promise<void> {
       reason: returnForm.reason || null,
       items: items.map((item) => ({
         material_id: item.material_id,
-        warehouse_id: returnForm.warehouse_id,
         quantity: item.quantity,
         quality_status: item.quality_status,
         reason: item.reason || null,
       })),
     })
     await confirmReturn(created.id)
-    ElMessage.success('退货单已创建并确认（已产生库存流水）')
+    ElMessage.success('退货单已创建并确认；库存管理已生成待入库单，由仓库人员指定仓库')
     returnDialogVisible.value = false
     await load()
   } catch (error) {
@@ -782,17 +693,6 @@ onMounted(load)
               <el-date-picker v-model="shipForm.shipment_date" type="date" value-format="YYYY-MM-DD" style="width: 100%" />
             </el-form-item>
           </el-col>
-          <el-col :span="12">
-            <el-form-item label="发货仓库" prop="warehouse_id">
-              <RemoteSelect
-                :key="`wh-${shipWarehouseVersion}`"
-                v-model="shipForm.warehouse_id"
-                :loader="loadShipWarehouseOptions"
-                placeholder="请选择有库存的仓库"
-                style="width: 100%"
-              />
-            </el-form-item>
-          </el-col>
           <el-col :span="24">
             <el-form-item label="备注"><el-input v-model="shipForm.remark" /></el-form-item>
           </el-col>
@@ -809,14 +709,12 @@ onMounted(load)
               :max="row.remaining"
               :controls="false"
               style="width: 100%"
-              @change="refreshShipWarehouseOptions"
             />
           </template>
         </el-table-column>
       </el-table>
       <p class="form-tip">
-        发货仓库只列出同时备有本次发货全部物料且有可用量的仓库（不含废品仓），标签中的「可用 X」为实时可用库存。
-        发货单保存后为草稿状态，请在「发货管理」中确认以实际出库。
+        发货单保存后为草稿状态，确认发货后会在「库存管理 → 出库管理」生成待出库单，由仓库管理人员指定出库仓库。
       </p>
       <template #footer>
         <el-button @click="shipDialogVisible = false">取消</el-button>
@@ -833,14 +731,9 @@ onMounted(load)
               <RemoteSelect v-model="returnForm.customer_id" :loader="loadCustomerOptions" style="width: 100%" />
             </el-form-item>
           </el-col>
-          <el-col :span="8">
+          <el-col :span="12">
             <el-form-item label="退货日期" prop="return_date">
               <el-date-picker v-model="returnForm.return_date" type="date" value-format="YYYY-MM-DD" style="width: 100%" />
-            </el-form-item>
-          </el-col>
-          <el-col :span="8">
-            <el-form-item label="退回仓库" prop="warehouse_id">
-              <RemoteSelect v-model="returnForm.warehouse_id" :loader="loadWarehouseOptions" style="width: 100%" />
             </el-form-item>
           </el-col>
           <el-col :span="24">
@@ -883,7 +776,7 @@ onMounted(load)
           </template>
         </el-table-column>
       </el-table>
-      <p class="form-tip">保存后将自动确认退货单并写入库存流水。</p>
+      <p class="form-tip">保存后自动确认退货单，并在「库存管理 → 入库管理」生成待入库单，由仓库管理人员指定入库仓库。</p>
       <template #footer>
         <el-button @click="returnDialogVisible = false">取消</el-button>
         <el-button type="primary" :loading="returnSubmitting" @click="submitReturn">保存并确认</el-button>

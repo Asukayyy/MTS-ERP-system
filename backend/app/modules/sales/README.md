@@ -54,8 +54,9 @@
 | --- | --- |
 | `system.contract.get_finished_materials` | 销售产品下拉 |
 | `system.contract.log_operation` | 写操作日志（同事务） |
-| `inventory.contract.decrease_stock` | 发货确认出库（`SALES_SHIPMENT`） |
-| `inventory.contract.increase_stock` | 退货确认入库（`SALES_RETURN`） |
+| `inventory.contract.push_outbound_order` | 发货确认推送**待出库单**（`SALES_SHIPMENT`，不改结存，由仓库管理指定仓库并确认） |
+| `inventory.contract.push_inbound_order` | 退货确认推送**待入库单**（`SALES_RETURN`，不改结存，由仓库管理指定仓库并确认） |
+| `inventory.contract.cancel_pending_inout_orders` | 发货 / 退货取消时撤销尚未确认的出入库单 |
 | `inventory.contract.get_available_by_warehouse` | 订单确认时按仓库查可用量（现存量 − 锁定量）做库存分流 |
 | `planning.contract.create_sales_demand_from_order` | 订单确认时登记 `SALES` 计划需求（置 `CONFIRMED`，数量为订单未交付总量） |
 | `planning.contract.cancel_sales_demands_for_order` | 订单取消时作废未进入 MPS 的销售计划需求 |

@@ -692,6 +692,9 @@ def draft_shipment_allocations(db: Session) -> dict:
 
     订单确认时按库存分配需要扣除这些已占用数量，避免多张订单
     把同一批库存重复分配（发货确认前库存不会被扣减）。
+
+    `warehouse_id` 为 `None` 表示「发货草稿未指定仓库」：业务模块已不再选仓库，
+    由仓库管理人员在库存出库单里决定出库仓，所以这类占用只能按物料整体抵扣。
     """
     stmt = (
         select(
@@ -704,7 +707,7 @@ def draft_shipment_allocations(db: Session) -> dict:
         .group_by(models.SalShipmentItem.warehouse_id, models.SalShipmentItem.material_id)
     )
     return {
-        (int(row[0]), int(row[1])): Decimal(str(row[2]))
+        (int(row[0]) if row[0] is not None else None, int(row[1])): Decimal(str(row[2]))
         for row in db.execute(stmt).all()
     }
 

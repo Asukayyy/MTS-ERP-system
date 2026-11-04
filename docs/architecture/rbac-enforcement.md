@@ -78,7 +78,7 @@ GET http://127.0.0.1:8000/api/v1/system/users?page=1&page_size=5
 | `planning:finish` | `/planning/finish` | `/planning/completion` |
 | `procurement:arrival` | `/procurement/arrival` | `/procurement/receipt` |
 | `inventory:stock` | `/inventory/stock` | `/inventory/balance` |
-| `inventory:ledger` | `/inventory/ledger` | `/inventory/transaction` |
+| `inventory:ledger` | `/inventory/ledger` | `/inventory/stock-journal` |
 
 **第二类：标成 MENU 但系统里没有这个页面 —— 4 条，需要决策**
 
