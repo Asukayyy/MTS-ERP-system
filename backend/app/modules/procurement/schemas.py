@@ -75,6 +75,9 @@ class SupplierOut(_IdOut):
     address: Optional[str] = None
     status: str
     remark: Optional[str] = None
+    avg_total_score: Optional[Decimal] = Field(
+        default=None, description="评价平均综合得分（无评价记录时为空）"
+    )
 
 
 # ==================== 供应商-物料关系 ====================

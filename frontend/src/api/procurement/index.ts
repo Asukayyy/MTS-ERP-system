@@ -28,6 +28,21 @@ export function getProcurementStats(): Promise<ProcurementStats> {
 
 // ---------------- 供应商 ----------------
 
+/**
+ * 供应商下拉选项文案：`编码 名称 · 4.6分`，未评价时省略评分段。
+ * 主供应商额外加【主供】前缀，便于采购人员优先命中主供。
+ */
+export function supplierOptionLabel(
+  supplier: Pick<Supplier, 'supplier_code' | 'supplier_name' | 'avg_total_score'>,
+  isPrimary = false,
+): string {
+  const base = `${supplier.supplier_code} ${supplier.supplier_name}`
+  const raw = supplier.avg_total_score
+  const scoreText =
+    raw === null || raw === undefined || raw === '' ? '' : ` · ${Number(raw).toFixed(1)}分`
+  return isPrimary ? `【主供】${base}${scoreText}` : `${base}${scoreText}`
+}
+
 export function listSuppliers(params: Record<string, unknown> = {}): Promise<PageData<Supplier>> {
   return get<PageData<Supplier>>('/procurement/suppliers', params)
 }
