@@ -10,6 +10,7 @@ import {
   getSupplierEvaluationReport,
 } from '@/api/procurement'
 import StatusTag from '@/components/common/StatusTag.vue'
+import { fmtQty } from '@/utils/format'
 import type {
   OrderReportRow,
   PendingReceiptRow,
@@ -121,11 +122,15 @@ onMounted(loadAll)
                 {{ row.material_code ? `${row.material_code} ${row.material_name ?? ''}` : `ID ${row.material_id}` }}
               </template>
             </el-table-column>
-            <el-table-column label="采购数量" prop="quantity" width="110" align="right" />
-            <el-table-column label="已到货" prop="received_qty" width="110" align="right" />
+            <el-table-column label="采购数量" prop="quantity" width="110" align="right">
+              <template #default="{ row }">{{ fmtQty(row.quantity) }}</template>
+            </el-table-column>
+            <el-table-column label="已到货" prop="received_qty" width="110" align="right">
+              <template #default="{ row }">{{ fmtQty(row.received_qty) }}</template>
+            </el-table-column>
             <el-table-column label="未到货" width="110" align="right">
               <template #default="{ row }">
-                <span class="text-danger">{{ row.remaining_qty }}</span>
+                <span class="text-danger">{{ fmtQty(row.remaining_qty) }}</span>
               </template>
             </el-table-column>
             <el-table-column label="预计到货" prop="expected_date" width="110" />
@@ -145,11 +150,15 @@ onMounted(loadAll)
                 {{ row.material_code ? `${row.material_code} ${row.material_name ?? ''}` : `ID ${row.material_id}` }}
               </template>
             </el-table-column>
-            <el-table-column label="需求数量" prop="required_qty" width="110" align="right" />
-            <el-table-column label="已下单" prop="ordered_qty" width="110" align="right" />
+            <el-table-column label="需求数量" prop="required_qty" width="110" align="right">
+              <template #default="{ row }">{{ fmtQty(row.required_qty) }}</template>
+            </el-table-column>
+            <el-table-column label="已下单" prop="ordered_qty" width="110" align="right">
+              <template #default="{ row }">{{ fmtQty(row.ordered_qty) }}</template>
+            </el-table-column>
             <el-table-column label="剩余未下单" width="120" align="right">
               <template #default="{ row }">
-                <span class="text-danger">{{ row.remaining_qty }}</span>
+                <span class="text-danger">{{ fmtQty(row.remaining_qty) }}</span>
               </template>
             </el-table-column>
             <el-table-column label="需求日期" prop="required_date" width="110" />
@@ -174,8 +183,12 @@ onMounted(loadAll)
                 {{ row.material_code ? `${row.material_code} ${row.material_name ?? ''}` : `ID ${row.material_id}` }}
               </template>
             </el-table-column>
-            <el-table-column label="采购数量" prop="quantity" width="110" align="right" />
-            <el-table-column label="已到货" prop="received_qty" width="110" align="right" />
+            <el-table-column label="采购数量" prop="quantity" width="110" align="right">
+              <template #default="{ row }">{{ fmtQty(row.quantity) }}</template>
+            </el-table-column>
+            <el-table-column label="已到货" prop="received_qty" width="110" align="right">
+              <template #default="{ row }">{{ fmtQty(row.received_qty) }}</template>
+            </el-table-column>
             <el-table-column label="到货率" width="110" align="right">
               <template #default="{ row }">{{ row.receipt_rate }}</template>
             </el-table-column>
@@ -219,8 +232,12 @@ onMounted(loadAll)
                 {{ row.material_code ? `${row.material_code} ${row.material_name ?? ''}` : `ID ${row.material_id}` }}
               </template>
             </el-table-column>
-            <el-table-column label="到货数量" prop="quantity" width="110" align="right" />
-            <el-table-column label="合格数量" prop="qualified_qty" width="110" align="right" />
+            <el-table-column label="到货数量" prop="quantity" width="110" align="right">
+              <template #default="{ row }">{{ fmtQty(row.quantity) }}</template>
+            </el-table-column>
+            <el-table-column label="合格数量" prop="qualified_qty" width="110" align="right">
+              <template #default="{ row }">{{ fmtQty(row.qualified_qty) }}</template>
+            </el-table-column>
             <el-table-column label="状态" width="90">
               <template #default="{ row }"><StatusTag :status="row.status" /></template>
             </el-table-column>

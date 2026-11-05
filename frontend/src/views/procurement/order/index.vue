@@ -21,6 +21,7 @@ import { listMaterials, listPersonnel } from '@/api/system'
 import RemoteSelect from '@/components/common/RemoteSelect.vue'
 import StatusTag from '@/components/common/StatusTag.vue'
 import { usePagedTable, toNumber } from '@/composables/usePagedTable'
+import { fmtQty } from '@/utils/format'
 import type { PurchaseOrder, RemoteOption } from '@/types/erp'
 
 const { loading, rows, total, page, pageSize, query, load, search, reset, changePage, changeSize } =
@@ -404,8 +405,12 @@ onMounted(load)
             <el-table class="nested-table" :data="row.items" border size="small">
               <el-table-column label="行号" prop="line_no" width="70" align="right" />
               <el-table-column label="物料ID" prop="material_id" width="90" align="right" />
-              <el-table-column label="采购数量" prop="quantity" width="110" align="right" />
-              <el-table-column label="已到货" prop="received_qty" width="110" align="right" />
+              <el-table-column label="采购数量" prop="quantity" width="110" align="right">
+                <template #default="{ row }">{{ fmtQty(row.quantity) }}</template>
+              </el-table-column>
+              <el-table-column label="已到货" prop="received_qty" width="110" align="right">
+                <template #default="{ row }">{{ fmtQty(row.received_qty) }}</template>
+              </el-table-column>
               <el-table-column label="单价" prop="unit_price" width="110" align="right" />
               <el-table-column label="金额" prop="amount" width="120" align="right" />
               <el-table-column label="备注" prop="remark" min-width="140" />

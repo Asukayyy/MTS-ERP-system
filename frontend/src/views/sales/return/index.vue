@@ -16,6 +16,7 @@ import {
 import RemoteSelect from '@/components/common/RemoteSelect.vue'
 import StatusTag from '@/components/common/StatusTag.vue'
 import { usePagedTable } from '@/composables/usePagedTable'
+import { fmtQty } from '@/utils/format'
 import type { Order, RemoteOption, SalesReturn } from '@/types/erp'
 
 const { loading, rows, total, page, pageSize, query, load, search, reset, changePage, changeSize } =
@@ -221,7 +222,9 @@ onMounted(load)
             <el-table :data="row.items" size="small" border class="nested-table">
               <el-table-column label="物料编码" prop="material_code" min-width="130" />
               <el-table-column label="物料名称" prop="material_name" min-width="150" />
-              <el-table-column label="数量" prop="quantity" width="100" align="right" />
+              <el-table-column label="数量" prop="quantity" width="100" align="right">
+                <template #default="{ row }">{{ fmtQty(row.quantity) }}</template>
+              </el-table-column>
               <el-table-column label="质量状态" width="100">
                 <template #default="{ row: item }"><StatusTag :status="item.quality_status" /></template>
               </el-table-column>
@@ -301,7 +304,7 @@ onMounted(load)
           <el-descriptions-item label="订单金额">{{ selectedOrder.total_amount }}</el-descriptions-item>
           <el-descriptions-item label="明细行数">{{ selectedOrder.items.length }}</el-descriptions-item>
           <el-descriptions-item label="已发数量">
-            {{ selectedOrder.items.reduce((sum, item) => sum + Number(item.delivered_qty ?? 0), 0) }}
+            {{ fmtQty(selectedOrder.items.reduce((sum, item) => sum + Number(item.delivered_qty ?? 0), 0)) }}
           </el-descriptions-item>
         </el-descriptions>
 
@@ -309,13 +312,13 @@ onMounted(load)
           <el-table-column label="物料编码" prop="material_code" min-width="140" />
           <el-table-column label="物料名称" prop="material_name" min-width="160" />
           <el-table-column label="订单数量" width="110" align="right">
-            <template #default="{ row }">{{ row.quantity }}</template>
+            <template #default="{ row }">{{ fmtQty(row.quantity) }}</template>
           </el-table-column>
           <el-table-column label="已发数量" width="110" align="right">
-            <template #default="{ row }">{{ row.delivered_qty }}</template>
+            <template #default="{ row }">{{ fmtQty(row.delivered_qty) }}</template>
           </el-table-column>
           <el-table-column label="未发数量" width="110" align="right">
-            <template #default="{ row }">{{ Number(row.quantity) - Number(row.delivered_qty ?? 0) }}</template>
+            <template #default="{ row }">{{ fmtQty(Number(row.quantity) - Number(row.delivered_qty ?? 0)) }}</template>
           </el-table-column>
         </el-table>
       </div>

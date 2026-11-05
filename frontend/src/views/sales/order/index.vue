@@ -21,6 +21,7 @@ import { listBalances } from '@/api/inventory'
 import RemoteSelect from '@/components/common/RemoteSelect.vue'
 import StatusTag from '@/components/common/StatusTag.vue'
 import { usePagedTable, toNumber } from '@/composables/usePagedTable'
+import { fmtQty } from '@/utils/format'
 import type { Order, RemoteOption } from '@/types/erp'
 
 const { loading, rows, total, page, pageSize, query, load, search, reset, changePage, changeSize } =
@@ -73,14 +74,10 @@ interface StockInfo {
 /** 物料ID -> 各仓汇总库存，选物料后展示该物料的可用/现存数量 */
 const stockMap = ref<Record<number, StockInfo>>({})
 
-function formatQty(value: number): string {
-  return String(Math.round(value * 10000) / 10000)
-}
-
 function stockText(materialId: number | undefined): string {
   const info = materialId ? stockMap.value[materialId] : undefined
   if (!info) return ''
-  return `可用库存 ${formatQty(info.available)}（现存 ${formatQty(info.onHand)}）`
+  return `可用库存 ${fmtQty(info.available)}（现存 ${fmtQty(info.onHand)}）`
 }
 
 async function loadMaterialStock(materialId: number | undefined): Promise<void> {
@@ -527,8 +524,12 @@ onMounted(load)
               <el-table-column label="行号" prop="line_no" width="70" align="right" />
               <el-table-column label="物料编码" prop="material_code" min-width="130" />
               <el-table-column label="物料名称" prop="material_name" min-width="150" />
-              <el-table-column label="订单数量" prop="quantity" width="110" align="right" />
-              <el-table-column label="已发货" prop="delivered_qty" width="100" align="right" />
+              <el-table-column label="订单数量" prop="quantity" width="110" align="right">
+                <template #default="{ row }">{{ fmtQty(row.quantity) }}</template>
+              </el-table-column>
+              <el-table-column label="已发货" prop="delivered_qty" width="100" align="right">
+                <template #default="{ row }">{{ fmtQty(row.delivered_qty) }}</template>
+              </el-table-column>
               <el-table-column label="单价" prop="unit_price" width="100" align="right" />
               <el-table-column label="金额" prop="amount" width="120" align="right" />
               <el-table-column label="备注" prop="remark" min-width="140" />
@@ -700,7 +701,9 @@ onMounted(load)
       </el-form>
       <el-table :data="shipForm.items" border size="small">
         <el-table-column label="物料" prop="material_label" min-width="200" />
-        <el-table-column label="可发数量" prop="remaining" width="110" align="right" />
+        <el-table-column label="可发数量" prop="remaining" width="110" align="right">
+          <template #default="{ row }">{{ fmtQty(row.remaining) }}</template>
+        </el-table-column>
         <el-table-column label="本次发货" width="150">
           <template #default="{ row }">
             <el-input-number

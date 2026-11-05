@@ -12,6 +12,7 @@ import {
 import { listMaterials } from '@/api/system'
 import RemoteSelect from '@/components/common/RemoteSelect.vue'
 import StatusTag from '@/components/common/StatusTag.vue'
+import { fmtQty } from '@/utils/format'
 import type { GenerationResult, ProductionPlan, RemoteOption } from '@/types/erp'
 
 /**
@@ -179,7 +180,9 @@ defineExpose({ open })
       <el-table-column label="来源" width="90">
         <template #default="{ row }"><StatusTag :status="row.source_type" /></template>
       </el-table-column>
-      <el-table-column label="计划数量" prop="planned_qty" width="110" align="right" />
+      <el-table-column label="计划数量" prop="planned_qty" width="110" align="right">
+        <template #default="{ row }">{{ fmtQty(row.planned_qty) }}</template>
+      </el-table-column>
       <el-table-column label="开始日期" prop="start_date" width="110" />
       <el-table-column label="完成日期" prop="end_date" width="110" />
       <el-table-column label="状态" width="90">

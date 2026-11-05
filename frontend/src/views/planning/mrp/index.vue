@@ -14,6 +14,7 @@ import {
 import RemoteSelect from '@/components/common/RemoteSelect.vue'
 import StatusTag from '@/components/common/StatusTag.vue'
 import { usePagedTable } from '@/composables/usePagedTable'
+import { fmtQty } from '@/utils/format'
 import type { MrpExplain, MrpResult, MrpRun, RemoteOption } from '@/types/erp'
 
 // ---------------- 运行 MRP ----------------
@@ -249,12 +250,24 @@ onMounted(async () => {
         <el-table-column label="物料编码" prop="material_code" min-width="140" />
         <el-table-column label="物料名称" prop="material_name" min-width="140" />
         <el-table-column label="父件编码" prop="parent_material_code" min-width="140" />
-        <el-table-column label="毛需求" prop="gross_requirement" width="110" align="right" />
-        <el-table-column label="现有库存" prop="on_hand" width="110" align="right" />
-        <el-table-column label="可用量" prop="available_quantity" width="110" align="right" />
-        <el-table-column label="安全库存" prop="safety_stock" width="110" align="right" />
-        <el-table-column label="净需求" prop="net_requirement" width="110" align="right" />
-        <el-table-column label="建议下达量" prop="order_qty" width="120" align="right" />
+        <el-table-column label="毛需求" prop="gross_requirement" width="110" align="right">
+          <template #default="{ row }">{{ fmtQty(row.gross_requirement) }}</template>
+        </el-table-column>
+        <el-table-column label="现有库存" prop="on_hand" width="110" align="right">
+          <template #default="{ row }">{{ fmtQty(row.on_hand) }}</template>
+        </el-table-column>
+        <el-table-column label="可用量" prop="available_quantity" width="110" align="right">
+          <template #default="{ row }">{{ fmtQty(row.available_quantity) }}</template>
+        </el-table-column>
+        <el-table-column label="安全库存" prop="safety_stock" width="110" align="right">
+          <template #default="{ row }">{{ fmtQty(row.safety_stock) }}</template>
+        </el-table-column>
+        <el-table-column label="净需求" prop="net_requirement" width="110" align="right">
+          <template #default="{ row }">{{ fmtQty(row.net_requirement) }}</template>
+        </el-table-column>
+        <el-table-column label="建议下达量" prop="order_qty" width="120" align="right">
+          <template #default="{ row }">{{ fmtQty(row.order_qty) }}</template>
+        </el-table-column>
         <el-table-column label="需求日期" prop="requirement_date" width="110" />
         <el-table-column label="建议下达日期" prop="planned_release_date" width="120" />
         <el-table-column label="提前期(天)" prop="lead_time_days" width="100" align="right" />
@@ -301,12 +314,12 @@ onMounted(async () => {
             <el-descriptions-item label="供应类型">
               <StatusTag :status="explain.supply_type" />
             </el-descriptions-item>
-            <el-descriptions-item label="毛需求">{{ explain.gross_requirement }}</el-descriptions-item>
-            <el-descriptions-item label="现有库存">{{ explain.on_hand }}</el-descriptions-item>
-            <el-descriptions-item label="可用量">{{ explain.available_quantity }}</el-descriptions-item>
-            <el-descriptions-item label="安全库存">{{ explain.safety_stock }}</el-descriptions-item>
-            <el-descriptions-item label="净需求">{{ explain.net_requirement }}</el-descriptions-item>
-            <el-descriptions-item label="建议下达量">{{ explain.order_qty }}</el-descriptions-item>
+            <el-descriptions-item label="毛需求">{{ fmtQty(explain.gross_requirement) }}</el-descriptions-item>
+            <el-descriptions-item label="现有库存">{{ fmtQty(explain.on_hand) }}</el-descriptions-item>
+            <el-descriptions-item label="可用量">{{ fmtQty(explain.available_quantity) }}</el-descriptions-item>
+            <el-descriptions-item label="安全库存">{{ fmtQty(explain.safety_stock) }}</el-descriptions-item>
+            <el-descriptions-item label="净需求">{{ fmtQty(explain.net_requirement) }}</el-descriptions-item>
+            <el-descriptions-item label="建议下达量">{{ fmtQty(explain.order_qty) }}</el-descriptions-item>
             <el-descriptions-item label="提前期(天)">{{ explain.lead_time_days }}</el-descriptions-item>
             <el-descriptions-item label="需求日期">{{ explain.requirement_date }}</el-descriptions-item>
             <el-descriptions-item label="建议下达日期">

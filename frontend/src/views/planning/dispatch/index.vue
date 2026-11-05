@@ -17,6 +17,7 @@ import RemoteSelect from '@/components/common/RemoteSelect.vue'
 import StatusTag from '@/components/common/StatusTag.vue'
 import GenerateFromPlansDialog from '@/components/planning/GenerateFromPlansDialog.vue'
 import { usePagedTable, toNumber } from '@/composables/usePagedTable'
+import { fmtQty } from '@/utils/format'
 import type { DispatchOrder, RemoteOption } from '@/types/erp'
 
 const { loading, rows, total, page, pageSize, query, load, search, reset, changePage, changeSize } =
@@ -271,8 +272,12 @@ onMounted(load)
         <el-table-column label="工序" prop="operation" min-width="130">
           <template #default="{ row }">{{ row.operation ?? '整单' }}</template>
         </el-table-column>
-        <el-table-column label="派工数量" prop="planned_qty" width="110" align="right" />
-        <el-table-column label="已完工" prop="completed_qty" width="100" align="right" />
+        <el-table-column label="派工数量" prop="planned_qty" width="110" align="right">
+          <template #default="{ row }">{{ fmtQty(row.planned_qty) }}</template>
+        </el-table-column>
+        <el-table-column label="已完工" prop="completed_qty" width="100" align="right">
+          <template #default="{ row }">{{ fmtQty(row.completed_qty) }}</template>
+        </el-table-column>
         <el-table-column label="作业人员" prop="worker_name" width="120">
           <template #default="{ row }">{{ row.worker_name ?? '待指派' }}</template>
         </el-table-column>

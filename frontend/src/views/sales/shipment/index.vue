@@ -14,6 +14,7 @@ import {
 import RemoteSelect from '@/components/common/RemoteSelect.vue'
 import StatusTag from '@/components/common/StatusTag.vue'
 import { usePagedTable, toNumber } from '@/composables/usePagedTable'
+import { fmtQty } from '@/utils/format'
 import type { RemoteOption, Shipment } from '@/types/erp'
 
 const { loading, rows, total, page, pageSize, query, load, search, reset, changePage, changeSize } =
@@ -177,7 +178,9 @@ onMounted(load)
             <el-table :data="row.items" size="small" border class="nested-table">
               <el-table-column label="物料编码" prop="material_code" min-width="130" />
               <el-table-column label="物料名称" prop="material_name" min-width="150" />
-              <el-table-column label="发货数量" prop="quantity" width="110" align="right" />
+              <el-table-column label="发货数量" prop="quantity" width="110" align="right">
+                <template #default="{ row }">{{ fmtQty(row.quantity) }}</template>
+              </el-table-column>
               <el-table-column label="备注" prop="remark" min-width="140" />
             </el-table>
           </template>
@@ -238,7 +241,9 @@ onMounted(load)
 
       <el-table :data="form.items" border size="small">
         <el-table-column label="物料" prop="material_label" min-width="200" />
-        <el-table-column label="未发数量" prop="remaining" width="110" align="right" />
+        <el-table-column label="未发数量" prop="remaining" width="110" align="right">
+          <template #default="{ row }">{{ fmtQty(row.remaining) }}</template>
+        </el-table-column>
         <el-table-column label="本次发货" width="160">
           <template #default="{ row }">
             <el-input-number

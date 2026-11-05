@@ -14,6 +14,7 @@ import { getProcurementStats } from '@/api/procurement'
 import { listMaterials } from '@/api/system'
 import StatusTag from '@/components/common/StatusTag.vue'
 import { toNumber } from '@/composables/usePagedTable'
+import { fmtQty } from '@/utils/format'
 import type {
   InventoryStats,
   PlanningStats,
@@ -201,7 +202,7 @@ onMounted(loadAll)
         <el-card class="metric" shadow="never" @click="router.push(item.path)">
           <div class="metric__label">{{ item.label }}</div>
           <div class="metric__value">
-            {{ item.value }}
+            {{ fmtQty(item.value) }}
             <span class="metric__unit">{{ item.unit }}</span>
           </div>
           <el-progress

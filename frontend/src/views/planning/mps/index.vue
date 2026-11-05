@@ -17,6 +17,7 @@ import { listMaterials } from '@/api/system'
 import RemoteSelect from '@/components/common/RemoteSelect.vue'
 import StatusTag from '@/components/common/StatusTag.vue'
 import { usePagedTable, toNumber } from '@/composables/usePagedTable'
+import { fmtQty } from '@/utils/format'
 import type { Mps, MpsImportPreview, RemoteOption } from '@/types/erp'
 
 /** 课程附录 1 内置数据源标识 */
@@ -317,8 +318,12 @@ onMounted(load)
               <el-table-column label="物料编码" prop="material_code" min-width="130" />
               <el-table-column label="物料名称" prop="material_name" min-width="130" />
               <el-table-column label="期间" prop="period_label" width="110" />
-              <el-table-column label="计划数量" prop="planned_qty" width="110" align="right" />
-              <el-table-column label="已完工" prop="finished_qty" width="100" align="right" />
+              <el-table-column label="计划数量" prop="planned_qty" width="110" align="right">
+                <template #default="{ row }">{{ fmtQty(row.planned_qty) }}</template>
+              </el-table-column>
+              <el-table-column label="已完工" prop="finished_qty" width="100" align="right">
+                <template #default="{ row }">{{ fmtQty(row.finished_qty) }}</template>
+              </el-table-column>
               <el-table-column label="开始日期" prop="start_date" width="110" />
               <el-table-column label="完成日期" prop="end_date" width="110" />
               <el-table-column label="状态" width="90">
@@ -540,7 +545,9 @@ onMounted(load)
           <el-table-column label="物料编码" prop="material_code" min-width="130" />
           <el-table-column label="物料名称" prop="material_name" min-width="150" />
           <el-table-column label="期间" prop="period_label" width="110" />
-          <el-table-column label="计划数量" prop="planned_qty" width="110" align="right" />
+          <el-table-column label="计划数量" prop="planned_qty" width="110" align="right">
+            <template #default="{ row }">{{ fmtQty(row.planned_qty) }}</template>
+          </el-table-column>
           <el-table-column label="开始日期" prop="start_date" width="110" />
           <el-table-column label="完成日期" prop="end_date" width="110" />
         </el-table>

@@ -7,6 +7,7 @@ import { listBalances, listReorderSuggestions, listWarehouses, updateBalanceReor
 import { listMaterials } from '@/api/system'
 import RemoteSelect from '@/components/common/RemoteSelect.vue'
 import { usePagedTable } from '@/composables/usePagedTable'
+import { fmtQty } from '@/utils/format'
 import type { Balance, ReorderSuggestion, RemoteOption } from '@/types/erp'
 
 /**
@@ -167,10 +168,18 @@ onMounted(() => {
         <el-table-column label="仓库" min-width="150" show-overflow-tooltip>
           <template #default="{ row }">{{ row.warehouse_code }} {{ row.warehouse_name }}</template>
         </el-table-column>
-        <el-table-column label="现存量" prop="on_hand" width="110" align="right" />
-        <el-table-column label="可用量" prop="available_quantity" width="110" align="right" />
-        <el-table-column label="订货点" prop="reorder_point" width="110" align="right" />
-        <el-table-column label="建议订货量" prop="reorder_quantity" width="120" align="right" />
+        <el-table-column label="现存量" prop="on_hand" width="110" align="right">
+          <template #default="{ row }">{{ fmtQty(row.on_hand) }}</template>
+        </el-table-column>
+        <el-table-column label="可用量" prop="available_quantity" width="110" align="right">
+          <template #default="{ row }">{{ fmtQty(row.available_quantity) }}</template>
+        </el-table-column>
+        <el-table-column label="订货点" prop="reorder_point" width="110" align="right">
+          <template #default="{ row }">{{ fmtQty(row.reorder_point) }}</template>
+        </el-table-column>
+        <el-table-column label="建议订货量" prop="reorder_quantity" width="120" align="right">
+          <template #default="{ row }">{{ fmtQty(row.reorder_quantity) }}</template>
+        </el-table-column>
         <el-table-column label="操作" width="100" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" @click="openEdit(row)">编辑订货点</el-button>
@@ -206,10 +215,18 @@ onMounted(() => {
         <el-table-column label="仓库" min-width="140" show-overflow-tooltip>
           <template #default="{ row }">{{ row.warehouse_code }} {{ row.warehouse_name }}</template>
         </el-table-column>
-        <el-table-column label="订货点" prop="reorder_point" width="110" align="right" />
-        <el-table-column label="当前库存" prop="current_qty" width="110" align="right" />
-        <el-table-column label="建议补库量" prop="suggested_qty" width="120" align="right" />
-        <el-table-column label="目标库存" prop="target_qty" width="110" align="right" />
+        <el-table-column label="订货点" prop="reorder_point" width="110" align="right">
+          <template #default="{ row }">{{ fmtQty(row.reorder_point) }}</template>
+        </el-table-column>
+        <el-table-column label="当前库存" prop="current_qty" width="110" align="right">
+          <template #default="{ row }">{{ fmtQty(row.current_qty) }}</template>
+        </el-table-column>
+        <el-table-column label="建议补库量" prop="suggested_qty" width="120" align="right">
+          <template #default="{ row }">{{ fmtQty(row.suggested_qty) }}</template>
+        </el-table-column>
+        <el-table-column label="目标库存" prop="target_qty" width="110" align="right">
+          <template #default="{ row }">{{ fmtQty(row.target_qty) }}</template>
+        </el-table-column>
         <template #empty>暂无补库建议</template>
       </el-table>
     </el-card>

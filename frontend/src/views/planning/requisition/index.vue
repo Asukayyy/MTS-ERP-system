@@ -18,6 +18,7 @@ import RemoteSelect from '@/components/common/RemoteSelect.vue'
 import StatusTag from '@/components/common/StatusTag.vue'
 import GenerateFromPlansDialog from '@/components/planning/GenerateFromPlansDialog.vue'
 import { usePagedTable, toNumber } from '@/composables/usePagedTable'
+import { fmtQty } from '@/utils/format'
 import type { RemoteOption, Requisition } from '@/types/erp'
 
 const { loading, rows, total, page, pageSize, query, load, search, reset, changePage, changeSize } =
@@ -274,8 +275,12 @@ onMounted(load)
             <el-table class="nested-table" :data="row.items" border size="small">
               <el-table-column label="物料编码" prop="material_code" min-width="130" />
               <el-table-column label="物料名称" prop="material_name" min-width="130" />
-              <el-table-column label="需求数量" prop="required_qty" width="110" align="right" />
-              <el-table-column label="已发数量" prop="issued_qty" width="110" align="right" />
+              <el-table-column label="需求数量" prop="required_qty" width="110" align="right">
+                <template #default="{ row }">{{ fmtQty(row.required_qty) }}</template>
+              </el-table-column>
+              <el-table-column label="已发数量" prop="issued_qty" width="110" align="right">
+                <template #default="{ row }">{{ fmtQty(row.issued_qty) }}</template>
+              </el-table-column>
               <el-table-column label="备注" prop="remark" min-width="140" />
               <template #empty>暂无领料明细</template>
             </el-table>
