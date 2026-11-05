@@ -19,6 +19,7 @@ import RemoteSelect from '@/components/common/RemoteSelect.vue'
 import StatusTag from '@/components/common/StatusTag.vue'
 import GenerateFromPlansDialog from '@/components/planning/GenerateFromPlansDialog.vue'
 import { usePagedTable, toNumber } from '@/composables/usePagedTable'
+import { fmtQty } from '@/utils/format'
 import type { CompletionReport, RemoteOption } from '@/types/erp'
 
 const { loading, rows, total, page, pageSize, query, load, search, reset, changePage, changeSize } =
@@ -278,9 +279,15 @@ onMounted(load)
         </el-table-column>
         <el-table-column label="产出物料编码" prop="material_code" min-width="140" />
         <el-table-column label="产出物料名称" prop="material_name" min-width="140" />
-        <el-table-column label="完工数量" prop="completed_qty" width="110" align="right" />
-        <el-table-column label="合格数量" prop="qualified_qty" width="110" align="right" />
-        <el-table-column label="报废数量" prop="scrap_qty" width="100" align="right" />
+        <el-table-column label="完工数量" prop="completed_qty" width="110" align="right">
+          <template #default="{ row }">{{ fmtQty(row.completed_qty) }}</template>
+        </el-table-column>
+        <el-table-column label="合格数量" prop="qualified_qty" width="110" align="right">
+          <template #default="{ row }">{{ fmtQty(row.qualified_qty) }}</template>
+        </el-table-column>
+        <el-table-column label="报废数量" prop="scrap_qty" width="100" align="right">
+          <template #default="{ row }">{{ fmtQty(row.scrap_qty) }}</template>
+        </el-table-column>
         <el-table-column label="入库仓库" prop="warehouse_name" width="130">
           <template #default="{ row }">
             {{ row.warehouse_name ?? '库存管理指定' }}

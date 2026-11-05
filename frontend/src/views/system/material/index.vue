@@ -12,6 +12,7 @@ import {
 } from '@/api/system'
 import StatusTag from '@/components/common/StatusTag.vue'
 import { usePagedTable } from '@/composables/usePagedTable'
+import { fmtQty } from '@/utils/format'
 import type { Material } from '@/types/erp'
 
 const { loading, rows, total, page, pageSize, query, load, search, reset, changePage, changeSize } =
@@ -270,7 +271,9 @@ onMounted(load)
         </el-table-column>
         <el-table-column label="单位" prop="unit_code" width="80" />
         <el-table-column label="提前期(天)" prop="lead_time_days" width="100" align="right" />
-        <el-table-column label="安全库存" prop="safety_stock" width="100" align="right" />
+        <el-table-column label="安全库存" prop="safety_stock" width="100" align="right">
+          <template #default="{ row }">{{ fmtQty(row.safety_stock) }}</template>
+        </el-table-column>
         <el-table-column label="标准成本" prop="standard_cost" width="100" align="right" />
         <el-table-column label="状态" width="90">
           <template #default="{ row }"><StatusTag :status="row.status" /></template>

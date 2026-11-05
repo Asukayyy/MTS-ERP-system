@@ -21,6 +21,7 @@ import {
 } from '@/api/system'
 import RemoteSelect from '@/components/common/RemoteSelect.vue'
 import StatusTag from '@/components/common/StatusTag.vue'
+import { fmtQty } from '@/utils/format'
 import type { Bom, BomItem, BomTreeNode, Material, RemoteOption } from '@/types/erp'
 import { hasPermission } from '@/utils/auth'
 
@@ -1032,7 +1033,7 @@ onMounted(loadDefaultTree)
                 <span class="bom-node">
                   <span class="bom-node__code">{{ data.material_code }}</span>
                   <span class="bom-node__name">{{ data.material_name }}</span>
-                  <span class="bom-node__qty">×{{ data.quantity }}</span>
+                  <span class="bom-node__qty">×{{ fmtQty(data.quantity) }}</span>
                   <el-tag size="small" type="info" effect="plain">L{{ data.level }}</el-tag>
                   <el-tag
                     v-if="data.children && data.children.length"
@@ -1158,7 +1159,9 @@ onMounted(loadDefaultTree)
                 <template #default="{ row }">{{ row.material_name || '—' }}</template>
               </el-table-column>
               <el-table-column label="单位" prop="unit_code" width="70" />
-              <el-table-column label="用量" prop="quantity" width="90" align="right" />
+              <el-table-column label="用量" prop="quantity" width="90" align="right">
+                <template #default="{ row }">{{ fmtQty(row.quantity) }}</template>
+              </el-table-column>
               <el-table-column label="提前期偏置(天)" prop="lead_time_offset" width="130" align="right" />
               <el-table-column label="损耗率" prop="scrap_rate" width="90" align="right" />
               <el-table-column label="备注" prop="remark" min-width="120" />
@@ -1479,7 +1482,9 @@ onMounted(loadDefaultTree)
         <el-table-column label="行号" prop="line" width="60" />
         <el-table-column label="母件编码" prop="parentCode" min-width="130" />
         <el-table-column label="子件编码" prop="childCode" min-width="130" />
-        <el-table-column label="用量" prop="quantity" width="90" align="right" />
+        <el-table-column label="用量" prop="quantity" width="90" align="right">
+          <template #default="{ row }">{{ fmtQty(row.quantity) }}</template>
+        </el-table-column>
         <el-table-column label="版本" prop="version" width="90" />
         <el-table-column label="提前期偏置" prop="leadOffset" width="100" align="right" />
         <el-table-column label="损耗率" prop="scrapRate" width="90" align="right" />

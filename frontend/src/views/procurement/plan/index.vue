@@ -18,6 +18,7 @@ import { listMaterials } from '@/api/system'
 import RemoteSelect from '@/components/common/RemoteSelect.vue'
 import StatusTag from '@/components/common/StatusTag.vue'
 import { usePagedTable } from '@/composables/usePagedTable'
+import { fmtQty } from '@/utils/format'
 import type { PurchasePlan, RemoteOption } from '@/types/erp'
 
 const SOURCE_LABELS: Record<string, string> = {
@@ -427,8 +428,12 @@ onMounted(load)
               {{ row.material_code ? `${row.material_code} ${row.material_name ?? ''}` : `ID ${row.material_id}` }}
             </template>
           </el-table-column>
-          <el-table-column label="需求数量" prop="required_qty" width="110" align="right" />
-          <el-table-column label="已下单数量" prop="ordered_qty" width="110" align="right" />
+          <el-table-column label="需求数量" prop="required_qty" width="110" align="right">
+            <template #default="{ row }">{{ fmtQty(row.required_qty) }}</template>
+          </el-table-column>
+          <el-table-column label="已下单数量" prop="ordered_qty" width="110" align="right">
+            <template #default="{ row }">{{ fmtQty(row.ordered_qty) }}</template>
+          </el-table-column>
           <el-table-column label="需求日期" prop="required_date" width="110" />
           <el-table-column label="来源" width="110">
             <template #default="{ row }">{{ SOURCE_LABELS[row.source_type] || row.source_type }}</template>

@@ -15,6 +15,7 @@ import { listMaterials } from '@/api/system'
 import RemoteSelect from '@/components/common/RemoteSelect.vue'
 import StatusTag from '@/components/common/StatusTag.vue'
 import { usePagedTable, toNumber } from '@/composables/usePagedTable'
+import { fmtQty } from '@/utils/format'
 import type { ProductionPlan, RemoteOption } from '@/types/erp'
 
 const { loading, rows, total, page, pageSize, query, load, search, reset, changePage, changeSize } =
@@ -232,8 +233,12 @@ onMounted(load)
         <el-table-column label="来源" width="100">
           <template #default="{ row }"><StatusTag :status="row.source_type" /></template>
         </el-table-column>
-        <el-table-column label="计划数量" prop="planned_qty" width="110" align="right" />
-        <el-table-column label="已完工" prop="completed_qty" width="100" align="right" />
+        <el-table-column label="计划数量" prop="planned_qty" width="110" align="right">
+          <template #default="{ row }">{{ fmtQty(row.planned_qty) }}</template>
+        </el-table-column>
+        <el-table-column label="已完工" prop="completed_qty" width="100" align="right">
+          <template #default="{ row }">{{ fmtQty(row.completed_qty) }}</template>
+        </el-table-column>
         <el-table-column label="计划日期" prop="plan_date" width="110" />
         <el-table-column label="开始日期" prop="start_date" width="110" />
         <el-table-column label="完成日期" prop="end_date" width="110" />

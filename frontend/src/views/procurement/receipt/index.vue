@@ -13,6 +13,7 @@ import {
 import RemoteSelect from '@/components/common/RemoteSelect.vue'
 import StatusTag from '@/components/common/StatusTag.vue'
 import { usePagedTable, toNumber } from '@/composables/usePagedTable'
+import { fmtQty } from '@/utils/format'
 import type { Receipt, RemoteOption } from '@/types/erp'
 
 const { loading, rows, total, page, pageSize, query, load, search, reset, changePage, changeSize } =
@@ -179,8 +180,12 @@ onMounted(load)
             <el-table class="nested-table" :data="row.items" border size="small">
               <el-table-column label="订单行ID" prop="order_item_id" width="100" align="right" />
               <el-table-column label="物料ID" prop="material_id" width="90" align="right" />
-              <el-table-column label="到货数量" prop="quantity" width="110" align="right" />
-              <el-table-column label="合格数量" prop="qualified_qty" width="110" align="right" />
+              <el-table-column label="到货数量" prop="quantity" width="110" align="right">
+                <template #default="{ row }">{{ fmtQty(row.quantity) }}</template>
+              </el-table-column>
+              <el-table-column label="合格数量" prop="qualified_qty" width="110" align="right">
+                <template #default="{ row }">{{ fmtQty(row.qualified_qty) }}</template>
+              </el-table-column>
               <el-table-column label="备注" prop="remark" min-width="140" />
               <template #empty>暂无到货明细</template>
             </el-table>

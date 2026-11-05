@@ -14,6 +14,7 @@ import {
 import RemoteSelect from '@/components/common/RemoteSelect.vue'
 import StatusTag from '@/components/common/StatusTag.vue'
 import { usePagedTable, toNumber } from '@/composables/usePagedTable'
+import { fmtQty } from '@/utils/format'
 import type { RemoteOption, SupplierMaterial } from '@/types/erp'
 
 /** 供应商-物料供货关系：维护供货价、最小起订量，供采购计划取价 */
@@ -168,7 +169,9 @@ onMounted(load)
           </template>
         </el-table-column>
         <el-table-column label="供货单价" prop="supply_price" width="110" align="right" />
-        <el-table-column label="最小起订量" prop="min_order_qty" width="110" align="right" />
+        <el-table-column label="最小起订量" prop="min_order_qty" width="110" align="right">
+          <template #default="{ row }">{{ fmtQty(row.min_order_qty) }}</template>
+        </el-table-column>
         <el-table-column label="状态" width="90">
           <template #default="{ row }"><StatusTag :status="row.status" /></template>
         </el-table-column>

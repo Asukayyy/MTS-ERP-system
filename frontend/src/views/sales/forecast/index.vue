@@ -16,6 +16,7 @@ import {
 import RemoteSelect from '@/components/common/RemoteSelect.vue'
 import StatusTag from '@/components/common/StatusTag.vue'
 import { usePagedTable } from '@/composables/usePagedTable'
+import { fmtQty } from '@/utils/format'
 import type { Forecast, ForecastSummary, RemoteOption } from '@/types/erp'
 
 const { loading, rows, total, page, pageSize, query, load, search, reset, changePage, changeSize } =
@@ -207,17 +208,17 @@ onMounted(() => {
       <div class="summary-cards">
         <div class="summary-card summary-card--machine">
           <span class="summary-card__label">整机预测</span>
-          <span class="summary-card__value">{{ summaryOf('MACHINE').qty }}</span>
+          <span class="summary-card__value">{{ fmtQty(summaryOf('MACHINE').qty) }}</span>
           <span class="summary-card__meta">{{ summaryOf('MACHINE').count }} 条预测</span>
         </div>
         <div class="summary-card summary-card--spare">
           <span class="summary-card__label">可售备件预测</span>
-          <span class="summary-card__value">{{ summaryOf('SPARE').qty }}</span>
+          <span class="summary-card__value">{{ fmtQty(summaryOf('SPARE').qty) }}</span>
           <span class="summary-card__meta">{{ summaryOf('SPARE').count }} 条预测</span>
         </div>
         <div class="summary-card summary-card--internal">
           <span class="summary-card__label">内部件预测</span>
-          <span class="summary-card__value">{{ summaryOf('INTERNAL').qty }}</span>
+          <span class="summary-card__value">{{ fmtQty(summaryOf('INTERNAL').qty) }}</span>
           <span class="summary-card__meta">{{ summaryOf('INTERNAL').count }} 条预测</span>
         </div>
       </div>
@@ -274,7 +275,9 @@ onMounted(() => {
         <el-table-column label="物料编码" prop="material_code" min-width="130" />
         <el-table-column label="物料名称" prop="material_name" min-width="140" />
         <el-table-column label="预测月份" prop="forecast_month" width="110" />
-        <el-table-column label="预测数量" prop="forecast_qty" width="110" align="right" />
+        <el-table-column label="预测数量" prop="forecast_qty" width="110" align="right">
+          <template #default="{ row }">{{ fmtQty(row.forecast_qty) }}</template>
+        </el-table-column>
         <el-table-column label="状态" width="90">
           <template #default="{ row }"><StatusTag :status="row.status" /></template>
         </el-table-column>

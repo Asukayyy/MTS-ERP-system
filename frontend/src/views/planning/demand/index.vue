@@ -14,6 +14,7 @@ import { listMaterials } from '@/api/system'
 import RemoteSelect from '@/components/common/RemoteSelect.vue'
 import StatusTag from '@/components/common/StatusTag.vue'
 import { usePagedTable } from '@/composables/usePagedTable'
+import { fmtQty } from '@/utils/format'
 import type { Demand, RemoteOption } from '@/types/erp'
 
 const { loading, rows, total, page, pageSize, query, load, search, reset, changePage, changeSize } =
@@ -177,7 +178,9 @@ onMounted(load)
         <el-table-column label="来源单号" prop="source_no" min-width="150" />
         <el-table-column label="物料编码" prop="material_code" min-width="140" />
         <el-table-column label="物料名称" prop="material_name" min-width="140" />
-        <el-table-column label="需求数量" prop="quantity" width="110" align="right" />
+        <el-table-column label="需求数量" prop="quantity" width="110" align="right">
+          <template #default="{ row }">{{ fmtQty(row.quantity) }}</template>
+        </el-table-column>
         <el-table-column label="需求日期" prop="due_date" width="110" />
         <el-table-column label="状态" width="90">
           <template #default="{ row }"><StatusTag :status="row.status" /></template>
