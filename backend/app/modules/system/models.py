@@ -413,6 +413,22 @@ class SysBomItem(Base, AuditMixin):
     remark: Mapped[Optional[str]] = mapped_column(String(200), nullable=True, comment="备注")
 
     bom: Mapped[SysBom] = relationship(back_populates="items")
+    material: Mapped["SysMaterial"] = relationship(lazy="selectin")
+
+    @property
+    def material_code(self) -> str:
+        """子件编码（供子项列表直接展示）。"""
+        return self.material.material_code if self.material else ""
+
+    @property
+    def material_name(self) -> str:
+        """子件名称（供子项列表直接展示）。"""
+        return self.material.material_name if self.material else ""
+
+    @property
+    def unit_code(self) -> str:
+        """子件计量单位。"""
+        return self.material.unit_code if self.material else ""
 
     __table_args__ = (
         UniqueConstraint("bom_id", "material_id", name="uq_sys_bom_item"),

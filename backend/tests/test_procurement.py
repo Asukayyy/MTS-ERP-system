@@ -385,8 +385,11 @@ def test_order_from_plan_explicit_expected_date_wins(db: Session) -> None:
 # ==================== 6. 到货确认（调用库存入库） ====================
 
 
-def test_receipt_confirm_increases_stock_and_writes_ledger(db: Session) -> None:
-    """到货确认：库存增加、写 PURCHASE_RECEIPT 流水、回写 received_qty、订单转 IN_PROGRESS。"""
+def test_receipt_confirm_pushes_inbound_then_warehouse_confirm_increases_stock(
+    db: Session,
+) -> None:
+    """到货确认：只推送待入库单（不改结存）、回写 received_qty、订单转 IN_PROGRESS；
+    仓库管理人员指定仓库并确认后结存才增加。"""
     material_id = _create_material(db)
     warehouse_id = _create_warehouse(db)
     supplier = _create_supplier(db)
@@ -405,7 +408,6 @@ def test_receipt_confirm_increases_stock_and_writes_ledger(db: Session) -> None:
     receipt = service.create_receipt(
         db,
         purchase_order_id=order["id"],
-        warehouse_id=warehouse_id,
         receipt_date=date.today(),
         items=[{"order_item_id": order_item_id, "quantity": Decimal("40")}],
     )
@@ -416,8 +418,14 @@ def test_receipt_confirm_increases_stock_and_writes_ledger(db: Session) -> None:
     db.commit()
 
     assert confirmed["status"] == "COMPLETED"
-    # 库存增加（qualified_qty 默认 = quantity）
-    assert inventory_service.get_on_hand_qty(db, material_id, warehouse_id) == Decimal("40.0000")
+    # 业务确认不改结存，只登记待入库单（合格数量 = 到货数量）
+    assert inventory_service.get_on_hand_qty(db, material_id, warehouse_id) == Decimal("0")
+    pending = inventory_service.get_inout_status_map(
+        db, [("procurement", "PURCHASE_RECEIPT", receipt["id"])]
+    )[("procurement", "PURCHASE_RECEIPT", receipt["id"])]
+    assert pending["op_type"] == "INBOUND"
+    assert pending["status"] == "DRAFT"
+
     # 采购订单行已到货数量回写（直接读库校验）
     db.expire_all()
     received_qty = db.execute(
@@ -426,6 +434,59 @@ def test_receipt_confirm_increases_stock_and_writes_ledger(db: Session) -> None:
     assert Decimal(str(received_qty)) == Decimal("40.0000")
     # 订单状态 → IN_PROGRESS
     assert service.get_order(db, order["id"])["status"] == "IN_PROGRESS"
+
+    inventory_service.confirm_stock_operation(
+        db, pending["operation_id"], warehouse_id=warehouse_id
+    )
+    db.commit()
+    assert inventory_service.get_on_hand_qty(db, material_id, warehouse_id) == Decimal("40.0000")
+
+
+def test_create_receipt_api_without_warehouse(
+    client: TestClient, db: Session
+) -> None:
+    """回归：采购订单「生成到货单」不再传仓库，接口仍应成功（warehouse_id 为空）。"""
+    material_id = _create_material(db)
+    supplier = _create_supplier(db)
+    order = service.create_order(
+        db,
+        supplier_id=supplier["id"],
+        order_date=date.today(),
+        expected_date=date.today() + timedelta(days=5),
+        items=[{"material_id": material_id, "quantity": Decimal("10"), "unit_price": Decimal("1")}],
+    )
+    db.commit()
+    service.set_order_status(db, order["id"], "CONFIRMED")
+    db.commit()
+    order_item_id = order["items"][0]["id"]
+
+    created = client.post(
+        "/api/v1/procurement/receipts",
+        json={
+            "purchase_order_id": order["id"],
+            "receipt_date": date.today().isoformat(),
+            "items": [{"order_item_id": order_item_id, "quantity": "10", "qualified_qty": "10"}],
+        },
+    )
+    assert created.status_code == 200, created.text
+    body = created.json()
+    assert body["code"] == 0, body
+    assert body["data"]["warehouse_id"] is None
+
+    # 确认到货：仍不改结存，只推送待入库单
+    confirmed = client.post(
+        f"/api/v1/procurement/receipts/{body['data']['id']}/confirm"
+    )
+    assert confirmed.status_code == 200, confirmed.text
+    assert confirmed.json()["data"]["status"] == "COMPLETED"
+
+    # 列表 / 详情接口遇到空仓库也不能报错
+    listed = client.get("/api/v1/procurement/receipts?page=1&page_size=20")
+    assert listed.status_code == 200, listed.text
+    hit = [row for row in listed.json()["data"]["items"] if row["id"] == body["data"]["id"]]
+    assert hit and hit[0]["warehouse_id"] is None
+    detail = client.get(f"/api/v1/procurement/receipts/{body['data']['id']}")
+    assert detail.status_code == 200, detail.text
 
 
 # ==================== 7. 到货超量拒绝 ====================
@@ -578,6 +639,25 @@ def test_auto_evaluation_without_business_data_rejected(db: Session) -> None:
         service.auto_evaluate_supplier(db, supplier_id=supplier["id"])
     assert exc.value.code == 4000
     db.rollback()
+
+
+def test_list_suppliers_includes_avg_total_score(db: Session) -> None:
+    """供应商列表需透出评价平均综合得分，供前端下拉展示；无评价的供应商为空。"""
+    rated = _create_supplier(db, name="有评价供应商")
+    unrated = _create_supplier(db, name="无评价供应商")
+    service.create_evaluation(
+        db,
+        supplier_id=rated["id"],
+        quality_score=Decimal("90"),
+        delivery_score=Decimal("80"),
+        price_score=Decimal("70"),
+    )
+    db.commit()
+
+    rows, _ = service.list_suppliers(db, page=1, page_size=200, keyword=None, status="ACTIVE")
+    by_id = {int(r["id"]): r for r in rows}
+    assert Decimal(by_id[rated["id"]]["avg_total_score"]) == Decimal("80")
+    assert by_id[unrated["id"]]["avg_total_score"] is None
 
 
 def test_auto_evaluation_api(client: TestClient, db: Session) -> None:

@@ -9,14 +9,15 @@ import {
   createReturn,
   createShipment,
   deleteOrder,
+  getProductPrice,
   listCustomers,
   listOrders,
   listProducts,
   setOrderStatus,
   updateOrder,
 } from '@/api/sales'
-import { listPersonnel } from '@/api/system'
-import { listBalances, listWarehouses } from '@/api/inventory'
+import { listOrganizationsFlat, listPersonnel } from '@/api/system'
+import { listBalances } from '@/api/inventory'
 import RemoteSelect from '@/components/common/RemoteSelect.vue'
 import StatusTag from '@/components/common/StatusTag.vue'
 import { usePagedTable, toNumber } from '@/composables/usePagedTable'
@@ -45,14 +46,22 @@ async function loadProductOptions(keyword: string): Promise<RemoteOption[]> {
   return list.map((item) => ({ id: item.id, label: `${item.material_code} ${item.material_name}` }))
 }
 
-async function loadSalespersonOptions(keyword: string): Promise<RemoteOption[]> {
-  const data = await listPersonnel({ keyword, page: 1, page_size: 50 })
-  return data.items.map((item) => ({ id: item.id, label: `${item.employee_no} ${item.person_name}` }))
+/** 销售员只允许从销售部人员中选择 */
+const SALES_ORG_CODE = 'DEP-SALES'
+let salesOrgId: number | undefined
+
+async function resolveSalesOrgId(): Promise<number | undefined> {
+  if (salesOrgId !== undefined) return salesOrgId
+  const orgs = await listOrganizationsFlat()
+  salesOrgId = orgs.find((item) => item.org_code === SALES_ORG_CODE)?.id
+  return salesOrgId
 }
 
-async function loadWarehouseOptions(keyword: string): Promise<RemoteOption[]> {
-  const data = await listWarehouses({ keyword, page: 1, page_size: 50 })
-  return data.items.map((item) => ({ id: item.id, label: `${item.warehouse_code} ${item.warehouse_name}` }))
+async function loadSalespersonOptions(keyword: string): Promise<RemoteOption[]> {
+  const orgId = await resolveSalesOrgId()
+  if (!orgId) return []
+  const data = await listPersonnel({ keyword, org_id: orgId, page: 1, page_size: 50 })
+  return data.items.map((item) => ({ id: item.id, label: `${item.employee_no} ${item.person_name}` }))
 }
 
 // ---------------- 物料库存提示 ----------------
@@ -80,6 +89,43 @@ async function loadMaterialStock(materialId: number | undefined): Promise<void> 
   const onHand = data.items.reduce((sum, item) => sum + toNumber(item.on_hand), 0)
   const available = data.items.reduce((sum, item) => sum + toNumber(item.available_quantity), 0)
   stockMap.value = { ...stockMap.value, [materialId]: { onHand, available } }
+}
+
+/** 物料ID -> 产品当前价格（来自「销售管理 → 产品价格」） */
+const priceMap = ref<Record<number, number>>({})
+
+async function loadMaterialPrice(materialId: number | undefined): Promise<void> {
+  if (!materialId || priceMap.value[materialId] !== undefined) return
+  try {
+    const product = await getProductPrice(materialId)
+    priceMap.value = { ...priceMap.value, [materialId]: toNumber(product.current_price) }
+  } catch {
+    priceMap.value = { ...priceMap.value, [materialId]: 0 }
+  }
+}
+
+function currentPrice(materialId: number | undefined): number | undefined {
+  const price = materialId ? priceMap.value[materialId] : undefined
+  if (price === undefined || price <= 0) return undefined
+  return price
+}
+
+function priceText(materialId: number | undefined): string {
+  const price = currentPrice(materialId)
+  if (price === undefined) return '该物料尚未维护产品价格，请到「产品价格」中定价'
+  return `当前价格 ${price.toFixed(2)}`
+}
+
+function materialHint(materialId: number | undefined): string {
+  return [stockText(materialId), priceText(materialId)].filter(Boolean).join('；')
+}
+
+/** 选物料后加载库存与当前价格，单价直接取产品当前价格 */
+async function onMaterialChange(row: OrderLineForm, materialId: number | undefined): Promise<void> {
+  await Promise.all([loadMaterialStock(materialId), loadMaterialPrice(materialId)])
+  if (materialId === undefined) return
+  const price = currentPrice(materialId)
+  if (price !== undefined) row.unit_price = price
 }
 
 // ---------------- 新增 / 修改订单 ----------------
@@ -158,7 +204,10 @@ function openEdit(row: Order): void {
     })),
   })
   if (!form.items.length) addLine()
-  form.items.forEach((item) => void loadMaterialStock(item.material_id))
+  form.items.forEach((item) => {
+    void loadMaterialStock(item.material_id)
+    void loadMaterialPrice(item.material_id)
+  })
   dialogVisible.value = true
 }
 
@@ -235,6 +284,12 @@ async function changeStatus(row: Order, status: string): Promise<void> {
   }
 }
 
+/** 所有订单行都已发满（已发数量 >= 订单数量）才允许标记完成 */
+function isFullyDelivered(row: Order): boolean {
+  if (!row.items.length) return false
+  return row.items.every((item) => toNumber(item.delivered_qty) >= toNumber(item.quantity))
+}
+
 async function remove(row: Order): Promise<void> {
   try {
     await ElMessageBox.confirm(`确认删除订单「${row.order_no}」？`, '删除确认', { type: 'warning' })
@@ -253,6 +308,7 @@ async function remove(row: Order): Promise<void> {
 // ---------------- 生成发货单 ----------------
 interface ShipmentLineForm {
   order_item_id: number
+  material_id: number
   material_label: string
   remaining: number
   quantity: number
@@ -264,29 +320,26 @@ const shipFormRef = ref<FormInstance>()
 const shipForm = reactive<{
   order_id: number | null
   shipment_date: string
-  warehouse_id: number | undefined
   remark: string
   items: ShipmentLineForm[]
 }>({
   order_id: null,
   shipment_date: '',
-  warehouse_id: undefined,
   remark: '',
   items: [],
 })
 
 const shipRules: FormRules = {
   shipment_date: [{ required: true, message: '请选择发货日期', trigger: 'change' }],
-  warehouse_id: [{ required: true, message: '请选择发货仓库', trigger: 'change' }],
 }
 
 function openShipment(row: Order): void {
   shipForm.order_id = row.id
   shipForm.shipment_date = ''
-  shipForm.warehouse_id = undefined
   shipForm.remark = ''
   shipForm.items = row.items.map((item) => ({
     order_item_id: item.id,
+    material_id: item.material_id,
     material_label: `${item.material_code ?? ''} ${item.material_name ?? ''}`.trim(),
     remaining: toNumber(item.quantity) - toNumber(item.delivered_qty),
     quantity: toNumber(item.quantity) - toNumber(item.delivered_qty),
@@ -297,7 +350,7 @@ function openShipment(row: Order): void {
 async function submitShipment(): Promise<void> {
   const valid = await shipFormRef.value?.validate().catch(() => false)
   if (!valid) return
-  if (shipForm.order_id === null || shipForm.warehouse_id === undefined) return
+  if (shipForm.order_id === null) return
   const items = shipForm.items.filter((item) => item.quantity > 0)
   if (!items.length) {
     ElMessage.warning('请填写发货数量')
@@ -309,13 +362,13 @@ async function submitShipment(): Promise<void> {
       order_id: shipForm.order_id,
       shipment_date: shipForm.shipment_date,
       remark: shipForm.remark || null,
+      // 不再指定仓库：确认发货只推送库存「待出库单」，由仓库管理人员决定出库仓
       items: items.map((item) => ({
         order_item_id: item.order_item_id,
-        warehouse_id: shipForm.warehouse_id,
         quantity: item.quantity,
       })),
     })
-    ElMessage.success('发货单已生成（草稿）')
+    ElMessage.success('发货单已生成（草稿）；确认发货后会在库存管理生成待出库单')
     shipDialogVisible.value = false
     await load()
   } catch (error) {
@@ -341,14 +394,12 @@ const returnForm = reactive<{
   order_id: number | null
   customer_id: number | undefined
   return_date: string
-  warehouse_id: number | undefined
   reason: string
   items: ReturnLineForm[]
 }>({
   order_id: null,
   customer_id: undefined,
   return_date: '',
-  warehouse_id: undefined,
   reason: '',
   items: [],
 })
@@ -356,7 +407,6 @@ const returnForm = reactive<{
 const returnRules: FormRules = {
   customer_id: [{ required: true, message: '请选择客户', trigger: 'change' }],
   return_date: [{ required: true, message: '请选择退货日期', trigger: 'change' }],
-  warehouse_id: [{ required: true, message: '请选择退回仓库', trigger: 'change' }],
 }
 
 function addReturnLine(): void {
@@ -373,7 +423,6 @@ function openReturnFromOrder(row: Order): void {
   returnForm.order_id = row.id
   returnForm.customer_id = row.customer_id
   returnForm.return_date = ''
-  returnForm.warehouse_id = undefined
   returnForm.reason = ''
   returnForm.items = row.items.map((item) => ({
     material_id: item.material_id,
@@ -389,7 +438,6 @@ function openReturnBlank(): void {
   returnForm.order_id = null
   returnForm.customer_id = undefined
   returnForm.return_date = ''
-  returnForm.warehouse_id = undefined
   returnForm.reason = ''
   returnForm.items = []
   addReturnLine()
@@ -399,7 +447,7 @@ function openReturnBlank(): void {
 async function submitReturn(): Promise<void> {
   const valid = await returnFormRef.value?.validate().catch(() => false)
   if (!valid) return
-  if (returnForm.customer_id === undefined || returnForm.warehouse_id === undefined) return
+  if (returnForm.customer_id === undefined) return
   const items = returnForm.items.filter((item) => item.material_id !== undefined && item.quantity > 0)
   if (!items.length) {
     ElMessage.warning('请至少添加一行退货明细')
@@ -414,14 +462,13 @@ async function submitReturn(): Promise<void> {
       reason: returnForm.reason || null,
       items: items.map((item) => ({
         material_id: item.material_id,
-        warehouse_id: returnForm.warehouse_id,
         quantity: item.quantity,
         quality_status: item.quality_status,
         reason: item.reason || null,
       })),
     })
     await confirmReturn(created.id)
-    ElMessage.success('退货单已创建并确认（已产生库存流水）')
+    ElMessage.success('退货单已创建并确认；库存管理已生成待入库单，由仓库人员指定仓库')
     returnDialogVisible.value = false
     await load()
   } catch (error) {
@@ -505,9 +552,23 @@ onMounted(load)
             <el-button v-if="row.status === 'CONFIRMED'" link type="primary" @click="changeStatus(row, 'IN_PROGRESS')">
               开始执行
             </el-button>
-            <el-button v-if="row.status === 'IN_PROGRESS'" link type="success" @click="changeStatus(row, 'COMPLETED')">
-              完成
-            </el-button>
+            <el-tooltip
+              v-if="row.status === 'IN_PROGRESS'"
+              :disabled="isFullyDelivered(row)"
+              content="还有物料未发满，发货数量达到订单数量后才能完成"
+              placement="top"
+            >
+              <span class="complete-wrap">
+                <el-button
+                  link
+                  type="success"
+                  :disabled="!isFullyDelivered(row)"
+                  @click="changeStatus(row, 'COMPLETED')"
+                >
+                  完成
+                </el-button>
+              </span>
+            </el-tooltip>
             <el-button
               v-if="row.status === 'CONFIRMED' || row.status === 'IN_PROGRESS'"
               link
@@ -587,10 +648,10 @@ onMounted(load)
               v-model="row.material_id"
               :loader="loadProductOptions"
               style="width: 100%"
-              @change="loadMaterialStock"
+              @change="onMaterialChange(row, $event)"
             />
-            <div v-if="stockText(row.material_id)" class="stock-hint">
-              {{ stockText(row.material_id) }}
+            <div v-if="materialHint(row.material_id)" class="stock-hint">
+              {{ materialHint(row.material_id) }}
             </div>
           </template>
         </el-table-column>
@@ -632,11 +693,6 @@ onMounted(load)
               <el-date-picker v-model="shipForm.shipment_date" type="date" value-format="YYYY-MM-DD" style="width: 100%" />
             </el-form-item>
           </el-col>
-          <el-col :span="12">
-            <el-form-item label="发货仓库" prop="warehouse_id">
-              <RemoteSelect v-model="shipForm.warehouse_id" :loader="loadWarehouseOptions" style="width: 100%" />
-            </el-form-item>
-          </el-col>
           <el-col :span="24">
             <el-form-item label="备注"><el-input v-model="shipForm.remark" /></el-form-item>
           </el-col>
@@ -647,11 +703,19 @@ onMounted(load)
         <el-table-column label="可发数量" prop="remaining" width="110" align="right" />
         <el-table-column label="本次发货" width="150">
           <template #default="{ row }">
-            <el-input-number v-model="row.quantity" :min="0" :max="row.remaining" :controls="false" style="width: 100%" />
+            <el-input-number
+              v-model="row.quantity"
+              :min="0"
+              :max="row.remaining"
+              :controls="false"
+              style="width: 100%"
+            />
           </template>
         </el-table-column>
       </el-table>
-      <p class="form-tip">发货单保存后为草稿状态，请在「发货管理」中确认以实际出库。</p>
+      <p class="form-tip">
+        发货单保存后为草稿状态，确认发货后会在「库存管理 → 出库管理」生成待出库单，由仓库管理人员指定出库仓库。
+      </p>
       <template #footer>
         <el-button @click="shipDialogVisible = false">取消</el-button>
         <el-button type="primary" :loading="shipSubmitting" @click="submitShipment">生成发货单</el-button>
@@ -667,14 +731,9 @@ onMounted(load)
               <RemoteSelect v-model="returnForm.customer_id" :loader="loadCustomerOptions" style="width: 100%" />
             </el-form-item>
           </el-col>
-          <el-col :span="8">
+          <el-col :span="12">
             <el-form-item label="退货日期" prop="return_date">
               <el-date-picker v-model="returnForm.return_date" type="date" value-format="YYYY-MM-DD" style="width: 100%" />
-            </el-form-item>
-          </el-col>
-          <el-col :span="8">
-            <el-form-item label="退回仓库" prop="warehouse_id">
-              <RemoteSelect v-model="returnForm.warehouse_id" :loader="loadWarehouseOptions" style="width: 100%" />
             </el-form-item>
           </el-col>
           <el-col :span="24">
@@ -717,7 +776,7 @@ onMounted(load)
           </template>
         </el-table-column>
       </el-table>
-      <p class="form-tip">保存后将自动确认退货单并写入库存流水。</p>
+      <p class="form-tip">保存后自动确认退货单，并在「库存管理 → 入库管理」生成待入库单，由仓库管理人员指定入库仓库。</p>
       <template #footer>
         <el-button @click="returnDialogVisible = false">取消</el-button>
         <el-button type="primary" :loading="returnSubmitting" @click="submitReturn">保存并确认</el-button>
@@ -737,5 +796,11 @@ onMounted(load)
   font-size: 12px;
   line-height: 18px;
   color: var(--el-text-color-secondary);
+}
+
+/* 「完成」按钮包一层 span 以便禁用时仍能显示提示，并补齐与相邻按钮的间距 */
+.complete-wrap {
+  display: inline-block;
+  margin-right: 12px;
 }
 </style>

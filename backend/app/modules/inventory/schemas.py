@@ -93,12 +93,22 @@ class BalanceOut(_IdOut):
     material_abc_class: Optional[str] = None
     material_sales_category: Optional[str] = None
     warehouse_id: int
+    warehouse_code: Optional[str] = None
     warehouse_name: Optional[str] = None
     on_hand: Decimal
     locked_quantity: Decimal
     available_quantity: Decimal
+    safety_stock: Decimal = Field(default=Decimal("0"), description="安全库存（取物料主数据）")
     reorder_point: Optional[Decimal] = Field(default=None, description="订货点（仅 A 类物料配置，未配置为 null）")
     reorder_quantity: Optional[Decimal] = Field(default=None, description="建议订货量（仅 A 类物料配置）")
+    is_available_warehouse: bool = Field(
+        default=True,
+        description="所在仓库是否计入可用量（废品仓为 false，可用量固定 0）",
+    )
+    material_total_available: Decimal = Field(
+        default=0,
+        description="该物料跨仓库可用量合计（排除废品仓），用于安全库存总量判断",
+    )
 
 
 class BalanceSummaryOut(BaseModel):
@@ -161,40 +171,68 @@ class StockChangeOut(BaseModel):
     quantity_after: Decimal
 
 
-# ==================== 库存操作单（移库 / 盘点） ====================
+# ==================== 库存操作单（移库 / 盘点 / 入库 / 出库） ====================
 
 
 class StockOperationItemCreate(BaseModel):
     """操作单明细行入参。
 
     - TRANSFER：填 `quantity`；
-    - STOCKTAKE：填 `actual_qty`（`book_qty` 留空时按当前结存自动带出）。
+    - STOCKTAKE：填 `actual_qty`（`book_qty` 留空时按当前结存自动带出）；
+    - INBOUND / OUTBOUND：填 `quantity`。
     """
 
     material_id: int
-    quantity: Optional[Decimal] = Field(default=None, gt=0, description="移库数量（TRANSFER 用）")
+    quantity: Optional[Decimal] = Field(default=None, gt=0, description="数量（TRANSFER/INBOUND/OUTBOUND 用）")
     book_qty: Optional[Decimal] = Field(default=None, ge=0, description="账面数量（STOCKTAKE 用，留空自动取当前结存）")
     actual_qty: Optional[Decimal] = Field(default=None, ge=0, description="实盘数量（STOCKTAKE 用）")
     remark: Optional[str] = None
 
 
 class StockOperationCreate(BaseModel):
-    """库存操作单新增入参（单头 + 明细），`op_type` 区分移库 / 盘点。"""
+    """库存操作单新增入参（单头 + 明细），`op_type` 区分移库 / 盘点 / 入库 / 出库。"""
 
-    op_type: str = Field(description="操作类型 TRANSFER/STOCKTAKE")
+    op_type: str = Field(description="操作类型 TRANSFER/STOCKTAKE/INBOUND/OUTBOUND")
     operation_no: Optional[str] = Field(default=None, description="操作单号，留空自动生成")
     from_warehouse_id: Optional[int] = Field(default=None, description="源仓库ID（TRANSFER 必填）")
     to_warehouse_id: Optional[int] = Field(default=None, description="目标仓库ID（TRANSFER 必填）")
-    warehouse_id: Optional[int] = Field(default=None, description="仓库ID（STOCKTAKE 必填）")
-    op_date: date = Field(description="业务日期（移库/盘点日期）")
+    warehouse_id: Optional[int] = Field(
+        default=None,
+        description="仓库ID（STOCKTAKE 必填；INBOUND/OUTBOUND 可留空，确认时再指定）",
+    )
+    op_date: date = Field(description="业务日期（移库/盘点/出入库日期）")
     remark: Optional[str] = None
     operator_id: Optional[int] = None
+    source_module: Optional[str] = Field(
+        default=None, description="来源模块（库存自建单填 inventory）"
+    )
+    source_type: Optional[str] = Field(
+        default=None,
+        description=(
+            "来源业务类型：入库限 SALES_RETURN/PURCHASE_RECEIPT/PRODUCTION_COMPLETION/MANUAL，"
+            "出库限 SALES_SHIPMENT/MATERIAL_REQUISITION/MANUAL"
+        ),
+    )
+    source_no: Optional[str] = Field(default=None, description="来源单号（可手工填业务单据号）")
     items: List[StockOperationItemCreate] = Field(default_factory=list, description="明细")
+
+
+class StockOperationConfirm(BaseModel):
+    """库存单据确认入参：入库 / 出库由仓库管理人员在此选择仓库。"""
+
+    warehouse_id: Optional[int] = Field(
+        default=None, description="仓库ID（INBOUND/OUTBOUND 确认时必填）"
+    )
+    operator_id: Optional[int] = None
 
 
 class StockOperationItemOut(_IdOut):
     operation_id: int
     material_id: int
+    material_code: Optional[str] = None
+    material_name: Optional[str] = None
+    material_spec: Optional[str] = None
+    unit: Optional[str] = None
     quantity: Optional[Decimal] = None
     book_qty: Optional[Decimal] = None
     actual_qty: Optional[Decimal] = None
@@ -210,6 +248,11 @@ class StockOperationOut(_IdOut):
     warehouse_id: Optional[int] = None
     op_date: date
     status: str
+    source_module: Optional[str] = None
+    source_type: Optional[str] = None
+    source_reference_id: Optional[int] = None
+    source_no: Optional[str] = None
+    confirmed_at: Optional[datetime] = None
     remark: Optional[str] = None
     items: List[StockOperationItemOut] = Field(default_factory=list)
 
@@ -222,7 +265,11 @@ class ReorderSuggestionOut(BaseModel):
 
     balance_id: int
     material_id: int
+    material_code: Optional[str] = None
+    material_name: Optional[str] = None
     warehouse_id: int
+    warehouse_code: Optional[str] = None
+    warehouse_name: Optional[str] = None
     reorder_point: Decimal
     current_qty: Decimal
     suggested_qty: Decimal
@@ -295,6 +342,88 @@ class LowStockOut(BaseModel):
     available_quantity: Decimal
     safety_stock: Decimal
     shortage_qty: Decimal
+
+
+class SafetyStockSuggestionOut(BaseModel):
+    """安全库存补库建议：可用量低于安全库存时的建议。"""
+
+    material_id: int
+    material_code: Optional[str] = None
+    material_name: Optional[str] = None
+    supply_type: Optional[str] = None
+    source_type: str = Field(description="补库来源 REORDER / PRODUCTION")
+    warehouse_id: int
+    warehouse_code: Optional[str] = None
+    warehouse_name: Optional[str] = None
+    available_quantity: Decimal
+    safety_stock: Decimal
+    suggested_qty: Decimal
+
+
+# ==================== 库存变动流水 ====================
+
+
+class StockJournalOut(_OrmBase):
+    """库存变动流水出参。"""
+
+    id: int
+    op_date: date
+    material_id: int
+    material_code: Optional[str] = None
+    material_name: Optional[str] = None
+    warehouse_id: int
+    warehouse_code: Optional[str] = None
+    warehouse_name: Optional[str] = None
+    direction: str = Field(description="IN/OUT/ADJUST")
+    delta_qty: Decimal
+    qty_before: Decimal
+    qty_after: Decimal
+    source_module: Optional[str] = None
+    source_type: Optional[str] = None
+    source_reference_id: Optional[int] = None
+    source_no: Optional[str] = None
+    remark: Optional[str] = None
+    operator_id: Optional[int] = None
+    created_at: datetime
+
+
+
+class StocktakeSummaryItemOut(BaseModel):
+    """盘点汇总明细行（单条盘点明细）。"""
+
+    operation_id: int
+    operation_no: str
+    op_date: date
+    warehouse_id: Optional[int] = None
+    warehouse_code: Optional[str] = None
+    warehouse_name: Optional[str] = None
+    material_id: int
+    material_code: Optional[str] = None
+    material_name: Optional[str] = None
+    book_qty: Decimal
+    actual_qty: Decimal
+    difference: Decimal
+    standard_cost: Decimal
+    diff_amount: Decimal
+    result: str = Field(description="GAIN 盘盈 / LOSS 盘亏 / MATCH 相符")
+
+
+class StocktakeSummaryOut(BaseModel):
+    """盘点汇总（盘盈盘亏报表）。"""
+
+    operation_count: int
+    line_count: int
+    matched_count: int
+    gain_count: int
+    gain_qty: Decimal
+    loss_count: int
+    loss_qty: Decimal
+    net_qty: Decimal
+    gain_amount: Decimal
+    loss_amount: Decimal
+    net_amount: Decimal
+    accuracy_rate: Decimal
+    items: List[StocktakeSummaryItemOut]
 
 
 class FlowSummaryOut(BaseModel):

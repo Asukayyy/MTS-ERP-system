@@ -63,7 +63,6 @@ const personVisible = ref(false)
 const personSubmitting = ref(false)
 const personFormRef = ref<FormInstance>()
 const personForm = reactive({
-  employee_no: '',
   person_name: '',
   gender: '',
   id_card: '',
@@ -76,7 +75,6 @@ const personForm = reactive({
 })
 
 const personRules: FormRules = {
-  employee_no: [{ required: true, message: '请输入工号', trigger: 'blur' }],
   person_name: [{ required: true, message: '请输入姓名', trigger: 'blur' }],
   org_id: [{ required: true, message: '请选择所属部门', trigger: 'change' }],
   id_card: [
@@ -93,7 +91,6 @@ const personRules: FormRules = {
 
 function openCreatePerson() {
   Object.assign(personForm, {
-    employee_no: '',
     person_name: '',
     gender: '',
     id_card: '',
@@ -112,8 +109,7 @@ async function submitPerson() {
   if (!valid) return
   personSubmitting.value = true
   try {
-    await createPersonnel({
-      employee_no: personForm.employee_no.trim(),
+    const created = await createPersonnel({
       person_name: personForm.person_name.trim(),
       gender: personForm.gender || null,
       id_card: personForm.id_card.trim() || null,
@@ -124,7 +120,7 @@ async function submitPerson() {
       hire_date: personForm.hire_date || null,
       remark: personForm.remark || null,
     })
-    ElMessage.success('员工已建档')
+    ElMessage.success(`员工已建档，工号 ${created.employee_no}`)
     personVisible.value = false
     await loadAll()
   } catch (error) {
@@ -516,9 +512,9 @@ onMounted(loadAll)
     <el-dialog v-model="personVisible" title="新增员工" width="640px">
       <el-form ref="personFormRef" :model="personForm" :rules="personRules" label-width="90px">
         <el-row :gutter="12">
-          <el-col :span="12">
-            <el-form-item label="工号" prop="employee_no">
-              <el-input v-model="personForm.employee_no" placeholder="如 EMP001" />
+          <el-col :span="24">
+            <el-form-item label="工号">
+              <span class="auto-no-hint">保存后由系统自动生成（EMP 开头），无需手工填写</span>
             </el-form-item>
           </el-col>
           <el-col :span="12">
@@ -624,6 +620,11 @@ onMounted(loadAll)
   display: flex;
   flex-direction: column;
   gap: 14px;
+}
+
+.auto-no-hint {
+  font-size: 12px;
+  color: #909399;
 }
 
 .hr-head {

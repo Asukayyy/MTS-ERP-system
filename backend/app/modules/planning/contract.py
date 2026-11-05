@@ -27,7 +27,7 @@ from app.modules.planning.service import CODE_CONTRACT_NOT_READY, CODE_NOT_FOUND
 from app.modules.system.contract import get_materials, log_operation
 
 
-def create_sales_demand_from_shortage(
+def create_sales_demand_from_order(
     db: Session,
     *,
     order_id: int,
@@ -38,10 +38,14 @@ def create_sales_demand_from_shortage(
     remark: Optional[str] = None,
     operator_id: Optional[int] = None,
 ) -> Dict[str, Any]:
-    """销售订单确认时库存不足，把缺口登记为 `source_type=SALES` 的计划需求。
+    """销售订单确认时登记 `source_type=SALES` 的计划需求。
 
-    - 去重键 = 来源订单 + 物料：同一订单同一物料只保留一条缺口需求，重复受理幂等；
-    - 需求直接置 `CONFIRMED`（订单已确认，缺口是确定需求），可立即进入 MPS 汇总；
+    - **只在订单存在库存缺口时调用**（库存已完全覆盖的订单直接发货，不走计划）；
+    - `quantity` 传**订单未交付总量**（`quantity − delivered_qty`），不是缺口：
+      库存已自动分配的部分由 MRP 在净算时用可用库存抵扣，需求侧若只记缺口，
+      同一批库存会被需求侧与 MRP 各抵扣一次，导致净需求被算成 0；
+    - 去重键 = 来源订单 + 物料：同一订单同一物料只保留一条需求，重复受理幂等；
+    - 需求直接置 `CONFIRMED`（订单已确认，需求是确定的），可立即进入 MPS 汇总；
     - **不提交事务**，由调用方（Sales）提交，保证订单状态与需求同时生效。
     """
     existing = repository.find_demand_by_source_material(
@@ -61,7 +65,7 @@ def create_sales_demand_from_shortage(
         due_date=due_date,
         source_reference_id=order_id,
         source_no=order_no,
-        remark=remark or f"销售订单 {order_no} 库存不足缺口",
+        remark=remark or f"销售订单 {order_no} 客户需求",
         operator_id=operator_id,
     )
     service.set_demand_status(db, demand.id, "CONFIRMED", operator_id)

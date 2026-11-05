@@ -338,6 +338,12 @@ class PlnDispatchOrder(Base, AuditMixin):
     worker_id: Mapped[Optional[BigIntFk]] = mapped_column(
         ForeignKey("sys_personnel.id", ondelete="RESTRICT"), nullable=True, index=True, comment="作业人员（sys_personnel.id）"
     )
+    org_id: Mapped[Optional[BigIntFk]] = mapped_column(
+        ForeignKey("sys_organization.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+        comment="承接单位（sys_organization.id，加工中心 / 车间）",
+    )
     planned_start: Mapped[Optional[date]] = mapped_column(
         Date, nullable=True, comment="计划开始日期（草稿可留空，确认前必填）"
     )

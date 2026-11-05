@@ -59,7 +59,7 @@ ROLE_SEEDS: list[dict[str, Any]] = [
         "role_code": "INVENTORY",
         "role_name": "库存人员",
         "status": "ACTIVE",
-        "description": "管理出入库与实时库存，查看发货指令、领料单与到货信息（数据范围：全部）",
+        "description": "库存管理全部权限；维护物料、只读 BOM；销售预测/订单/发货/退货；领料单与完工报告；采购计划/订单/到货（数据范围：全部）",
     },
     {
         "role_code": "PLAN",
@@ -224,14 +224,18 @@ PERMISSION_SEEDS: list[dict[str, Any]] = [
      "parent": "inventory", "path": "/inventory/inbound", "module": "inventory", "sort_no": 20},
     {"code": "inventory:outbound", "name": "出库管理", "perm_type": "MENU",
      "parent": "inventory", "path": "/inventory/outbound", "module": "inventory", "sort_no": 30},
-    {"code": "inventory:ledger", "name": "库存流水与结存", "perm_type": "MENU",
-     "parent": "inventory", "path": "/inventory/transaction", "module": "inventory", "sort_no": 40},
+    {"code": "inventory:ledger", "name": "库存流水", "perm_type": "MENU",
+     "parent": "inventory", "path": "/inventory/stock-journal", "module": "inventory", "sort_no": 40},
     # ---- 补充：与前端实际路由逐一比对后新增的页面权限（原权限树遗漏） ----
     # 前端菜单按权限编码过滤，因此每个真实页面都必须有对应的 MENU 权限码。
     {"code": "sales:customer", "name": "客户管理", "perm_type": "MENU",
      "parent": "sales", "path": "/sales/customer", "module": "sales", "sort_no": 50},
     {"code": "sales:return", "name": "销售退货", "perm_type": "MENU",
      "parent": "sales", "path": "/sales/return", "module": "sales", "sort_no": 60},
+    {"code": "sales:price", "name": "产品价格", "perm_type": "MENU",
+     "parent": "sales", "path": "/sales/price", "module": "sales", "sort_no": 55},
+    {"code": "sales:price:manage", "name": "维护产品价格", "perm_type": "ACTION",
+     "parent": "sales:price", "path": "/sales/price", "module": "sales", "sort_no": 10},
     {"code": "planning:demand", "name": "需求管理", "perm_type": "MENU",
      "parent": "planning", "path": "/planning/demand", "module": "planning", "sort_no": 5},
     {"code": "procurement:supplier", "name": "供应商管理", "perm_type": "MENU",
@@ -282,20 +286,23 @@ ROLE_PERMISSION_BINDINGS: dict[str, list[str]] = {
     # 销售人员：销售管理全部 + 物料/人员 + 库存查询与流水 + 需求管理（只读）
     "SALES": [
         "sales", "sales:order", "sales:demand", "sales:shipping", "sales:stock",
-        "sales:customer", "sales:return",
+        "sales:customer", "sales:return", "sales:price", "sales:price:manage",
         "system", "system:material", "system:personnel",
         "inventory", "inventory:stock", "inventory:ledger",
         "planning", "planning:demand",
     ],
+    # 库存人员：库存管理全部；物料管理（可维护）、BOM 只读；
+    #           销售预测/订单/发货/退货；领料单/完工报告；采购计划/订单/到货
     "INVENTORY": [
         "inventory", "inventory:stock", "inventory:inbound",
         "inventory:outbound", "inventory:ledger",
         "inventory:transfer", "inventory:stocktake",
         "inventory:reorder", "inventory:replenishment",
-        "sales", "sales:shipping",
-        "planning", "planning:picking",
-        "procurement", "procurement:arrival",
-        "system:material",
+        "system", "system:material", "system:material:manage",
+        "system:bom",
+        "sales", "sales:demand", "sales:order", "sales:shipping", "sales:return",
+        "planning", "planning:picking", "planning:finish",
+        "procurement", "procurement:plan", "procurement:order", "procurement:arrival",
     ],
     # 计划管理员：计划管理全部 + 基础信息全部（物料/BOM/工艺路线）+ 销售订单
     #             + 采购计划 + 补货需求
@@ -333,6 +340,7 @@ ROLE_PERMISSION_BINDINGS: dict[str, list[str]] = {
         # 销售管理：全部
         "sales", "sales:customer", "sales:demand", "sales:order",
         "sales:shipping", "sales:stock", "sales:return",
+        "sales:price", "sales:price:manage",
         # 计划管理：全部
         "planning", "planning:demand", "planning:mps", "planning:mrp",
         "planning:schedule", "planning:dispatch", "planning:picking",
@@ -365,7 +373,7 @@ ROLE_PERMISSION_BINDINGS: dict[str, list[str]] = {
         "system", "system:material", "system:bom", "system:routing",
         "system:org", "system:dictionary", "system:personnel", "system:personnel:manage",
         "sales", "sales:order", "sales:demand", "sales:shipping", "sales:stock",
-        "sales:customer", "sales:return",
+        "sales:customer", "sales:return", "sales:price",
         "planning", "planning:mps", "planning:mrp", "planning:schedule",
         "planning:demand",
         "planning:dispatch", "planning:picking", "planning:finish",

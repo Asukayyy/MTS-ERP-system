@@ -11,11 +11,12 @@ import {
   getPurchaseOrder,
   listPurchaseOrders,
   listPurchasePlans,
+  listSupplierMaterials,
   listSuppliers,
   setPurchaseOrderStatus,
+  supplierOptionLabel,
   updatePurchaseOrder,
 } from '@/api/procurement'
-import { listWarehouses } from '@/api/inventory'
 import { listMaterials, listPersonnel } from '@/api/system'
 import RemoteSelect from '@/components/common/RemoteSelect.vue'
 import StatusTag from '@/components/common/StatusTag.vue'
@@ -33,19 +34,47 @@ async function loadMaterialOptions(keyword: string): Promise<RemoteOption[]> {
   return data.items.map((item) => ({ id: item.id, label: `${item.material_code} ${item.material_name}` }))
 }
 
-async function loadSupplierOptions(keyword: string): Promise<RemoteOption[]> {
+/**
+ * 供应商下拉：展示评价平均得分，并把订单涉及物料的主供应商置顶标记【主供】。
+ */
+async function loadSupplierOptionsForMaterials(
+  keyword: string,
+  materialIds: (number | undefined)[] = [],
+): Promise<RemoteOption[]> {
   const data = await listSuppliers({ keyword, status: 'ACTIVE', page: 1, page_size: 50 })
-  return data.items.map((item) => ({ id: item.id, label: `${item.supplier_code} ${item.supplier_name}` }))
+  const ids = Array.from(
+    new Set(materialIds.filter((id): id is number => typeof id === 'number' && id > 0)),
+  )
+  const primaryIds = new Set<number>()
+  if (ids.length) {
+    const pages = await Promise.all(
+      ids.map((id) => listSupplierMaterials({ material_id: id, page: 1, page_size: 100 })),
+    )
+    pages.forEach((page) =>
+      page.items.forEach((link) => {
+        if (link.is_primary) primaryIds.add(link.supplier_id)
+      }),
+    )
+  }
+  return data.items
+    .map((item) => ({
+      id: item.id,
+      label: supplierOptionLabel(item, primaryIds.has(item.id)),
+    }))
+    .sort((a, b) => Number(primaryIds.has(b.id)) - Number(primaryIds.has(a.id)))
+}
+
+function loadSupplierOptions(keyword: string): Promise<RemoteOption[]> {
+  return loadSupplierOptionsForMaterials(keyword)
+}
+
+function loadFormSupplierOptions(keyword: string): Promise<RemoteOption[]> {
+  return loadSupplierOptionsForMaterials(keyword, form.items.map((i) => i.material_id))
 }
 
 async function loadBuyerOptions(keyword: string): Promise<RemoteOption[]> {
   const data = await listPersonnel({ keyword, page: 1, page_size: 50 })
   return data.items.map((item) => ({ id: item.id, label: `${item.employee_no} ${item.person_name}` }))
-}
-
-async function loadWarehouseOptions(keyword: string): Promise<RemoteOption[]> {
-  const data = await listWarehouses({ keyword, status: 'ACTIVE', page: 1, page_size: 50 })
-  return data.items.map((item) => ({ id: item.id, label: `${item.warehouse_code} ${item.warehouse_name}` }))
 }
 
 // ---------------- 新增 / 编辑 ----------------
@@ -204,17 +233,15 @@ const receiptVisible = ref(false)
 const receiptSubmitting = ref(false)
 const receiptOrder = ref<PurchaseOrder | null>(null)
 const receiptForm = reactive<{
-  warehouse_id: number | undefined
   receipt_date: string
   remark: string
   items: ReceiptLineForm[]
-}>({ warehouse_id: undefined, receipt_date: '', remark: '', items: [] })
+}>({ receipt_date: '', remark: '', items: [] })
 
 async function openReceipt(row: PurchaseOrder): Promise<void> {
   try {
     const detail = await getPurchaseOrder(row.id)
     receiptOrder.value = detail
-    receiptForm.warehouse_id = undefined
     receiptForm.receipt_date = ''
     receiptForm.remark = ''
     receiptForm.items = detail.items.map((item) => {
@@ -234,10 +261,6 @@ async function openReceipt(row: PurchaseOrder): Promise<void> {
 
 async function submitReceipt(): Promise<void> {
   if (!receiptOrder.value) return
-  if (!receiptForm.warehouse_id) {
-    ElMessage.warning('请选择收货仓库')
-    return
-  }
   if (!receiptForm.receipt_date) {
     ElMessage.warning('请选择到货日期')
     return
@@ -251,7 +274,7 @@ async function submitReceipt(): Promise<void> {
   try {
     const receipt = await createReceipt({
       purchase_order_id: receiptOrder.value.id,
-      warehouse_id: receiptForm.warehouse_id,
+      // 不再指定收货仓库：确认到货只推送库存「待入库单」，由仓库管理人员决定入库仓
       receipt_date: receiptForm.receipt_date,
       remark: receiptForm.remark || null,
       items: items.map((item) => ({
@@ -260,9 +283,8 @@ async function submitReceipt(): Promise<void> {
         qualified_qty: item.qualified_qty,
       })),
     })
-    // 生成后立即确认入库，写真实库存流水
     await confirmReceipt(receipt.id)
-    ElMessage.success('到货单已生成并确认入库')
+    ElMessage.success('到货单已生成并确认；库存管理已生成待入库单，由仓库人员指定仓库')
     receiptVisible.value = false
     await load()
   } catch (error) {
@@ -467,7 +489,7 @@ onMounted(load)
           </el-col>
           <el-col :span="12">
             <el-form-item label="供应商" prop="supplier_id">
-              <RemoteSelect v-model="form.supplier_id" :loader="loadSupplierOptions" placeholder="请选择供应商" style="width: 100%" />
+              <RemoteSelect v-model="form.supplier_id" :loader="loadFormSupplierOptions" placeholder="请选择供应商" style="width: 100%" />
             </el-form-item>
           </el-col>
           <el-col :span="8">
@@ -542,21 +564,11 @@ onMounted(load)
             </el-form-item>
           </el-col>
           <el-col :span="12">
-            <el-form-item label="收货仓库">
-              <RemoteSelect
-                v-model="receiptForm.warehouse_id"
-                :loader="loadWarehouseOptions"
-                placeholder="请选择仓库"
-                style="width: 100%"
-              />
-            </el-form-item>
-          </el-col>
-          <el-col :span="12">
             <el-form-item label="到货日期">
               <el-date-picker v-model="receiptForm.receipt_date" type="date" value-format="YYYY-MM-DD" style="width: 100%" />
             </el-form-item>
           </el-col>
-          <el-col :span="12">
+          <el-col :span="24">
             <el-form-item label="备注">
               <el-input v-model="receiptForm.remark" />
             </el-form-item>
@@ -577,7 +589,9 @@ onMounted(load)
           </el-table-column>
           <template #empty>该订单没有可到货的明细</template>
         </el-table>
-        <div class="form-tip">到货数量默认取「采购数量 - 已到货数量」，可手工调整。</div>
+        <div class="form-tip">
+          到货数量默认取「采购数量 - 已到货数量」，可手工调整；生成后自动确认，按合格数量推送「库存管理 → 入库管理」待入库单，由仓库管理人员指定仓库。
+        </div>
       </el-form>
       <template #footer>
         <el-button @click="receiptVisible = false">取消</el-button>

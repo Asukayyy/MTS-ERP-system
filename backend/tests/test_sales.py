@@ -26,6 +26,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.modules.inventory import contract as inventory_contract
+from app.modules.inventory import service as inventory_service
 from app.modules.sales import contract as sales_contract
 
 SALES = "/api/v1/sales"
@@ -304,7 +305,11 @@ def test_confirm_order_allocates_stock_and_creates_shipment(
 def test_confirm_order_sends_available_stock_and_converts_shortage(
     client: TestClient, db: Session
 ) -> None:
-    """库存不足：可用部分生成发货草稿，缺口转计划需求（CONFIRMED）。"""
+    """库存不足：可用部分生成发货草稿，缺口触发计划需求。
+
+    需求数量登记**订单未交付总量**（50）而不是缺口（30）：库存已分配的 20 由
+    MRP 净算抵扣，需求侧若只记 30，同一批库存会被抵扣两次。
+    """
     material_id = _create_material(db)
     warehouse_id = _create_warehouse(client)
     _set_stock(db, material_id, warehouse_id, "20")
@@ -329,14 +334,14 @@ def test_confirm_order_sends_available_stock_and_converts_shortage(
         ),
         {"o": order["id"], "m": material_id},
     ).one()
-    assert Decimal(str(row[0])) == Decimal("30")
+    assert Decimal(str(row[0])) == Decimal("50")
     assert row[1] == "CONFIRMED"
 
 
-def test_contract_open_order_demand_excludes_stock_allocated(
+def test_contract_open_order_demand_includes_stock_allocated(
     client: TestClient, db: Session
 ) -> None:
-    """已分配库存的发货草稿不再计入未交付需求，只剩缺口部分。"""
+    """未交付需求取订单未交付总量，已分配库存的发货草稿不扣减（由 MRP 净算抵扣）。"""
     material_id = _create_material(db)
     warehouse_id = _create_warehouse(client)
     _set_stock(db, material_id, warehouse_id, "20")
@@ -350,7 +355,7 @@ def test_contract_open_order_demand_excludes_stock_allocated(
         if row["order_id"] == order["id"]
     ]
     assert len(rows) == 1
-    assert Decimal(str(rows[0]["quantity"])) == Decimal("30")
+    assert Decimal(str(rows[0]["quantity"])) == Decimal("50")
 
 
 def test_confirm_order_does_not_double_allocate_stock(
@@ -367,6 +372,32 @@ def test_confirm_order_does_not_double_allocate_stock(
 
     second = _create_confirmed_order(client, customer["id"], material_id, quantity="20")
     assert Decimal(str(second["allocation"]["stock_qty"])) == Decimal("10")
+    assert Decimal(str(second["allocation"]["shortage_qty"])) == Decimal("10")
+
+
+def test_confirm_order_with_warehouse_less_draft_shipment(
+    client: TestClient, db: Session
+) -> None:
+    """回归：库里存在「未指定仓库」的发货草稿时，确认订单不应 500。
+
+    业务模块已不再选仓库，草稿发货可能 `warehouse_id = NULL`；此类占用按物料
+    整体抵扣可用池。库存 30、草稿占 10 → 新订单要 30 只能分配 20，缺口 10。
+    """
+    material_id = _create_material(db)
+    warehouse_id = _create_warehouse(client)
+    _set_stock(db, material_id, warehouse_id, "30")
+    customer = _create_customer(client)
+
+    # 先造一张草稿发货（自动分配会带仓库），再把仓库置空，模拟业务模块不选仓的草稿
+    first = _create_confirmed_order(client, customer["id"], material_id, quantity="10")
+    db.execute(
+        text("UPDATE sal_shipment_item SET warehouse_id = NULL WHERE shipment_id = :s"),
+        {"s": first["allocation"]["shipment_id"]},
+    )
+    db.commit()
+
+    second = _create_confirmed_order(client, customer["id"], material_id, quantity="30")
+    assert Decimal(str(second["allocation"]["stock_qty"])) == Decimal("20")
     assert Decimal(str(second["allocation"]["shortage_qty"])) == Decimal("10")
 
 
@@ -408,10 +439,11 @@ def test_cancel_order_releases_auto_shipment_and_demand(
 # ==================== 发货 ====================
 
 
-def test_shipment_confirm_decreases_stock_and_updates_delivered(
+def test_shipment_confirm_pushes_outbound_then_warehouse_confirm_decreases_stock(
     client: TestClient, db: Session
 ) -> None:
-    """发货确认：库存减少、写 SALES_SHIPMENT 流水、订单行已发数量回写、订单转 IN_PROGRESS。"""
+    """发货确认：只推送待出库单（不改结存）、订单行已发数量回写、订单转 IN_PROGRESS；
+    仓库管理人员指定仓库并确认后库存才减少。"""
     material_id = _create_material(db)
     warehouse_id = _create_warehouse(client)
     _set_stock(db, material_id, warehouse_id, "100")
@@ -419,18 +451,13 @@ def test_shipment_confirm_decreases_stock_and_updates_delivered(
     order = _create_confirmed_order(client, customer["id"], material_id, quantity="30")
     order_item_id = order["items"][0]["id"]
 
+    # 发货单不再要求选择仓库
     created = client.post(
         f"{SALES}/shipments",
         json={
             "order_id": order["id"],
             "shipment_date": date.today().isoformat(),
-            "items": [
-                {
-                    "order_item_id": order_item_id,
-                    "warehouse_id": warehouse_id,
-                    "quantity": "20",
-                }
-            ],
+            "items": [{"order_item_id": order_item_id, "quantity": "20"}],
         },
     )
     assert created.json()["code"] == 0, created.json()
@@ -442,6 +469,35 @@ def test_shipment_confirm_decreases_stock_and_updates_delivered(
     assert confirmed.json()["data"]["status"] == "COMPLETED"
 
     _refresh(db)
+    # 业务确认不改结存，只登记待出库单
+    assert inventory_contract.get_on_hand_qty(db, material_id, warehouse_id) == Decimal("100.0000")
+    pending = inventory_service.get_inout_status_map(
+        db, [("sales", "SALES_SHIPMENT", shipment["id"])]
+    )[("sales", "SALES_SHIPMENT", shipment["id"])]
+    assert pending["op_type"] == "OUTBOUND"
+    assert pending["status"] == "DRAFT"
+
+    # 库存「出库管理」待办列表可见该单据，且来源与物料快照完整
+    listed = client.get(
+        "/api/v1/inventory/stock-operations",
+        params={"op_type": "OUTBOUND", "status": "DRAFT", "source_type": "SALES_SHIPMENT"},
+    ).json()
+    assert listed["code"] == 0, listed
+    rows = [item for item in listed["data"]["items"] if item["id"] == pending["operation_id"]]
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["source_module"] == "sales"
+    assert row["source_no"] == shipment["shipment_no"]
+    assert row["warehouse_id"] is None
+    assert row["items"][0]["material_id"] == material_id
+    assert row["items"][0]["material_code"]
+    assert row["items"][0]["quantity"] is not None
+    assert "销售发货单" in row["remark"]
+
+    inventory_service.confirm_stock_operation(
+        db, pending["operation_id"], warehouse_id=warehouse_id
+    )
+    db.commit()
     assert inventory_contract.get_on_hand_qty(db, material_id, warehouse_id) == Decimal("80.0000")
 
     detail = client.get(f"{SALES}/orders/{order['id']}").json()["data"]
@@ -476,10 +532,10 @@ def test_shipment_over_quantity_rejected(client: TestClient, db: Session) -> Non
 # ==================== 退货 ====================
 
 
-def test_return_confirm_increases_stock_and_writes_ledger(
+def test_return_confirm_pushes_inbound_then_warehouse_confirm_increases_stock(
     client: TestClient, db: Session
 ) -> None:
-    """退货确认：库存回增、写 SALES_RETURN 流水，状态置 COMPLETED。"""
+    """退货确认：只推送待入库单（不改结存），仓库确认后才回增库存。"""
     material_id = _create_material(db)
     warehouse_id = _create_warehouse(client)
     customer = _create_customer(client)
@@ -493,7 +549,6 @@ def test_return_confirm_increases_stock_and_writes_ledger(
             "items": [
                 {
                     "material_id": material_id,
-                    "warehouse_id": warehouse_id,
                     "quantity": "5",
                     "quality_status": "DEFECTIVE",
                 }
@@ -510,6 +565,18 @@ def test_return_confirm_increases_stock_and_writes_ledger(
     assert confirmed.json()["data"]["items"][0]["quality_status"] == "DEFECTIVE"
 
     _refresh(db)
+    # 业务确认不改结存，只登记待入库单
+    assert inventory_contract.get_on_hand_qty(db, material_id, warehouse_id) == Decimal("0")
+    pending = inventory_service.get_inout_status_map(
+        db, [("sales", "SALES_RETURN", sales_return["id"])]
+    )[("sales", "SALES_RETURN", sales_return["id"])]
+    assert pending["op_type"] == "INBOUND"
+    assert pending["status"] == "DRAFT"
+
+    inventory_service.confirm_stock_operation(
+        db, pending["operation_id"], warehouse_id=warehouse_id
+    )
+    db.commit()
     assert inventory_contract.get_on_hand_qty(db, material_id, warehouse_id) == Decimal("5.0000")
 
 

@@ -6,6 +6,8 @@ import type {
   ForecastSummary,
   Order,
   Product,
+  ProductPrice,
+  ProductPriceHistory,
   SalesReturn,
   SalesStats,
   Shipment,
@@ -43,6 +45,36 @@ export function deleteCustomer(id: number, operatorId?: number): Promise<void> {
 
 export function listProducts(params: Record<string, unknown> = {}): Promise<Product[]> {
   return get<Product[]>('/sales/products', params)
+}
+
+// ---------------- 产品价格 ----------------
+
+export function listProductPrices(
+  params: Record<string, unknown> = {},
+): Promise<PageData<ProductPrice>> {
+  return get<PageData<ProductPrice>>('/sales/product-prices', params)
+}
+
+/** 查询单个物料的当前价格（销售订单选择物料时带出单价） */
+export function getProductPrice(materialId: number): Promise<ProductPrice> {
+  return get<ProductPrice>(`/sales/product-prices/${materialId}`)
+}
+
+export function updateProductPrice(
+  materialId: number,
+  payload: Record<string, unknown>,
+): Promise<ProductPrice> {
+  return put<ProductPrice>(`/sales/product-prices/${materialId}`, payload)
+}
+
+export function listProductPriceHistory(materialId: number): Promise<ProductPriceHistory[]> {
+  return get<ProductPriceHistory[]>(`/sales/product-prices/${materialId}/history`)
+}
+
+export function deleteProductPrice(materialId: number, operatorId?: number): Promise<null> {
+  return del<null>(`/sales/product-prices/${materialId}`, {
+    params: operatorId ? { operator_id: operatorId } : undefined,
+  })
 }
 
 // ---------------- 销售预测 ----------------

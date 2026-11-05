@@ -2,9 +2,10 @@
 
 硬性约定（规格 §7 / §24 / §35 / §42）：
 
-1. **不直接改库存**：发货 / 退货确认必须调用 `inventory.contract` 的
-   `decrease_stock` / `increase_stock`，由库存引擎写流水 + 结存；
-   库存不足时由库存契约抛 5001，本层**不吞异常**，整单事务回滚。
+1. **不直接改库存**：发货 / 退货确认不直接改结存，而是调用 `inventory.contract` 的
+   `push_outbound_order` / `push_inbound_order` 向库存管理推送**待出库 / 待入库单**；
+   由仓库管理人员在「库存管理 → 出库管理 / 入库管理」中指定仓库并确认后，
+   结存才真正变动（仓库选择权收口到库存模块）。
 2. **不写计划表**：销售只提供需求来源（订单 / 预测），由 Planning 通过契约读取。
 3. **只有一个物料主数据 / 人员表**：物料、销售员分别经 `system.contract`
    的 `get_material` / `get_personnel_name` 读取，不另建销售产品表 / 销售员表。
@@ -23,9 +24,10 @@ from sqlalchemy.orm import Session
 
 from app.common.exceptions import BusinessException
 from app.modules.inventory.contract import (
-    decrease_stock,
+    cancel_pending_inout_orders,
     get_available_by_warehouse,
-    increase_stock,
+    push_inbound_order,
+    push_outbound_order,
 )
 from app.modules.sales import models, repository
 from app.modules.system.contract import (
@@ -514,6 +516,180 @@ def list_products(db: Session, keyword: Optional[str] = None) -> List[Dict[str, 
     return get_sellable_materials(db, keyword)
 
 
+# ==================== 产品价格（仅可售物料） ====================
+
+
+def _product_price_dict(
+    material: Dict[str, Any],
+    price: Optional[models.SalProductPrice],
+    history_count: int = 0,
+) -> Dict[str, Any]:
+    return {
+        "material_id": material["id"],
+        "material_code": material.get("material_code") or "",
+        "material_name": material.get("material_name") or "",
+        "sales_category": material.get("sales_category"),
+        "unit_code": material.get("unit_code"),
+        "standard_cost": _as_decimal(material.get("standard_cost")),
+        "current_price": _as_decimal(price.price) if price else None,
+        "effective_date": price.effective_date if price else None,
+        "remark": price.remark if price else None,
+        "history_count": history_count,
+    }
+
+
+def list_product_prices(
+    db: Session,
+    page: int = 1,
+    page_size: int = 20,
+    keyword: Optional[str] = None,
+) -> Tuple[List[Dict[str, Any]], int]:
+    """分页查询产品价格：可售物料（含未定价）+ 已定价的其他仓库物料。"""
+    materials = list(get_sellable_materials(db, keyword))
+    sellable_ids = {int(item["id"]) for item in materials}
+    # 新增价格时允许从全部仓库物料中选取，这些物料也要在列表中可见
+    extra_ids = [
+        row.material_id for row in repository.list_prices(db) if row.material_id not in sellable_ids
+    ]
+    if extra_ids:
+        extra_map = get_materials(db, extra_ids)
+        needle = (keyword or "").strip().lower()
+        for material_id in extra_ids:
+            material = extra_map.get(int(material_id))
+            if not material:
+                continue
+            haystack = f"{material.get('material_code') or ''} {material.get('material_name') or ''}".lower()
+            if needle and needle not in haystack:
+                continue
+            materials.append(material)
+    materials.sort(key=lambda item: str(item.get("material_code") or ""))
+    material_ids = [int(item["id"]) for item in materials]
+    prices = repository.get_prices(db, material_ids)
+    counts = repository.price_history_counts(db, material_ids)
+    total = len(materials)
+    start = (page - 1) * page_size
+    page_materials = materials[start:start + page_size]
+    items = [
+        _product_price_dict(
+            material,
+            prices.get(int(material["id"])),
+            counts.get(int(material["id"]), 0),
+        )
+        for material in page_materials
+    ]
+    return items, total
+
+
+def get_product_price(db: Session, material_id: int) -> Dict[str, Any]:
+    """查询单个可售物料的当前价格。"""
+    material = _require_material(db, material_id)
+    price = repository.get_price(db, material_id)
+    count = len(repository.list_price_history(db, material_id))
+    return _product_price_dict(material, price, count)
+
+
+def set_product_price(
+    db: Session,
+    material_id: int,
+    *,
+    price: Decimal,
+    effective_date: Optional[date] = None,
+    remark: Optional[str] = None,
+    operator_id: Optional[int] = None,
+) -> Dict[str, Any]:
+    """调整产品价格：更新当前价并追加一条价格变动记录。
+
+    价格未变化时只更新备注 / 生效日期，不写变动记录（避免详细页被重复
+    提交的同价记录刷屏）。
+    """
+    material = _require_material(db, material_id)
+    if material.get("status") != RecordStatus.ACTIVE.value:
+        raise BusinessException(
+            CODE_PARAM_INVALID,
+            f"物料 {material.get('material_code')} 已停用，不能定价",
+        )
+    new_price = _money(price)
+    if new_price < 0:
+        raise BusinessException(CODE_PARAM_INVALID, "产品价格不能为负数")
+    effective = effective_date or date.today()
+    row = repository.get_price(db, material_id)
+    changed = row is None or _as_decimal(row.price) != new_price
+    if row is None:
+        row = models.SalProductPrice(
+            material_id=material_id,
+            price=new_price,
+            effective_date=effective,
+            remark=remark,
+            created_by=operator_id,
+            updated_by=operator_id,
+        )
+        repository.add_price(db, row)
+    else:
+        row.price = new_price
+        row.effective_date = effective
+        row.remark = remark
+        row.updated_by = operator_id
+    if changed:
+        repository.add_price_history(
+            db,
+            models.SalProductPriceHistory(
+                material_id=material_id,
+                price=new_price,
+                effective_date=effective,
+                remark=remark,
+                created_by=operator_id,
+                updated_by=operator_id,
+            ),
+        )
+        log_operation(
+            db,
+            module=MODULE,
+            action="UPDATE",
+            target_type="sal_product_price",
+            target_id=material_id,
+            operator_id=operator_id,
+            detail=f"调整产品价格 {material.get('material_code')} → {new_price}",
+        )
+    count = len(repository.list_price_history(db, material_id))
+    return _product_price_dict(material, row, count)
+
+
+def product_price_history(db: Session, material_id: int) -> List[Dict[str, Any]]:
+    """某物料的产品价格变动记录（按生效日期升序）。"""
+    _require_material(db, material_id)
+    return [
+        {
+            "id": row.id,
+            "material_id": row.material_id,
+            "price": _as_decimal(row.price),
+            "effective_date": row.effective_date,
+            "remark": row.remark,
+        }
+        for row in repository.list_price_history(db, material_id)
+    ]
+
+
+def delete_product_price(
+    db: Session, material_id: int, operator_id: Optional[int] = None
+) -> None:
+    """删除产品价格及其全部价格变动记录，物料回到「未定价」。"""
+    material = _require_material(db, material_id)
+    price = repository.get_price(db, material_id)
+    if price is None:
+        raise BusinessException(CODE_NOT_FOUND, "该物料尚未维护产品价格")
+    repository.delete_price_history(db, material_id)
+    repository.delete_price(db, price)
+    log_operation(
+        db,
+        module=MODULE,
+        action="DELETE",
+        target_type="sal_product_price",
+        target_id=material_id,
+        operator_id=operator_id,
+        detail=f"删除产品价格 {material.get('material_code')}",
+    )
+
+
 # ==================== 销售预测 ====================
 
 
@@ -754,6 +930,11 @@ def _build_order_items(
         unit_price = _as_decimal(raw.get("unit_price"))
         if unit_price < 0:
             raise BusinessException(CODE_PARAM_INVALID, "单价不能为负数")
+        if unit_price == 0:
+            # 未传单价时按产品当前价格兜底，保证下单价格与「产品价格」一致
+            price_row = repository.get_price(db, material_id)
+            if price_row is not None:
+                unit_price = _money(price_row.price)
         amount = _money(qty * unit_price)
         total += amount
         repository.add_order_item(
@@ -968,8 +1149,15 @@ def _settle_order_from_stock(
         raise BusinessException(CODE_CONTRACT_NOT_READY, "计划接口尚未就绪") from exc
 
     items = repository.get_order_items(db, order.id)
-    # 其他草稿发货单已占用的库存要先扣掉（发货确认前不会真正扣减结存）
+    # 其他草稿发货单已占用的库存要先扣掉（发货确认前不会真正扣减结存）。
+    # 草稿可能没指定仓库（由仓库管理在出库单里定仓），这种占用只能按物料整体抵扣。
     reserved = repository.draft_shipment_allocations(db)
+    reserved_by_material: Dict[int, Decimal] = {}
+    for (reserved_warehouse_id, reserved_material_id), reserved_qty in reserved.items():
+        if reserved_warehouse_id is None:
+            reserved_by_material[reserved_material_id] = (
+                reserved_by_material.get(reserved_material_id, Decimal("0")) + reserved_qty
+            )
     # 同一物料可能出现在多行，库存池必须按物料共享，否则会重复分配同一批库存
     pools: Dict[int, List[Dict[str, Any]]] = {}
     shipment_lines: List[Dict[str, Any]] = []
@@ -991,6 +1179,15 @@ def _settle_order_from_stock(
                 )
                 if free > 0:
                     pool.append({"warehouse_id": warehouse_id, "available": free})
+            # 未指定仓库的草稿占用：按可用量从大到小依次抵扣，与后续分配顺序一致
+            outstanding = reserved_by_material.get(material_id, Decimal("0"))
+            for bucket in pool:
+                if outstanding <= 0:
+                    break
+                take = min(bucket["available"], outstanding)
+                bucket["available"] -= take
+                outstanding -= take
+            pool = [bucket for bucket in pool if bucket["available"] > 0]
             pools[material_id] = pool
         need = remaining
         for bucket in pool:
@@ -1046,13 +1243,19 @@ def _settle_order_from_stock(
         )
         stock_total += got
         if shortage > 0:
-            result = planning_contract.create_sales_demand_from_shortage(
+            # 需求数量登记**订单未交付总量**（而非缺口）：库存已分配的部分由
+            # MRP 用可用库存净算抵扣，需求侧若只记缺口，会被库存重复抵扣一次。
+            result = planning_contract.create_sales_demand_from_order(
                 db,
                 order_id=order.id,
                 order_no=order.order_no,
                 material_id=material_id,
-                quantity=shortage,
+                quantity=need_qty,
                 due_date=order.delivery_date,
+                remark=(
+                    f"销售订单 {order.order_no} 客户需求 {need_qty}"
+                    f"（库存已分配 {got}，缺口 {shortage}）"
+                ),
                 operator_id=operator_id,
             )
             demand_nos.append(result["demand_no"])
@@ -1067,8 +1270,8 @@ def _settle_order_from_stock(
         operator_id=operator_id,
         detail=(
             f"销售订单 {order.order_no} 确认后库存分流：库存发货 {stock_total}"
-            f"（发货单 {shipment_no or '无'}），缺口转计划 {shortage_total}"
-            f"（需求 {'、'.join(demand_nos) or '无'}）"
+            f"（发货单 {shipment_no or '无'}），缺口 {shortage_total} 触发计划需求"
+            f"（需求 {'、'.join(demand_nos) or '无'}，按订单未交付总量登记）"
         ),
     )
     return {
@@ -1262,7 +1465,11 @@ def create_shipment(
 def confirm_shipment(
     db: Session, shipment_id: int, operator_id: Optional[int] = None
 ) -> Dict[str, Any]:
-    """确认发货（原子）：调用库存出库 → 回写订单行已发数量 → 更新单据 / 订单状态。"""
+    """确认发货（原子）：推送库存待出库单 → 回写订单行已发数量 → 更新单据 / 订单状态。
+
+    **不再直接扣减结存、也不再指定仓库**：库存管理会生成一张「待出库单」，
+    由仓库管理人员选择仓库并确认后，库存才真正减少。
+    """
     shipment = _require_shipment(db, shipment_id)
     if shipment.status != "DRAFT":
         raise BusinessException(
@@ -1276,6 +1483,7 @@ def confirm_shipment(
     items = repository.get_shipment_items(db, shipment.id)
     if not items:
         raise BusinessException(CODE_PARAM_INVALID, "发货单没有明细，不能确认")
+    push_items: List[Dict[str, Any]] = []
     for item in items:
         order_item = repository.get_order_item(db, item.order_item_id)
         if not order_item:
@@ -1287,21 +1495,27 @@ def confirm_shipment(
                 CODE_SHIP_QTY_EXCEED,
                 f"发货数量超过未发数量：物料 {item.material_id} 未发 {remaining}，本次 {qty}",
             )
-        # 库存不足时库存契约抛 5001，本层不吞，整单事务回滚
-        decrease_stock(
-            db,
-            material_id=item.material_id,
-            quantity=qty,
-            warehouse_id=item.warehouse_id,
-            source_module=MODULE,
-            source_type="SALES_SHIPMENT",
-            source_reference_id=shipment.id,
-            source_no=shipment.shipment_no,
-            biz_date=shipment.shipment_date,
-            operator_id=operator_id,
-            remark=f"销售发货 {shipment.shipment_no}",
-        )
+        push_items.append({"material_id": item.material_id, "quantity": qty})
         order_item.delivered_qty = _as_decimal(order_item.delivered_qty) + qty
+
+    # 推送到库存管理 → 出库管理（待仓库指定仓库并确认）
+    customer = repository.get_customers(db, [order.customer_id]).get(order.customer_id)
+    customer_label = customer.customer_name if customer else ""
+    pushed = push_outbound_order(
+        db,
+        op_date=shipment.shipment_date,
+        items=push_items,
+        source_module=MODULE,
+        source_type="SALES_SHIPMENT",
+        source_reference_id=shipment.id,
+        source_no=shipment.shipment_no,
+        remark=(
+            f"订单 {order.order_no}"
+            + (f"，客户 {customer_label}" if customer_label else "")
+            + f"，共 {len(push_items)} 项"
+        ),
+        operator_id=operator_id,
+    )
 
     shipment.status = "COMPLETED"
     shipment.updated_by = operator_id
@@ -1320,9 +1534,15 @@ def confirm_shipment(
         target_type="sal_shipment",
         target_id=shipment.id,
         operator_id=operator_id,
-        detail=f"确认发货单 {shipment.shipment_no}，订单 {order.order_no} → {order.status}",
+        detail=(
+            f"确认发货单 {shipment.shipment_no}，订单 {order.order_no} → {order.status}；"
+            f"已推送库存待出库单 {pushed.get('operation_no')}"
+        ),
     )
-    return _shipment_view(db, shipment)
+    view = _shipment_view(db, shipment)
+    view["inventory_operation_no"] = pushed.get("operation_no")
+    view["inventory_operation_id"] = pushed.get("operation_id")
+    return view
 
 
 def cancel_shipment(
@@ -1335,6 +1555,15 @@ def cancel_shipment(
         )
     shipment.status = "CANCELLED"
     shipment.updated_by = operator_id
+    # 尚未被仓库确认的待出库单一并撤销
+    cancelled = cancel_pending_inout_orders(
+        db,
+        source_module=MODULE,
+        source_type="SALES_SHIPMENT",
+        source_reference_id=shipment.id,
+        operator_id=operator_id,
+        reason=f"发货单 {shipment.shipment_no} 已取消",
+    )
     log_operation(
         db,
         module=MODULE,
@@ -1342,7 +1571,10 @@ def cancel_shipment(
         target_type="sal_shipment",
         target_id=shipment.id,
         operator_id=operator_id,
-        detail=f"取消发货单 {shipment.shipment_no}",
+        detail=(
+            f"取消发货单 {shipment.shipment_no}"
+            + (f"，同时撤销待出库单 {cancelled} 张" if cancelled else "")
+        ),
     )
     return _shipment_view(db, shipment)
 
@@ -1485,7 +1717,10 @@ def create_return(
 def confirm_return(
     db: Session, return_id: int, operator_id: Optional[int] = None
 ) -> Dict[str, Any]:
-    """确认退货（原子）：调用库存入库，状态置 COMPLETED。
+    """确认退货（原子）：推送库存待入库单，状态置 COMPLETED。
+
+    **不再直接增加结存、也不再指定仓库**：库存管理生成「待入库单」，
+    由仓库管理人员选择仓库并确认后，库存才真正增加。
 
     简化说明（规格 §42）：`quality_status` 为 SCRAP 的退货行**仍然入仓**，
     仅通过质量状态标签区分，系统不设独立隔离仓。
@@ -1515,20 +1750,32 @@ def confirm_return(
                     f"退货数量超过可退数量：物料 {item.material_id} 可退 {available}，本次 {qty}",
                 )
             returned[item.material_id] = used + qty
-    for item in items:
-        increase_stock(
-            db,
-            material_id=item.material_id,
-            quantity=_as_decimal(item.quantity),
-            warehouse_id=item.warehouse_id,
-            source_module=MODULE,
-            source_type="SALES_RETURN",
-            source_reference_id=sales_return.id,
-            source_no=sales_return.return_no,
-            biz_date=sales_return.return_date,
-            operator_id=operator_id,
-            remark=f"销售退货 {sales_return.return_no}（{item.quality_status}）",
-        )
+    push_items = [
+        {
+            "material_id": item.material_id,
+            "quantity": _as_decimal(item.quantity),
+            "remark": f"质量状态 {item.quality_status}",
+        }
+        for item in items
+    ]
+    customer = repository.get_customers(
+        db, [sales_return.customer_id] if sales_return.customer_id else []
+    ).get(sales_return.customer_id)
+    customer_label = customer.customer_name if customer else ""
+    pushed = push_inbound_order(
+        db,
+        op_date=sales_return.return_date,
+        items=push_items,
+        source_module=MODULE,
+        source_type="SALES_RETURN",
+        source_reference_id=sales_return.id,
+        source_no=sales_return.return_no,
+        remark=(
+            (f"客户 {customer_label}，" if customer_label else "")
+            + f"共 {len(push_items)} 项"
+        ),
+        operator_id=operator_id,
+    )
     sales_return.status = "COMPLETED"
     sales_return.updated_by = operator_id
     log_operation(
@@ -1538,9 +1785,15 @@ def confirm_return(
         target_type="sal_return",
         target_id=sales_return.id,
         operator_id=operator_id,
-        detail=f"确认退货单 {sales_return.return_no}",
+        detail=(
+            f"确认退货单 {sales_return.return_no}；"
+            f"已推送库存待入库单 {pushed.get('operation_no')}"
+        ),
     )
-    return _return_view(db, sales_return)
+    view = _return_view(db, sales_return)
+    view["inventory_operation_no"] = pushed.get("operation_no")
+    view["inventory_operation_id"] = pushed.get("operation_id")
+    return view
 
 
 def cancel_return(
@@ -1553,6 +1806,14 @@ def cancel_return(
         )
     sales_return.status = "CANCELLED"
     sales_return.updated_by = operator_id
+    cancelled = cancel_pending_inout_orders(
+        db,
+        source_module=MODULE,
+        source_type="SALES_RETURN",
+        source_reference_id=sales_return.id,
+        operator_id=operator_id,
+        reason=f"退货单 {sales_return.return_no} 已取消",
+    )
     log_operation(
         db,
         module=MODULE,
@@ -1560,7 +1821,10 @@ def cancel_return(
         target_type="sal_return",
         target_id=sales_return.id,
         operator_id=operator_id,
-        detail=f"取消退货单 {sales_return.return_no}",
+        detail=(
+            f"取消退货单 {sales_return.return_no}"
+            + (f"，同时撤销待入库单 {cancelled} 张" if cancelled else "")
+        ),
     )
     return _return_view(db, sales_return)
 
@@ -1725,3 +1989,7 @@ def stats(db: Session) -> Dict[str, Any]:
             db, models.SalReturn, models.SalReturn.return_date, month_start, next_month_start
         ),
     }
+
+def get_material_delivered_values(db: Session, since: date) -> Dict[int, Decimal]:
+    """按物料汇总指定日期之后的销售出库金额（供 ABC 自动分类使用）。"""
+    return dict(repository.material_delivered_value_rows(db, since))

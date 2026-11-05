@@ -59,11 +59,16 @@ export interface AbcClassifyResult {
   basis: string
   a_threshold: number
   b_threshold: number
+  purchase_value: string | number
+  sales_value: string | number
+  months: number
 }
 
-/** 自动 ABC 分类（按价值累计占比重算全部启用物料） */
-export function autoClassifyAbc(): Promise<AbcClassifyResult> {
-  return post<AbcClassifyResult>('/system/materials/abc-classify')
+/** 自动 ABC 分类（按近 N 个月采购 + 销售金额实时重算全部启用物料） */
+export function autoClassifyAbc(months = 12): Promise<AbcClassifyResult> {
+  return post<AbcClassifyResult>('/system/materials/abc-classify', undefined, {
+    params: { months },
+  })
 }
 
 // ---------------- BOM ----------------

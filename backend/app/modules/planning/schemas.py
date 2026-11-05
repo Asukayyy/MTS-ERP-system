@@ -216,6 +216,9 @@ class DispatchOrderCreate(BaseModel):
     operation: Optional[str] = None
     planned_qty: Decimal = Field(gt=0, description="派工数量")
     worker_id: Optional[int] = Field(default=None, description="作业人员（sys_personnel.id）")
+    org_id: Optional[int] = Field(
+        default=None, description="承接单位（sys_organization.id）；留空自动取智能加工中心"
+    )
     planned_start: Optional[date] = Field(default=None, description="计划开始日期，草稿可留空")
     planned_end: Optional[date] = Field(default=None, description="计划结束日期，草稿可留空")
     remark: Optional[str] = None
@@ -232,6 +235,8 @@ class DispatchOrderOut(_IdOut):
     completed_qty: Decimal
     worker_id: Optional[int] = None
     worker_name: Optional[str] = Field(default=None, description="作业人员姓名（列表展示）")
+    org_id: Optional[int] = None
+    org_name: Optional[str] = Field(default=None, description="承接单位名称（列表展示）")
     planned_start: Optional[date] = None
     planned_end: Optional[date] = None
     status: str
@@ -244,6 +249,9 @@ class DispatchOrderUpdate(BaseModel):
     operation: Optional[str] = None
     planned_qty: Optional[Decimal] = Field(default=None, gt=0, description="派工数量")
     worker_id: Optional[int] = Field(default=None, description="作业人员（sys_personnel.id）")
+    org_id: Optional[int] = Field(
+        default=None, description="承接单位（sys_organization.id）"
+    )
     planned_start: Optional[date] = None
     planned_end: Optional[date] = None
     remark: Optional[str] = None

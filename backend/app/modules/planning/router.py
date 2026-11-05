@@ -429,10 +429,20 @@ def list_production_plans(
     params: PageParams = Depends(PageParams.as_dependency),
     status: Optional[str] = Query(default=None, description="状态"),
     material_id: Optional[int] = Query(default=None, description="物料ID"),
+    generable_only: bool = Query(
+        default=False,
+        description="仅返回仍可生成下游单据的计划（排除已完成 / 已取消）",
+    ),
     db: Session = Depends(get_db),
 ) -> ApiResponse[PageData[schemas.ProductionPlanOut]]:
-    """分页查询生产作业计划。"""
-    rows, total = service.list_production_plans(db, params.page, params.page_size, status, material_id)
+    """分页查询生产作业计划。
+
+    `generable_only=true` 供"按计划生成派工单 / 领料单 / 完工报告"的选择列表使用，
+    已完工与已取消的计划不会再出现在选项中。
+    """
+    rows, total = service.list_production_plans(
+        db, params.page, params.page_size, status, material_id, generable_only
+    )
     return success(
         PageData[schemas.ProductionPlanOut](
             page=params.page, page_size=params.page_size, total=total, items=rows
@@ -575,7 +585,7 @@ def list_dispatch_orders(
 def create_dispatch_order(
     payload: schemas.DispatchOrderCreate, db: Session = Depends(get_db)
 ) -> ApiResponse[schemas.DispatchOrderOut]:
-    """新增派工单；作业人员须存在于 `sys_personnel`。"""
+    """新增派工单；作业人员须存在于 `sys_personnel`，承接单位留空默认智能加工中心。"""
     dispatch = service.create_dispatch_order(
         db,
         planned_qty=payload.planned_qty,
@@ -584,6 +594,7 @@ def create_dispatch_order(
         plan_id=payload.plan_id,
         operation=payload.operation,
         worker_id=payload.worker_id,
+        org_id=payload.org_id,
         dispatch_no=payload.dispatch_no,
         remark=payload.remark,
     )
@@ -599,7 +610,7 @@ def create_dispatch_order(
 def create_dispatch_orders_from_plans(
     payload: schemas.DispatchOrderFromPlansRequest, db: Session = Depends(get_db)
 ) -> ApiResponse[schemas.GenerationResultOut]:
-    """按选中计划的工艺路线逐工序生成 DRAFT 派工单；无工艺路线的计划计入 errors。"""
+    """按选中计划生成 DRAFT 派工单：一张计划一张，整单派给智能加工中心。"""
     try:
         result = service.create_dispatch_orders_from_plans(db, payload.plan_ids)
         db.commit()

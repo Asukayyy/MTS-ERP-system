@@ -29,6 +29,7 @@ from app.modules.system.contract import (
     get_material,
     get_materials,
     log_operation,
+    search_materials,
 )
 
 # ==================== 错误码（5000~5999） ====================
@@ -51,6 +52,8 @@ _VALID_SOURCE_TYPES = {
     "SALES_RETURN",
     "TRANSFER",
     "STOCKTAKE",
+    "INBOUND",
+    "OUTBOUND",
     "MANUAL",
 }
 _VALID_REPLENISHMENT_SOURCES = {"REORDER", "PRODUCTION"}
@@ -88,6 +91,12 @@ def _validate_source_type(source_type: str) -> None:
         raise BusinessException(CODE_PARAM_INVALID, f"非法的来源业务类型：{source_type}")
 
 
+def _require_integer_qty(qty: Decimal, field: str) -> None:
+    """库存数量一律按整数管理（件/个/台），拒绝小数输入。"""
+    if qty != qty.to_integral_value():
+        raise BusinessException(CODE_PARAM_INVALID, f"{field}必须为整数，收到：{qty}")
+
+
 def _material_map(db: Session, material_ids: Sequence[int]) -> Dict[int, Dict[str, Any]]:
     return get_materials(db, [int(i) for i in material_ids if i])
 
@@ -101,6 +110,19 @@ def _warehouse_name_map(db: Session, warehouse_ids: Sequence[int]) -> Dict[int, 
     return result
 
 
+def _warehouse_map(db: Session, warehouse_ids: Sequence[int]) -> Dict[int, Dict[str, Any]]:
+    """仓库 ID → {warehouse_code, warehouse_name}，用于出参展示编码与名称。"""
+    result: Dict[int, Dict[str, Any]] = {}
+    for wid in {int(i) for i in warehouse_ids if i}:
+        warehouse = repository.get_warehouse(db, wid)
+        if warehouse:
+            result[wid] = {
+                "warehouse_code": warehouse.warehouse_code,
+                "warehouse_name": warehouse.warehouse_name,
+            }
+    return result
+
+
 def _balance_dict(balance: models.InvBalance) -> Dict[str, Any]:
     return {
         "on_hand": _as_decimal(balance.quantity),
@@ -110,6 +132,54 @@ def _balance_dict(balance: models.InvBalance) -> Dict[str, Any]:
 
 
 # ==================== 库存引擎（核心） ====================
+
+
+def _append_stock_journal(
+    db: Session,
+    *,
+    op_date: date,
+    material_id: int,
+    warehouse_id: int,
+    direction: str,  # IN / OUT / ADJUST
+    delta_qty: Decimal,
+    qty_before: Decimal,
+    qty_after: Decimal,
+    source_module: str,
+    source_type: Optional[str],
+    source_reference_id: Optional[int],
+    source_no: Optional[str],
+    remark: Optional[str],
+    operator_id: Optional[int],
+) -> None:
+    """在同一事务内追加一条库存变动流水（inv_stock_journal）。
+
+    调用方：increase_stock / decrease_stock / _apply_adjust / 移库确认 / 盘点确认。
+    """
+    # 拿物料/仓库快照（保持当时的 code/name，不受后续改名影响）
+    material_info = _material_map(db, [material_id]).get(material_id, {})
+    warehouse_info = _warehouse_map(db, [warehouse_id]).get(warehouse_id, {})
+
+    journal = models.InvStockJournal(
+        op_date=op_date,
+        material_id=material_id,
+        material_code=material_info.get("material_code"),
+        material_name=material_info.get("material_name"),
+        warehouse_id=warehouse_id,
+        warehouse_code=warehouse_info.get("warehouse_code"),
+        warehouse_name=warehouse_info.get("warehouse_name"),
+        direction=direction,
+        delta_qty=delta_qty,
+        qty_before=qty_before,
+        qty_after=qty_after,
+        source_module=source_module,
+        source_type=source_type,
+        source_reference_id=source_reference_id,
+        source_no=source_no,
+        remark=remark,
+        operator_id=operator_id,
+        created_at=datetime.now(),
+    )
+    db.add(journal)
 
 
 def _lock_or_create_balance(db: Session, warehouse_id: int, material_id: int) -> models.InvBalance:
@@ -141,6 +211,7 @@ def _validate_stock_args(
     qty = _as_decimal(quantity)
     if qty <= 0:
         raise BusinessException(CODE_PARAM_INVALID, "库存变动数量必须为正数")
+    _require_integer_qty(qty, "库存变动数量")
     if not source_module:
         raise BusinessException(CODE_PARAM_INVALID, "来源模块不能为空")
     _validate_source_type(source_type)
@@ -165,7 +236,7 @@ def _increase_stock(
     operator_id: Optional[int] = None,
     remark: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """入库内部实现：加锁后直接给结存加数量（同一事务，不写独立流水表）。"""
+    """入库内部实现：加锁后直接给结存加数量（同一事务，追加 journal 流水）。"""
     qty = _validate_stock_args(
         db,
         material_id=material_id,
@@ -176,11 +247,18 @@ def _increase_stock(
     )
     biz = biz_date or date.today()
     balance = _lock_or_create_balance(db, warehouse_id, material_id)
-    balance.quantity = _as_decimal(balance.quantity) + qty
+    before = _as_decimal(balance.quantity)
+    after = before + qty
+    balance.quantity = after
     balance.updated_at_txn = datetime.now()
-    return {
-        "quantity_after": _as_decimal(balance.quantity),
-    }
+    _append_stock_journal(
+        db, op_date=biz, material_id=material_id, warehouse_id=warehouse_id,
+        direction="IN", delta_qty=qty, qty_before=before, qty_after=after,
+        source_module=source_module, source_type=source_type,
+        source_reference_id=source_reference_id, source_no=source_no,
+        remark=remark, operator_id=operator_id,
+    )
+    return {"quantity_after": after}
 
 
 def increase_stock(
@@ -232,7 +310,7 @@ def _decrease_stock(
     operator_id: Optional[int] = None,
     remark: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """出库内部实现：加锁复核可用量 → 直接减结存（不写独立流水表）。"""
+    """出库内部实现：加锁复核可用量 → 直接减结存（同一事务，追加 journal）。"""
     qty = _validate_stock_args(
         db,
         material_id=material_id,
@@ -255,14 +333,21 @@ def _decrease_stock(
             CODE_STOCK_INSUFFICIENT,
             f"库存不足：物料 {material_id} 可用量 {available}，需求 {qty}",
         )
-    new_qty = on_hand - qty
-    if new_qty < 0:  # 防御性校验，禁止负库存
+    before = on_hand
+    after = before - qty
+    if after < 0:  # 防御性校验，禁止负库存
         raise BusinessException(CODE_STOCK_INSUFFICIENT, "库存不足：出库后将出现负库存")
-    balance.quantity = new_qty
+    balance.quantity = after
     balance.updated_at_txn = datetime.now()
-    return {
-        "quantity_after": new_qty,
-    }
+    _append_stock_journal(
+        db, op_date=biz, material_id=material_id, warehouse_id=warehouse_id,
+        direction="OUT", delta_qty=-qty, qty_before=before, qty_after=after,
+        source_module=source_module, source_type=source_type,
+        source_reference_id=source_reference_id, source_no=source_no,
+        remark=remark, operator_id=operator_id,
+    )
+    _auto_replenish_if_needed(db, material_id, operator_id)
+    return {"quantity_after": after}
 
 
 def decrease_stock(
@@ -313,18 +398,28 @@ def _apply_adjust(
     operator_id: Optional[int] = None,
     remark: Optional[str] = None,
 ) -> Decimal:
-    """盘点调整：直接改结存（delta 可为负，调整后结存不得为负）。"""
+    """盘点调整：直接改结存（delta 可为负，调整后结存不得为负，追加 journal）。"""
     biz = biz_date or date.today()
     balance = _lock_or_create_balance(db, warehouse_id, material_id)
-    new_qty = _as_decimal(balance.quantity) + delta
-    if new_qty < 0:
+    before = _as_decimal(balance.quantity)
+    after = before + delta
+    if after < 0:
         raise BusinessException(
             CODE_BALANCE_NEGATIVE,
-            f"盘点调整后库存为负：物料 {material_id} 调整后 {new_qty}",
+            f"盘点调整后库存为负：物料 {material_id} 调整后 {after}",
         )
-    balance.quantity = new_qty
+    balance.quantity = after
     balance.updated_at_txn = datetime.now()
-    return new_qty
+    _append_stock_journal(
+        db, op_date=biz, material_id=material_id, warehouse_id=warehouse_id,
+        direction="ADJUST", delta_qty=delta, qty_before=before, qty_after=after,
+        source_module=source_module, source_type=source_type,
+        source_reference_id=source_reference_id, source_no=source_no,
+        remark=remark, operator_id=operator_id,
+    )
+    if delta < 0:
+        _auto_replenish_if_needed(db, material_id, operator_id)
+    return after
 
 
 # ---- 只读查询（契约导出） ----
@@ -512,6 +607,9 @@ def list_balances(
     has_reorder_point: bool = False,
     sales_category: Optional[str] = None,
     abc_class: Optional[str] = None,
+    quantity_gt: Optional[Decimal] = None,
+    sort_by: Optional[str] = None,
+    sort_order: str = "asc",
 ) -> Tuple[List[Dict[str, Any]], int]:
     """分页查询实时库存，附带物料编码/名称、ABC 分类、销售类别与可用量。"""
     material_ids: Optional[List[int]] = None
@@ -531,12 +629,29 @@ def list_balances(
     rows, total = repository.list_balances(
         db, page, page_size, material_id, warehouse_id, material_ids,
         has_reorder_point=has_reorder_point,
+        quantity_gt=quantity_gt,
+        sort_by=sort_by,
+        sort_order=sort_order,
     )
     materials = _material_map(db, [r.material_id for r in rows])
-    warehouses = _warehouse_name_map(db, [r.warehouse_id for r in rows])
+    warehouses = _warehouse_map(db, [r.warehouse_id for r in rows])
+    # 批量算物料跨仓可用量（排除废品仓），供前端按总量判断安全库存
+    unique_mids = list({r.material_id for r in rows})
+    total_available_map = {
+        mid: repository.sum_available(db, mid) for mid in unique_mids
+    }
     items = []
     for row in rows:
         material = materials.get(row.material_id, {})
+        warehouse = warehouses.get(row.warehouse_id, {})
+        # 废品仓物资已报废：现存量照实，但可用量记 0、不参与安全库存判断
+        counts_in_available = (
+            warehouse.get("warehouse_code")
+            not in repository.NON_AVAILABLE_WAREHOUSE_CODES
+        )
+        balance_dict = _balance_dict(row)
+        if not counts_in_available:
+            balance_dict["available_quantity"] = Decimal("0")
         items.append(
             {
                 "id": row.id,
@@ -546,10 +661,16 @@ def list_balances(
                 "material_abc_class": material.get("abc_class"),
                 "material_sales_category": material.get("sales_category"),
                 "warehouse_id": row.warehouse_id,
-                "warehouse_name": warehouses.get(row.warehouse_id),
+                "warehouse_code": warehouse.get("warehouse_code"),
+                "warehouse_name": warehouse.get("warehouse_name"),
+                "safety_stock": _as_decimal(material.get("safety_stock")),
                 "reorder_point": row.reorder_point,
                 "reorder_quantity": row.reorder_quantity,
-                **_balance_dict(row),
+                "is_available_warehouse": counts_in_available,
+                "material_total_available": total_available_map.get(
+                    row.material_id, Decimal("0")
+                ),
+                **balance_dict,
             }
         )
     return items, total
@@ -620,7 +741,26 @@ def get_available_stock(
 # 手工入/出库直接改结存、不留单据；前端流水页复用 list_stock_operations 展示。
 
 
-# ==================== 库存操作单（移库 / 盘点） ====================
+# ==================== 库存单据（移库 / 盘点 / 入库 / 出库） ====================
+
+#: 允许的单据类型
+_OP_TYPES = ("TRANSFER", "STOCKTAKE", "INBOUND", "OUTBOUND")
+
+#: 单据类型中文名（日志 / 备注用）
+_OP_TYPE_NAMES = {
+    "TRANSFER": "移库单",
+    "STOCKTAKE": "盘点单",
+    "INBOUND": "入库单",
+    "OUTBOUND": "出库单",
+}
+
+#: 每种单据允许的来源类型（UI 下拉同口径）：
+#: 入库只有销售退货 / 采购到货 / 生产完工；出库只有销售发货 / 生产领料；
+#: 另外保留 INBOUND / OUTBOUND / MANUAL 给库存自己发起的单据。
+_SOURCE_TYPES_BY_OP: Dict[str, set] = {
+    "INBOUND": {"SALES_RETURN", "PURCHASE_RECEIPT", "PRODUCTION_COMPLETION", "INBOUND", "MANUAL"},
+    "OUTBOUND": {"SALES_SHIPMENT", "MATERIAL_REQUISITION", "OUTBOUND", "MANUAL"},
+}
 
 
 def list_stock_operations(
@@ -630,8 +770,37 @@ def list_stock_operations(
     op_type: Optional[str] = None,
     status: Optional[str] = None,
     warehouse_id: Optional[int] = None,
+    source_module: Optional[str] = None,
+    source_type: Optional[str] = None,
+    keyword: Optional[str] = None,
 ):
-    return repository.list_stock_operations(db, page, page_size, op_type, status, warehouse_id)
+    return repository.list_stock_operations(
+        db, page, page_size, op_type, status, warehouse_id, source_module, source_type, keyword
+    )
+
+
+def list_stock_journal(
+    db: Session,
+    *,
+    page: int = 1,
+    page_size: int = 20,
+    keyword: Optional[str] = None,
+    material_id: Optional[int] = None,
+    warehouse_id: Optional[int] = None,
+    direction: Optional[str] = None,
+    source_module: Optional[str] = None,
+    source_type: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+) -> Tuple[List[models.InvStockJournal], int]:
+    """库存变动流水列表。"""
+    return repository.list_stock_journal(
+        db,
+        page=page, page_size=page_size,
+        keyword=keyword, material_id=material_id, warehouse_id=warehouse_id,
+        direction=direction, source_module=source_module, source_type=source_type,
+        date_from=date_from, date_to=date_to,
+    )
 
 
 def get_stock_operation(db: Session, operation_id: int) -> models.InvStockOperation:
@@ -639,6 +808,132 @@ def get_stock_operation(db: Session, operation_id: int) -> models.InvStockOperat
     if not operation:
         raise BusinessException(CODE_NOT_FOUND, f"库存操作单不存在：{operation_id}")
     return operation
+
+
+def _material_snapshot(material: Mapping[str, Any]) -> Dict[str, Any]:
+    """建单时的物料快照字段（编码 / 名称 / 规格 / 单位），供仓库人员查看完整信息。"""
+    return {
+        "material_code": material.get("material_code"),
+        "material_name": material.get("material_name"),
+        "material_spec": material.get("specification"),
+        "unit": material.get("unit_code"),
+    }
+
+
+#: 业务来源类型中文名（出入库单备注 / 日志展示用）
+SOURCE_TYPE_NAMES: Dict[str, str] = {
+    "SALES_SHIPMENT": "销售发货单",
+    "SALES_RETURN": "销售退货单",
+    "PURCHASE_RECEIPT": "采购到货单",
+    "MATERIAL_REQUISITION": "生产领料单",
+    "PRODUCTION_COMPLETION": "完工报告",
+}
+
+
+def source_label(source_type: Optional[str], source_no: Optional[str]) -> str:
+    """来源单据的可读描述，例如「销售发货单 SH202610300001」。"""
+    if not source_type and not source_no:
+        return ""
+    name = SOURCE_TYPE_NAMES.get(source_type or "", source_type or "业务单据")
+    return f"{name} {source_no}" if source_no else name
+
+
+def _source_remark(operation: models.InvStockOperation) -> str:
+    """出入库单的「来源」备注后缀。"""
+    label = source_label(operation.source_type, operation.source_no)
+    return f"（来源 {label}）" if label else ""
+
+
+def push_inout_order(
+    db: Session,
+    *,
+    op_type: str,
+    op_date: date,
+    items: Sequence[Mapping[str, Any]],
+    source_module: str,
+    source_type: str,
+    source_reference_id: int,
+    source_no: str,
+    remark: Optional[str] = None,
+    operator_id: Optional[int] = None,
+) -> models.InvStockOperation:
+    """业务模块推送入库 / 出库单（**只登记待办，不改结存**）。
+
+    - 同一来源单据已存在待处理单时直接返回，保证重复确认幂等；
+    - 仓库由仓库管理人员在库存管理中确认时指定。
+    """
+    existing = repository.find_pending_by_source(
+        db, source_module, source_type, source_reference_id
+    )
+    if existing:
+        return existing
+    full_remark = f"{source_label(source_type, source_no)}"
+    if remark:
+        full_remark = f"{full_remark}｜{remark}"
+    return create_stock_operation(
+        db,
+        op_type=op_type,
+        op_date=op_date,
+        items=items,
+        source_module=source_module,
+        source_type=source_type,
+        source_reference_id=source_reference_id,
+        source_no=source_no,
+        remark=full_remark,
+        operator_id=operator_id,
+    )
+
+
+def cancel_pending_inout_orders(
+    db: Session,
+    *,
+    source_module: str,
+    source_type: str,
+    source_reference_id: int,
+    operator_id: Optional[int] = None,
+    reason: Optional[str] = None,
+) -> int:
+    """撤销某来源单据尚未被仓库确认的出入库单（业务单据取消 / 删除时调用）。"""
+    rows = repository.list_pending_by_source(
+        db, source_module, source_type, source_reference_id
+    )
+    for row in rows:
+        row.status = "CANCELLED"
+        row.updated_by = operator_id
+        log_operation(
+            db,
+            module=MODULE,
+            action="CANCEL",
+            target_type="inv_stock_operation",
+            target_id=row.id,
+            operator_id=operator_id,
+            detail=(
+                f"来源单据作废，撤销{_OP_TYPE_NAMES.get(row.op_type, '出入库单')}"
+                f" {row.operation_no}" + (f"（{reason}）" if reason else "")
+            ),
+        )
+    return len(rows)
+
+
+def get_inout_status_map(
+    db: Session, sources: Sequence[Tuple[str, str, int]]
+) -> Dict[Tuple[str, str, int], Dict[str, Any]]:
+    """批量查来源单据对应的库存单据状态，供业务列表回填「库存单状态 / 单号」。"""
+    rows = repository.list_operations_by_sources(db, sources)
+    result: Dict[Tuple[str, str, int], Dict[str, Any]] = {}
+    for row in rows:
+        key = (row.source_module, row.source_type, row.source_reference_id)
+        # 同一来源可能有多张单（历史作废 + 新建），优先展示待处理的
+        if key in result and result[key]["status"] == "DRAFT":
+            continue
+        result[key] = {
+            "operation_id": row.id,
+            "operation_no": row.operation_no,
+            "op_type": row.op_type,
+            "status": row.status,
+            "warehouse_id": row.warehouse_id,
+        }
+    return result
 
 
 def create_stock_operation(
@@ -651,20 +946,35 @@ def create_stock_operation(
     from_warehouse_id: Optional[int] = None,
     to_warehouse_id: Optional[int] = None,
     warehouse_id: Optional[int] = None,
+    source_module: Optional[str] = None,
+    source_type: Optional[str] = None,
+    source_reference_id: Optional[int] = None,
+    source_no: Optional[str] = None,
     remark: Optional[str] = None,
     operator_id: Optional[int] = None,
 ) -> models.InvStockOperation:
-    """新增库存操作单（单头 + 明细，状态 DRAFT）。
+    """新增库存单据（单头 + 明细，状态 DRAFT）。
 
     - TRANSFER：必填 from_warehouse_id / to_warehouse_id，明细带 quantity；
-    - STOCKTAKE：必填 warehouse_id，明细带 actual_qty（book_qty 缺省按当前结存自动带出）。
+    - STOCKTAKE：必填 warehouse_id，明细带 actual_qty（book_qty 缺省按当前结存自动带出）；
+    - INBOUND / OUTBOUND：**仓库可不填**（由仓库人员在确认时决定），明细带 quantity。
+      业务模块（销售 / 采购 / 计划）推送的出入库单通过 source_* 记录来源，
+      **不直接改结存**，只进入库存管理的待办列表。
     """
-    if op_type not in ("TRANSFER", "STOCKTAKE"):
-        raise BusinessException(CODE_PARAM_INVALID, f"非法操作类型：{op_type}")
+    if op_type not in _OP_TYPES:
+        raise BusinessException(CODE_PARAM_INVALID, f"非法单据类型：{op_type}")
     if not items:
-        raise BusinessException(CODE_PARAM_INVALID, "操作单至少需要一条明细")
+        raise BusinessException(CODE_PARAM_INVALID, "单据至少需要一条明细")
     if operation_no and repository.get_operation_by_no(db, operation_no):
-        raise BusinessException(CODE_DUPLICATE, f"操作单号已存在：{operation_no}")
+        raise BusinessException(CODE_DUPLICATE, f"单据号已存在：{operation_no}")
+    if source_type:
+        _validate_source_type(source_type)
+        allowed = _SOURCE_TYPES_BY_OP.get(op_type)
+        if allowed is not None and source_type not in allowed:
+            raise BusinessException(
+                CODE_PARAM_INVALID,
+                f"{_OP_TYPE_NAMES[op_type]}不允许的来源类型：{source_type}",
+            )
 
     if op_type == "TRANSFER":
         if not from_warehouse_id or not to_warehouse_id:
@@ -673,11 +983,13 @@ def create_stock_operation(
         _require_warehouse(db, to_warehouse_id)
         if from_warehouse_id == to_warehouse_id:
             raise BusinessException(CODE_PARAM_INVALID, "移库源仓库与目标仓库不能相同")
-        warehouse = None
-    else:
+    elif op_type == "STOCKTAKE":
         if not warehouse_id:
             raise BusinessException(CODE_PARAM_INVALID, "盘点单必须指定仓库")
-        warehouse = _require_warehouse(db, warehouse_id)
+        _require_warehouse(db, warehouse_id)
+    elif warehouse_id:
+        # 入 / 出库允许建单时预填仓库，也允许留空等仓库确认时再定
+        _require_warehouse(db, warehouse_id)
 
     number = operation_no or repository.next_operation_no(db, op_date, op_type)
     operation = models.InvStockOperation(
@@ -685,19 +997,25 @@ def create_stock_operation(
         op_type=op_type,
         from_warehouse_id=from_warehouse_id if op_type == "TRANSFER" else None,
         to_warehouse_id=to_warehouse_id if op_type == "TRANSFER" else None,
-        warehouse_id=warehouse_id if op_type == "STOCKTAKE" else None,
+        warehouse_id=warehouse_id if op_type in ("STOCKTAKE", "INBOUND", "OUTBOUND") else None,
         op_date=op_date,
         status="DRAFT",
+        source_module=source_module,
+        source_type=source_type,
+        source_reference_id=source_reference_id,
+        source_no=source_no,
         remark=remark,
         created_by=operator_id,
     )
     repository.add_stock_operation(db, operation)
     for raw in items:
-        _require_material(db, raw["material_id"])
+        material = _require_material(db, raw["material_id"])
+        snapshot = _material_snapshot(material)
         if op_type == "TRANSFER":
             qty = _as_decimal(raw.get("quantity"))
             if qty <= 0:
                 raise BusinessException(CODE_PARAM_INVALID, "移库数量必须为正数")
+            _require_integer_qty(qty, "移库数量")
             repository.add_operation_item(
                 db,
                 models.InvStockOperationItem(
@@ -707,13 +1025,14 @@ def create_stock_operation(
                     remark=raw.get("remark"),
                 ),
             )
-        else:
+        elif op_type == "STOCKTAKE":
             actual = _as_decimal(raw.get("actual_qty"))
             if actual < 0:
                 raise BusinessException(CODE_PARAM_INVALID, "实盘数量不能为负数")
+            _require_integer_qty(actual, "实盘数量")
             book_value = raw.get("book_qty")
             if book_value is None:
-                balance = repository.get_balance(db, warehouse.id, raw["material_id"])
+                balance = repository.get_balance(db, warehouse_id, raw["material_id"])
                 book_value = _as_decimal(balance.quantity) if balance else Decimal("0")
             book = _as_decimal(book_value)
             repository.add_operation_item(
@@ -727,6 +1046,24 @@ def create_stock_operation(
                     remark=raw.get("remark"),
                 ),
             )
+        else:
+            qty = _as_decimal(raw.get("quantity"))
+            if qty <= 0:
+                raise BusinessException(
+                    CODE_PARAM_INVALID,
+                    f"{_OP_TYPE_NAMES[op_type]}数量必须为正数",
+                )
+            _require_integer_qty(qty, f"{_OP_TYPE_NAMES[op_type]}数量")
+            repository.add_operation_item(
+                db,
+                models.InvStockOperationItem(
+                    operation_id=operation.id,
+                    material_id=raw["material_id"],
+                    quantity=qty,
+                    remark=raw.get("remark"),
+                    **snapshot,
+                ),
+            )
     log_operation(
         db,
         module=MODULE,
@@ -734,27 +1071,116 @@ def create_stock_operation(
         target_type="inv_stock_operation",
         target_id=operation.id,
         operator_id=operator_id,
-        detail=f"新增{'移库' if op_type == 'TRANSFER' else '盘点'}单 {number}",
+        detail=(
+            f"新增{_OP_TYPE_NAMES[op_type]} {number}"
+            + (f"（来源 {source_no or source_type}）" if (source_no or source_type) else "")
+        ),
     )
     return operation
 
 
 def confirm_stock_operation(
-    db: Session, operation_id: int, operator_id: Optional[int] = None
+    db: Session,
+    operation_id: int,
+    operator_id: Optional[int] = None,
+    warehouse_id: Optional[int] = None,
 ) -> models.InvStockOperation:
-    """确认操作单（仅 DRAFT 可确认）：
+    """确认库存单据（仅 DRAFT 可确认）：
 
     - TRANSFER：对每条明细在同一事务内更新调出仓 / 调入仓两边结存；
-    - STOCKTAKE：按盘盈/盘亏差异直接调整结存（差异为 0 的行不调整）。
+    - STOCKTAKE：按盘盈/盘亏差异直接调整结存（差异为 0 的行不调整）；
+    - INBOUND / OUTBOUND：**由仓库管理人员在此决定仓库**（建单时可留空），
+      再按明细数量增加 / 减少结存。出库前加锁复核可用量，禁止负库存。
     """
     operation = get_stock_operation(db, operation_id)
     if operation.status != "DRAFT":
         raise BusinessException(
-            CODE_STATUS_INVALID, f"操作单当前状态为 {operation.status}，不能确认"
+            CODE_STATUS_INVALID, f"单据当前状态为 {operation.status}，不能确认"
         )
     items = list(operation.items)
     if not items:
-        raise BusinessException(CODE_PARAM_INVALID, "操作单没有明细，不能确认")
+        raise BusinessException(CODE_PARAM_INVALID, "单据没有明细，不能确认")
+
+    if operation.op_type in ("INBOUND", "OUTBOUND"):
+        target_warehouse_id = warehouse_id or operation.warehouse_id
+        if not target_warehouse_id:
+            raise BusinessException(
+                CODE_PARAM_INVALID,
+                f"{_OP_TYPE_NAMES[operation.op_type]}尚未指定仓库，请选择仓库后再确认",
+            )
+        _require_warehouse(db, target_warehouse_id)
+        operation.warehouse_id = target_warehouse_id
+        is_inbound = operation.op_type == "INBOUND"
+        # 流水记录真实业务来源（销售发货 / 采购到货 / 生产领料…），手工单记 INBOUND/OUTBOUND
+        journal_source_type = (
+            operation.source_type
+            if operation.source_type in _VALID_SOURCE_TYPES
+            else operation.op_type
+        )
+        journal_source_module = operation.source_module or MODULE
+        journal_source_no = operation.source_no or operation.operation_no
+        journal_source_ref = operation.source_reference_id or operation.id
+        for item in items:
+            qty = _as_decimal(item.quantity)
+            if qty <= 0:
+                raise BusinessException(
+                    CODE_PARAM_INVALID, f"{_OP_TYPE_NAMES[operation.op_type]}数量必须为正数"
+                )
+            _require_integer_qty(qty, f"{_OP_TYPE_NAMES[operation.op_type]}数量")
+            # 明细缺快照时补一次（历史数据 / 手工建单兜底）
+            if not item.material_code or not item.material_name:
+                material = _require_material(db, item.material_id)
+                for key, value in _material_snapshot(material).items():
+                    if getattr(item, key, None) in (None, ""):
+                        setattr(item, key, value)
+            source_remark = _source_remark(operation)
+            if is_inbound:
+                _increase_stock(
+                    db,
+                    transaction_type="INBOUND",
+                    material_id=item.material_id,
+                    quantity=qty,
+                    warehouse_id=target_warehouse_id,
+                    source_module=journal_source_module,
+                    source_type=journal_source_type,
+                    source_reference_id=journal_source_ref,
+                    source_no=journal_source_no,
+                    biz_date=operation.op_date,
+                    operator_id=operator_id,
+                    remark=f"入库 {operation.operation_no}{source_remark}",
+                )
+            else:
+                _decrease_stock(
+                    db,
+                    transaction_type="OUTBOUND",
+                    material_id=item.material_id,
+                    quantity=qty,
+                    warehouse_id=target_warehouse_id,
+                    source_module=journal_source_module,
+                    source_type=journal_source_type,
+                    source_reference_id=journal_source_ref,
+                    source_no=journal_source_no,
+                    biz_date=operation.op_date,
+                    operator_id=operator_id,
+                    remark=f"出库 {operation.operation_no}{source_remark}",
+                )
+        operation.status = "COMPLETED"
+        operation.confirmed_at = datetime.now()
+        operation.updated_by = operator_id
+        log_operation(
+            db,
+            module=MODULE,
+            action="CONFIRM",
+            target_type="inv_stock_operation",
+            target_id=operation.id,
+            operator_id=operator_id,
+            detail=(
+                f"确认{_OP_TYPE_NAMES[operation.op_type]} {operation.operation_no}"
+                f"（仓库ID {target_warehouse_id}）{source_remark}"
+            ),
+        )
+        return operation
+
     if operation.op_type == "TRANSFER":
         for item in items:
             qty = _as_decimal(item.quantity)
@@ -907,6 +1333,8 @@ def list_reorder_suggestions(db: Session) -> List[Dict[str, Any]]:
     """
     suggestions: List[Dict[str, Any]] = []
     balances = list(db.scalars(select(models.InvBalance).order_by(models.InvBalance.id)))
+    materials = _material_map(db, [b.material_id for b in balances])
+    warehouses = _warehouse_map(db, [b.warehouse_id for b in balances])
     for balance in balances:
         if balance.reorder_point is None:
             continue
@@ -917,11 +1345,17 @@ def list_reorder_suggestions(db: Session) -> List[Dict[str, Any]]:
         if current >= point:
             continue
         suggested = _as_decimal(balance.reorder_quantity) if balance.reorder_quantity is not None else Decimal("0")
+        material = materials.get(balance.material_id, {})
+        warehouse = warehouses.get(balance.warehouse_id, {})
         suggestions.append(
             {
                 "balance_id": balance.id,
                 "material_id": balance.material_id,
+                "material_code": material.get("material_code"),
+                "material_name": material.get("material_name"),
                 "warehouse_id": balance.warehouse_id,
+                "warehouse_code": warehouse.get("warehouse_code"),
+                "warehouse_name": warehouse.get("warehouse_name"),
                 "reorder_point": point,
                 "current_qty": current,
                 "suggested_qty": suggested,
@@ -1211,6 +1645,278 @@ def low_stock_report(db: Session) -> List[Dict[str, Any]]:
             row["shortage_qty"] = row["safety_stock"] - row["available_quantity"]
             report.append(row)
     return report
+
+
+def _suggestion_warehouse(
+    db: Session, material_id: int
+) -> Optional[models.InvWarehouse]:
+    """补库建议的目标仓库：优先取该物料存量最大的仓库，否则取第一个启用的仓库。"""
+    balance = db.scalars(
+        select(models.InvBalance)
+        .join(
+            models.InvWarehouse,
+            models.InvWarehouse.id == models.InvBalance.warehouse_id,
+        )
+        .where(
+            models.InvBalance.material_id == material_id,
+            models.InvWarehouse.warehouse_code.notin_(
+                repository.NON_AVAILABLE_WAREHOUSE_CODES
+            ),
+        )
+        .order_by(models.InvBalance.quantity.desc(), models.InvBalance.id)
+        .limit(1)
+    ).first()
+    if balance is not None:
+        return repository.get_warehouse(db, balance.warehouse_id)
+    return db.scalars(
+        select(models.InvWarehouse)
+        .where(
+            models.InvWarehouse.status == "ACTIVE",
+            models.InvWarehouse.warehouse_code.notin_(
+                repository.NON_AVAILABLE_WAREHOUSE_CODES
+            ),
+        )
+        .order_by(models.InvWarehouse.id)
+        .limit(1)
+    ).first()
+
+
+def _auto_replenish_if_needed(
+    db: Session, material_id: int, operator_id: Optional[int] = None
+) -> Optional[int]:
+    """库存低于安全库存时**自动生成** DRAFT 补库需求，返回新单 ID。
+
+    在出库 / 盘点调减后触发，属系统自动行为而非人工点击（规格：低于安全库存
+    自动生成补库需求）。幂等性保障：同一物料已存在在途需求
+    （DRAFT / CONFIRMED / RELEASED）时直接跳过，重复触发不会产生多张单。
+    自动生成失败不影响主业务（出库 / 盘点仍然成功），因此此处吞掉异常。
+    """
+    try:
+        material = get_material(db, material_id)
+        if not material:
+            return None
+        safety = _as_decimal(material.get("safety_stock"))
+        if safety <= 0:
+            return None
+        db.flush()  # 让本次结存变动对后续查询可见（SessionLocal autoflush=False）
+        available = repository.sum_available(db, material_id)
+        if available >= safety:
+            return None
+        # 只要有在途补货单就跳过（含 DRAFT/CONFIRMED/RELEASED）——幂等防重复
+        pending = repository.count_where(
+            db,
+            models.InvReplenishmentRequest,
+            models.InvReplenishmentRequest.material_id == material_id,
+            models.InvReplenishmentRequest.status.in_(
+                ["DRAFT", "CONFIRMED", "RELEASED"]
+            ),
+        )
+        if pending:
+            return None
+        warehouse = _suggestion_warehouse(db, material_id)
+        if warehouse is None:
+            return None
+        supply_type = material.get("supply_type") or "BUY"
+        result = create_replenishment_request(
+            db,
+            material_id=material_id,
+            warehouse_id=warehouse.id,
+            request_qty=safety - available,
+            required_date=date.today(),
+            source_type="REORDER" if supply_type == "BUY" else "PRODUCTION",
+            current_qty=available,
+            target_qty=safety,
+            remark="安全库存自动生成（系统直接发单）",
+            operator_id=operator_id,
+        )
+        # ← 直接升级为 CONFIRMED / RELEASED，跳过人工确认环节
+        request = repository.get_replenishment_request(db, result["id"])
+        request.status = "CONFIRMED"
+        db.flush()
+        return result["id"]
+    except Exception:  # noqa: BLE001 - 自动补库失败不阻断出库 / 盘点
+        return None
+
+
+def safety_stock_suggestions(db: Session) -> List[Dict[str, Any]]:
+    """按安全库存给出补库建议（替代原订货点口径）。
+
+    口径：物料级可用量（各仓库合计，无结存视为 0）低于物料主数据 `safety_stock`
+    时给出建议，建议量 = safety_stock − 可用量；目标仓库取该物料存量最大的仓库，
+    没有任何结存时取第一个启用仓库。
+    补库方式按 supply_type 区分：BUY → REORDER（转采购），MAKE → PRODUCTION（转生产计划）。
+    """
+    materials = search_materials(db, status="ACTIVE")
+    available_map = {
+        material_id: available
+        for material_id, _, available in repository.aggregate_by_material(db)
+    }
+    suggestions: List[Dict[str, Any]] = []
+    for material in materials:
+        safety = _as_decimal(material.get("safety_stock"))
+        if safety <= 0:
+            continue
+        available = _as_decimal(available_map.get(material["id"]))
+        if available >= safety:
+            continue
+        warehouse = _suggestion_warehouse(db, material["id"])
+        if warehouse is None:
+            continue
+        supply_type = material.get("supply_type") or "BUY"
+        suggestions.append(
+            {
+                "material_id": material["id"],
+                "material_code": material.get("material_code"),
+                "material_name": material.get("material_name"),
+                "supply_type": supply_type,
+                "source_type": "REORDER" if supply_type == "BUY" else "PRODUCTION",
+                "warehouse_id": warehouse.id,
+                "warehouse_code": warehouse.warehouse_code,
+                "warehouse_name": warehouse.warehouse_name,
+                "available_quantity": available,
+                "safety_stock": safety,
+                "suggested_qty": safety - available,
+            }
+        )
+    return suggestions
+
+
+def generate_from_safety_stock(
+    db: Session, operator_id: Optional[int] = None
+) -> Dict[str, Any]:
+    """按安全库存建议批量生成 DRAFT 补库需求（同一物料已有在途需求则跳过）。"""
+    created_ids: List[int] = []
+    skipped = 0
+    for suggestion in safety_stock_suggestions(db):
+        pending = repository.count_where(
+            db,
+            models.InvReplenishmentRequest,
+            models.InvReplenishmentRequest.material_id == suggestion["material_id"],
+            models.InvReplenishmentRequest.status.in_(
+                ["DRAFT", "CONFIRMED", "RELEASED"]
+            ),
+        )
+        if pending:
+            skipped += 1
+            continue
+        result = create_replenishment_request(
+            db,
+            material_id=suggestion["material_id"],
+            warehouse_id=suggestion["warehouse_id"],
+            request_qty=suggestion["suggested_qty"],
+            required_date=date.today(),
+            source_type=suggestion["source_type"],
+            current_qty=suggestion["available_quantity"],
+            target_qty=suggestion["safety_stock"],
+            remark="安全库存自动生成",
+            operator_id=operator_id,
+        )
+        created_ids.append(result["id"])
+    return {
+        "created_count": len(created_ids),
+        "request_ids": created_ids,
+        "skipped_count": skipped,
+    }
+
+
+def stocktake_summary(
+    db: Session,
+    date_from: Optional[date] = None,
+    date_to: Optional[date] = None,
+    warehouse_id: Optional[int] = None,
+) -> Dict[str, Any]:
+    """盘点汇总（盘盈盘亏报表）。
+
+    只统计**已确认**（COMPLETED）的盘点单（DRAFT 尚未调整结存，计入会失真）。
+    差异口径：`difference = actual_qty - book_qty`，正数=盘盈，负数=盘亏；
+    差异金额 = 差异数量 × 物料标准成本。
+    """
+    stmt = select(models.InvStockOperation).where(
+        models.InvStockOperation.op_type == "STOCKTAKE",
+        models.InvStockOperation.status == "COMPLETED",
+    )
+    if date_from is not None:
+        stmt = stmt.where(models.InvStockOperation.op_date >= date_from)
+    if date_to is not None:
+        stmt = stmt.where(models.InvStockOperation.op_date <= date_to)
+    if warehouse_id is not None:
+        stmt = stmt.where(models.InvStockOperation.warehouse_id == warehouse_id)
+    operations = list(
+        db.scalars(
+            stmt.order_by(
+                models.InvStockOperation.op_date.desc(), models.InvStockOperation.id.desc()
+            )
+        )
+    )
+
+    materials = _material_map(
+        db,
+        [item.material_id for op in operations for item in op.items],
+    )
+    warehouses = _warehouse_map(db, [op.warehouse_id for op in operations if op.warehouse_id])
+
+    items: List[Dict[str, Any]] = []
+    line_count = matched_count = gain_count = loss_count = 0
+    gain_qty = loss_qty = Decimal("0")
+    gain_amount = loss_amount = Decimal("0")
+
+    for op in operations:
+        warehouse = warehouses.get(op.warehouse_id, {}) if op.warehouse_id else {}
+        for item in op.items:
+            book = _as_decimal(item.book_qty)
+            actual = _as_decimal(item.actual_qty)
+            difference = actual - book
+            material = materials.get(item.material_id, {})
+            cost = _as_decimal(material.get("standard_cost"))
+            diff_amount = difference * cost
+            line_count += 1
+            if difference == 0:
+                matched_count += 1
+            elif difference > 0:
+                gain_count += 1
+                gain_qty += difference
+                gain_amount += diff_amount
+            else:
+                loss_count += 1
+                loss_qty += -difference
+                loss_amount += -diff_amount
+            items.append(
+                {
+                    "operation_id": op.id,
+                    "operation_no": op.operation_no,
+                    "op_date": op.op_date,
+                    "warehouse_id": op.warehouse_id,
+                    "warehouse_code": warehouse.get("warehouse_code"),
+                    "warehouse_name": warehouse.get("warehouse_name"),
+                    "material_id": item.material_id,
+                    "material_code": material.get("material_code"),
+                    "material_name": material.get("material_name"),
+                    "book_qty": book,
+                    "actual_qty": actual,
+                    "difference": difference,
+                    "standard_cost": cost,
+                    "diff_amount": diff_amount,
+                    "result": "GAIN" if difference > 0 else ("LOSS" if difference < 0 else "MATCH"),
+                }
+            )
+
+    return {
+        "operation_count": len(operations),
+        "line_count": line_count,
+        "matched_count": matched_count,
+        "gain_count": gain_count,
+        "gain_qty": gain_qty,
+        "loss_count": loss_count,
+        "loss_qty": loss_qty,
+        "net_qty": gain_qty - loss_qty,
+        "gain_amount": gain_amount,
+        "loss_amount": loss_amount,
+        "net_amount": gain_amount - loss_amount,
+        "accuracy_rate": (Decimal(matched_count) / Decimal(line_count))
+        if line_count
+        else Decimal("0"),
+        "items": items,
+    }
 
 
 def flow_summary(db: Session, date_from: date, date_to: date) -> List[Dict[str, Any]]:

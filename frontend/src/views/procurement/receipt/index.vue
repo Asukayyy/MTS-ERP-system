@@ -10,7 +10,6 @@ import {
   listPurchaseOrders,
   listReceipts,
 } from '@/api/procurement'
-import { listWarehouses } from '@/api/inventory'
 import RemoteSelect from '@/components/common/RemoteSelect.vue'
 import StatusTag from '@/components/common/StatusTag.vue'
 import { usePagedTable, toNumber } from '@/composables/usePagedTable'
@@ -24,10 +23,7 @@ async function loadOrderOptions(keyword: string): Promise<RemoteOption[]> {
   return data.items.map((item) => ({ id: item.id, label: `${item.order_no} · 供应商${item.supplier_name || item.supplier_id}` }))
 }
 
-async function loadWarehouseOptions(keyword: string): Promise<RemoteOption[]> {
-  const data = await listWarehouses({ keyword, status: 'ACTIVE', page: 1, page_size: 50 })
-  return data.items.map((item) => ({ id: item.id, label: `${item.warehouse_code} ${item.warehouse_name}` }))
-}
+/** 到货不再选择收货仓库：确认后推送「库存管理 → 入库管理」待入库单，由仓库管理决定仓库 */
 
 interface ReceiptLineForm {
   order_item_id: number
@@ -43,14 +39,12 @@ const loadingLines = ref(false)
 const form = reactive<{
   purchase_order_id: number | undefined
   supplier_id: number | undefined
-  warehouse_id: number | undefined
   receipt_date: string
   remark: string
   items: ReceiptLineForm[]
 }>({
   purchase_order_id: undefined,
   supplier_id: undefined,
-  warehouse_id: undefined,
   receipt_date: '',
   remark: '',
   items: [],
@@ -60,7 +54,6 @@ function openCreate(): void {
   Object.assign(form, {
     purchase_order_id: undefined,
     supplier_id: undefined,
-    warehouse_id: undefined,
     receipt_date: '',
     remark: '',
     items: [],
@@ -98,10 +91,6 @@ async function submit(): Promise<void> {
     ElMessage.warning('请选择采购订单')
     return
   }
-  if (!form.warehouse_id) {
-    ElMessage.warning('请选择收货仓库')
-    return
-  }
   if (!form.receipt_date) {
     ElMessage.warning('请选择到货日期')
     return
@@ -116,7 +105,6 @@ async function submit(): Promise<void> {
     // 后端按订单行带出物料与供应商，前端只需提交订单行ID与数量
     await createReceipt({
       purchase_order_id: form.purchase_order_id,
-      warehouse_id: form.warehouse_id,
       receipt_date: form.receipt_date,
       remark: form.remark || null,
       items: items.map((item) => ({
@@ -126,7 +114,7 @@ async function submit(): Promise<void> {
         remark: item.remark || null,
       })),
     })
-    ElMessage.success('到货单已新增，确认后合格品入库')
+    ElMessage.success('到货单已新增，确认后推送库存待入库单')
     dialogVisible.value = false
     await load()
   } catch (error) {
@@ -139,7 +127,7 @@ async function submit(): Promise<void> {
 async function doConfirm(row: Receipt): Promise<void> {
   try {
     await confirmReceipt(row.id)
-    ElMessage.success('到货已确认，合格品已入库')
+    ElMessage.success('到货已确认，已推送库存入库单（待仓库确认入库）')
     await load()
   } catch (error) {
     ElMessage.error((error as Error).message)
@@ -205,7 +193,6 @@ onMounted(load)
         <el-table-column label="供应商" min-width="160">
           <template #default="{ row }">{{ row.supplier_name || `ID ${row.supplier_id}` }}</template>
         </el-table-column>
-        <el-table-column label="收货仓库ID" prop="warehouse_id" width="110" align="right" />
         <el-table-column label="到货日期" prop="receipt_date" width="110" />
         <el-table-column label="状态" width="90">
           <template #default="{ row }"><StatusTag :status="row.status" /></template>
@@ -213,7 +200,7 @@ onMounted(load)
         <el-table-column label="操作" width="170" fixed="right">
           <template #default="{ row }">
             <el-button v-if="row.status === 'DRAFT'" link type="primary" @click="doConfirm(row)">
-              确认入库
+              确认到货
             </el-button>
             <el-button
               v-if="['DRAFT', 'CONFIRMED'].includes(row.status)"
@@ -262,16 +249,6 @@ onMounted(load)
             </el-form-item>
           </el-col>
           <el-col :span="12">
-            <el-form-item label="收货仓库">
-              <RemoteSelect
-                v-model="form.warehouse_id"
-                :loader="loadWarehouseOptions"
-                placeholder="请选择仓库"
-                style="width: 100%"
-              />
-            </el-form-item>
-          </el-col>
-          <el-col :span="12">
             <el-form-item label="到货日期">
               <el-date-picker v-model="form.receipt_date" type="date" value-format="YYYY-MM-DD" style="width: 100%" />
             </el-form-item>
@@ -304,7 +281,10 @@ onMounted(load)
           </el-table-column>
           <template #empty>请先选择采购订单</template>
         </el-table>
-        <div class="form-tip">确认到货后系统按合格数量调用库存入库契约，写入库存流水与结存。</div>
+        <div class="form-tip">
+          确认到货后按合格数量生成「库存管理 → 入库管理」待入库单（不再选择仓库），
+          由仓库管理人员指定仓库并确认后，结存才真正增加。
+        </div>
       </el-form>
       <template #footer>
         <el-button @click="dialogVisible = false">取消</el-button>

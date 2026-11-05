@@ -17,6 +17,7 @@
   净需求计算可调用 `get_pending_receipt_qty` 参考在途未到货数量。
 """
 
+from datetime import date
 from decimal import Decimal
 from typing import Any, Dict, Sequence
 
@@ -55,3 +56,11 @@ def create_purchase_plan_from_replenishment(db: Session, request_id: int) -> Dic
 def get_pending_receipt_qty(db: Session, material_id: int) -> Decimal:
     """该物料所有在途未到货采购订单行的剩余数量合计，供 Planning / 库存预警参考。"""
     return service.get_pending_receipt_qty(db, material_id)
+
+
+def get_material_received_values(db: Session, since: date) -> Dict[int, Decimal]:
+    """按物料汇总指定日期之后的采购到货金额（供 ABC 自动分类使用）。
+
+    金额 = 已到货数量 × 采购单价，只统计非作废采购订单；不提交事务。
+    """
+    return service.get_material_received_values(db, since)

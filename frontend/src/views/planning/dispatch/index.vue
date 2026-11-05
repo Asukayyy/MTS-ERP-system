@@ -12,7 +12,7 @@ import {
   setDispatchOrderStatus,
   updateDispatchOrder,
 } from '@/api/planning'
-import { listPersonnel } from '@/api/system'
+import { listPersonnel, listOrganizationsFlat } from '@/api/system'
 import RemoteSelect from '@/components/common/RemoteSelect.vue'
 import StatusTag from '@/components/common/StatusTag.vue'
 import GenerateFromPlansDialog from '@/components/planning/GenerateFromPlansDialog.vue'
@@ -35,6 +35,22 @@ async function loadWorkerOptions(keyword: string): Promise<RemoteOption[]> {
   return data.items.map((item) => ({ id: item.id, label: `${item.employee_no} ${item.person_name}` }))
 }
 
+/** 承接单位只列加工中心与车间：派工整单下给加工中心，再由其指派具体作业人员。 */
+async function loadOrgOptions(keyword: string): Promise<RemoteOption[]> {
+  const data = await listOrganizationsFlat()
+  const keywordText = keyword.trim()
+  return data
+    .filter((item) => item.status === 'ACTIVE' && ['FACTORY', 'WORKSHOP'].includes(item.org_type))
+    .filter(
+      (item) =>
+        !keywordText ||
+        item.org_code.includes(keywordText) ||
+        item.org_name.includes(keywordText),
+    )
+    .slice(0, 50)
+    .map((item) => ({ id: item.id, label: `${item.org_code} ${item.org_name}` }))
+}
+
 const dialogVisible = ref(false)
 const submitting = ref(false)
 const editingId = ref<number | null>(null)
@@ -45,6 +61,7 @@ const form = reactive<{
   operation: string
   planned_qty: number
   worker_id: number | undefined
+  org_id: number | undefined
   planned_start: string | null
   planned_end: string | null
   remark: string
@@ -53,6 +70,7 @@ const form = reactive<{
   operation: '',
   planned_qty: 1,
   worker_id: undefined,
+  org_id: undefined,
   planned_start: null,
   planned_end: null,
   remark: '',
@@ -70,6 +88,7 @@ function openCreate(): void {
     operation: '',
     planned_qty: 1,
     worker_id: undefined,
+    org_id: undefined,
     planned_start: null,
     planned_end: null,
     remark: '',
@@ -84,6 +103,7 @@ function openEdit(row: DispatchOrder): void {
     operation: row.operation ?? '',
     planned_qty: toNumber(row.planned_qty),
     worker_id: row.worker_id ?? undefined,
+    org_id: row.org_id ?? undefined,
     planned_start: row.planned_start ?? null,
     planned_end: row.planned_end ?? null,
     remark: row.remark ?? '',
@@ -102,6 +122,7 @@ async function submit(): Promise<void> {
         operation: form.operation || null,
         planned_qty: form.planned_qty,
         worker_id: form.worker_id ?? null,
+        org_id: form.org_id ?? null,
         planned_start: form.planned_start || null,
         planned_end: form.planned_end || null,
         remark: form.remark || null,
@@ -112,6 +133,7 @@ async function submit(): Promise<void> {
         operation: form.operation || null,
         planned_qty: form.planned_qty,
         worker_id: form.worker_id ?? null,
+        org_id: form.org_id ?? null,
         planned_start: form.planned_start || null,
         planned_end: form.planned_end || null,
         remark: form.remark || null,
@@ -243,7 +265,12 @@ onMounted(load)
           <template #default="{ row }"><StatusTag :status="row.source_type" /></template>
         </el-table-column>
         <el-table-column label="作业计划编号" prop="plan_no" min-width="150" />
-        <el-table-column label="工序" prop="operation" min-width="130" />
+        <el-table-column label="承接单位" prop="org_name" min-width="140">
+          <template #default="{ row }">{{ row.org_name ?? '待指派' }}</template>
+        </el-table-column>
+        <el-table-column label="工序" prop="operation" min-width="130">
+          <template #default="{ row }">{{ row.operation ?? '整单' }}</template>
+        </el-table-column>
         <el-table-column label="派工数量" prop="planned_qty" width="110" align="right" />
         <el-table-column label="已完工" prop="completed_qty" width="100" align="right" />
         <el-table-column label="作业人员" prop="worker_name" width="120">
@@ -315,13 +342,21 @@ onMounted(load)
           />
         </el-form-item>
         <el-form-item label="工序">
-          <el-input v-model="form.operation" placeholder="如 组装 / 喷涂" />
+          <el-input v-model="form.operation" placeholder="整单派工时留空" />
         </el-form-item>
         <el-form-item label="派工数量" prop="planned_qty">
           <el-input-number v-model="form.planned_qty" :min="0.0001" style="width: 100%" />
         </el-form-item>
+        <el-form-item label="承接单位">
+          <RemoteSelect
+            v-model="form.org_id"
+            :loader="loadOrgOptions"
+            placeholder="留空默认智能加工中心"
+            style="width: 100%"
+          />
+        </el-form-item>
         <el-form-item label="作业人员">
-          <RemoteSelect v-model="form.worker_id" :loader="loadWorkerOptions" placeholder="可选" style="width: 100%" />
+          <RemoteSelect v-model="form.worker_id" :loader="loadWorkerOptions" placeholder="由加工中心指派，可留空" style="width: 100%" />
         </el-form-item>
         <el-form-item label="计划开始日期" prop="planned_start">
           <el-date-picker

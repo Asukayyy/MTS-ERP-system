@@ -147,6 +147,11 @@ onMounted(load)
         <el-table-column label="联系电话" prop="phone" min-width="130" />
         <el-table-column label="邮箱" prop="email" min-width="160" />
         <el-table-column label="地址" prop="address" min-width="180" />
+        <el-table-column label="评价得分" width="110" align="right">
+          <template #default="{ row }">
+            {{ row.avg_total_score === null || row.avg_total_score === undefined ? '—' : `${Number(row.avg_total_score).toFixed(1)}分` }}
+          </template>
+        </el-table-column>
         <el-table-column label="状态" width="90">
           <template #default="{ row }"><StatusTag :status="row.status" /></template>
         </el-table-column>

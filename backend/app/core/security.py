@@ -18,6 +18,7 @@ import base64
 import hashlib
 import hmac
 import json
+import secrets
 import time
 from typing import Callable, Iterable, Mapping, Optional, Set
 
@@ -53,14 +54,45 @@ def _forbidden(detail: str = FORBIDDEN_MESSAGE) -> HTTPException:
 # --------------------------------------------------------------------------- #
 # 密码
 # --------------------------------------------------------------------------- #
+_PASSWORD_SCHEME = "pbkdf2_sha256"
+_PASSWORD_ITERATIONS = 120000
+
+
 def hash_password(password: str) -> str:
-    """密码哈希（与既有 service / 种子脚本保持一致的 sha256 十六进制）。"""
+    """密码哈希：PBKDF2-HMAC-SHA256 + 随机盐。
+
+    存储格式 `pbkdf2_sha256$<iterations>$<salt>$<hex>`；旧数据仍是裸 sha256 十六进制，
+    由 `verify_password` 兼容校验，用户下次改密后自动升级为新格式。
+    """
+    salt = secrets.token_hex(16)
+    digest = hashlib.pbkdf2_hmac(
+        "sha256", password.encode("utf-8"), salt.encode("utf-8"), _PASSWORD_ITERATIONS
+    )
+    return f"{_PASSWORD_SCHEME}${_PASSWORD_ITERATIONS}${salt}${digest.hex()}"
+
+
+def _legacy_sha256(password: str) -> str:
+    """历史密码哈希（无盐 sha256），仅用于兼容校验。"""
     return hashlib.sha256(password.encode("utf-8")).hexdigest()
 
 
 def verify_password(password: str, password_hash: Optional[str]) -> bool:
-    """校验明文密码与库中哈希是否一致（常量时间比较）。"""
-    return hmac.compare_digest(hash_password(password), password_hash or "")
+    """校验明文密码与库中哈希是否一致（常量时间比较，兼容旧版 sha256）。"""
+    if not password_hash:
+        return False
+    if password_hash.startswith(f"{_PASSWORD_SCHEME}$"):
+        try:
+            _, iterations, salt, expected = password_hash.split("$", 3)
+            digest = hashlib.pbkdf2_hmac(
+                "sha256",
+                password.encode("utf-8"),
+                salt.encode("utf-8"),
+                int(iterations),
+            ).hex()
+        except (ValueError, TypeError):
+            return False
+        return hmac.compare_digest(digest, expected)
+    return hmac.compare_digest(_legacy_sha256(password), password_hash)
 
 
 # --------------------------------------------------------------------------- #
@@ -128,6 +160,9 @@ def get_optional_user(
     user = db.get(models.SysUser, user_id)
     if user is None or user.status != RecordStatus.ACTIVE.value:
         return None
+    # 员工被开除 / 离职时，其关联账号立即失去登录态（即使账号本身未停用）
+    if user.personnel is not None and user.personnel.status != RecordStatus.ACTIVE.value:
+        return None
     return user
 
 
@@ -141,11 +176,15 @@ def get_current_user(
 
 
 def get_permission_codes(db: Session, user: models.SysUser) -> Set[str]:
-    """用户经由角色获得的权限编码集合。"""
-    role_ids = [role.id for role in user.roles]
+    """用户经由**启用状态角色 / 权限**获得的权限编码集合。"""
+    role_ids = [role.id for role in user.roles if role.status == RecordStatus.ACTIVE.value]
     if not role_ids:
         return set()
-    return {permission.perm_code for permission in system_repository.list_role_permissions(db, role_ids)}
+    return {
+        permission.perm_code
+        for permission in system_repository.list_role_permissions(db, role_ids)
+        if permission.status == RecordStatus.ACTIVE.value
+    }
 
 
 def require_permission(*permission_codes: str) -> Callable[..., models.SysUser]:

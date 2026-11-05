@@ -3,7 +3,6 @@ import { onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 
-import { listWarehouses } from '@/api/inventory'
 import {
   batchDeleteCompletionReports,
   cancelCompletionReport,
@@ -46,10 +45,7 @@ async function loadDispatchOptions(keyword: string): Promise<RemoteOption[]> {
   }))
 }
 
-async function loadWarehouseOptions(keyword: string): Promise<RemoteOption[]> {
-  const data = await listWarehouses({ keyword, status: 'ACTIVE', page: 1, page_size: 50 })
-  return data.items.map((item) => ({ id: item.id, label: `${item.warehouse_code} ${item.warehouse_name}` }))
-}
+/** 完工报告不再选择入库仓库：确认后推送「库存管理 → 入库管理」待入库单，由仓库管理指定仓库 */
 
 const dialogVisible = ref(false)
 const submitting = ref(false)
@@ -64,7 +60,6 @@ const form = reactive<{
   completed_qty: number
   qualified_qty: number
   scrap_qty: number
-  warehouse_id: number | undefined
   report_date: string | null
   remark: string
 }>({
@@ -75,12 +70,11 @@ const form = reactive<{
   completed_qty: 1,
   qualified_qty: 1,
   scrap_qty: 0,
-  warehouse_id: undefined,
   report_date: null,
   remark: '',
 })
 
-// 报工日期与入库仓库为草稿阶段可留空的字段，由人工补填；确认入库前服务端会校验
+// 报工日期为草稿阶段可留空的字段，由人工补填；确认完工前服务端会校验
 const rules: FormRules = {
   material_id: [{ required: true, message: '请选择产出物料', trigger: 'change' }],
   completed_qty: [{ required: true, message: '请输入完工数量', trigger: 'blur' }],
@@ -114,7 +108,6 @@ function openEdit(row: CompletionReport): void {
     completed_qty: toNumber(row.completed_qty),
     qualified_qty: toNumber(row.qualified_qty),
     scrap_qty: toNumber(row.scrap_qty),
-    warehouse_id: row.warehouse_id ?? undefined,
     report_date: row.report_date ?? null,
     remark: row.remark ?? '',
   })
@@ -135,7 +128,6 @@ async function submit(): Promise<void> {
         completed_qty: form.completed_qty,
         qualified_qty: form.qualified_qty,
         scrap_qty: form.scrap_qty,
-        warehouse_id: form.warehouse_id ?? null,
         report_date: form.report_date || null,
         remark: form.remark || null,
       })
@@ -146,7 +138,6 @@ async function submit(): Promise<void> {
         completed_qty: form.completed_qty,
         qualified_qty: form.qualified_qty,
         scrap_qty: form.scrap_qty,
-        warehouse_id: form.warehouse_id ?? null,
         report_date: form.report_date || null,
         remark: form.remark || null,
       })
@@ -164,7 +155,7 @@ async function submit(): Promise<void> {
 async function doConfirm(row: CompletionReport): Promise<void> {
   try {
     await confirmCompletionReport(row.id)
-    ElMessage.success('完工报告已确认，合格品已入库')
+    ElMessage.success('完工报告已确认，已推送库存入库单（待仓库确认入库）')
     await load()
   } catch (error) {
     ElMessage.error((error as Error).message)
@@ -291,7 +282,9 @@ onMounted(load)
         <el-table-column label="合格数量" prop="qualified_qty" width="110" align="right" />
         <el-table-column label="报废数量" prop="scrap_qty" width="100" align="right" />
         <el-table-column label="入库仓库" prop="warehouse_name" width="130">
-          <template #default="{ row }">{{ row.warehouse_name ?? '待指定' }}</template>
+          <template #default="{ row }">
+            {{ row.warehouse_name ?? '库存管理指定' }}
+          </template>
         </el-table-column>
         <el-table-column label="报工日期" prop="report_date" width="110">
           <template #default="{ row }">{{ row.report_date || '待填写' }}</template>
@@ -379,16 +372,6 @@ onMounted(load)
           <el-col :span="12">
             <el-form-item label="派工单">
               <RemoteSelect v-model="form.dispatch_id" :loader="loadDispatchOptions" placeholder="可选" style="width: 100%" />
-            </el-form-item>
-          </el-col>
-          <el-col :span="12">
-            <el-form-item label="入库仓库" prop="warehouse_id">
-              <RemoteSelect
-                v-model="form.warehouse_id"
-                :loader="loadWarehouseOptions"
-                placeholder="确认入库前必填"
-                style="width: 100%"
-              />
             </el-form-item>
           </el-col>
           <el-col :span="12">
